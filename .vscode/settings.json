@@ -1,0 +1,15 @@
+{
+  "cSpell.words": [
+    "autoincrement",
+    "healthcheck",
+    "initdb",
+    "isready",
+    "nestjs",
+    "pgdata",
+    "pkey",
+    "postgres",
+    "postgresql",
+    "Timestamptz"
+  ],
+  "cSpell.ignoreWords": ["PGDATA", "Instantiator", "cuid", "datasource"]
+}

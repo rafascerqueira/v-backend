@@ -1,0 +1,226 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(100)
+  email     String   @unique @db.VarChar(100)
+  password  String
+  salt      String
+  createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
+
+  @@index([email(sort: Asc)], name: "idx_accounts_email")
+  @@map("accounts")
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(100)
+  email     String   @unique @db.VarChar(100)
+  phone     String   @unique @db.VarChar(15)
+  document  String   @unique @db.VarChar(20)
+  address   Json     @db.JsonB()
+  city      String   @db.VarChar(100)
+  state     String   @db.VarChar(2)
+  zip_code  String   @db.VarChar(10)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
+  Order     Order[]
+
+  @@index([email], name: "idx_customers_email")
+  @@index([phone], name: "idx_customers_phone")
+  @@index([address], type: Gin, name: "idx_customers_address_gin")
+  @@map("customers")
+}
+
+model Product {
+  id             Int              @id @default(autoincrement())
+  name           String           @db.VarChar(100)
+  description    String
+  sku            String           @unique @db.VarChar(50)
+  category       String           @db.VarChar(100)
+  brand          String           @db.VarChar(100)
+  unit           String           @default("un") @db.VarChar(20)
+  specifications Json             @db.JsonB()
+  images         String[]
+  active         Boolean          @default(true)
+  createdAt      DateTime         @default(now()) @db.Timestamptz()
+  updatedAt      DateTime         @updatedAt @db.Timestamptz()
+  Order_item     Order_item[]
+  Stock_movement Stock_movement[]
+
+  @@index([specifications], type: Gin, name: "idx_products_specifications_gin")
+  @@index([category], name: "idx_products_category")
+  @@map("products")
+}
+
+enum PriceType {
+  cost
+  sale
+  wholesale
+  promotional
+}
+
+model Product_price {
+  id         Int       @id @default(autoincrement())
+  product_id Int
+  price      Int
+  price_type PriceType @default(sale)
+  valid_from DateTime?
+  valid_to   DateTime?
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @db.Timestamptz()
+  updatedAt  DateTime  @updatedAt @db.Timestamptz()
+
+  @@map("product_prices")
+}
+
+model Store_stock {
+  id                Int      @id @default(autoincrement())
+  product_id        Int      @unique
+  quantity          Int      @default(0)
+  reserved_quantity Int      @default(0)
+  min_stock         Int      @default(0)
+  max_stock         Int      @default(0)
+  createdAt         DateTime @default(now()) @db.Timestamptz()
+  updatedAt         DateTime @updatedAt @db.Timestamptz()
+
+  @@map("store_stock")
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  shipping
+  delivered
+  canceled
+}
+
+enum PaymentMethod {
+  cash
+  credit_card
+  debit_card
+  pix
+}
+
+enum PaymentStatus {
+  pending
+  confirmed
+  canceled
+}
+
+model Order {
+  id             Int           @id @default(autoincrement())
+  order_number   String        @unique @db.VarChar(50)
+  customer_id    String
+  customer       Customer      @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  status         OrderStatus   @default(pending)
+  payment_status PaymentStatus @default(pending)
+  payment_method PaymentMethod @default(cash)
+  delivery_date  DateTime?
+  subtotal       Int           @default(0)
+  discount       Int           @default(0)
+  tax            Int           @default(0)
+  shipping       Int           @default(0)
+  total          Int           @default(0)
+  notes          String?
+  metadata       Json?         @db.JsonB()
+
+  createdAt  DateTime     @default(now()) @db.Timestamptz()
+  updatedAt  DateTime     @updatedAt @db.Timestamptz()
+  Order_item Order_item[]
+  Billing    Billing[]
+
+  @@map("orders")
+}
+
+model Order_item {
+  id         Int     @id @default(autoincrement())
+  order_id   Int
+  order      Order   @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product_id Int
+  product    Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity   Int     @default(1)
+  unit_price Int
+  discount   Int     @default(0)
+  total      Int     @default(0)
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
+
+  @@index([order_id], name: "idx_order_items_order_id")
+  @@index([product_id], name: "idx_order_items_product_id")
+  @@map("order_items")
+}
+
+enum BillingStatus {
+  pending
+  partial
+  paid
+  overdue
+  canceled
+}
+
+model Billing {
+  id             Int           @id @default(autoincrement())
+  order_id       Int
+  order          Order         @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  billing_number String        @unique @db.VarChar(50)
+  status         BillingStatus @default(pending)
+  total_amount   Int           @default(0)
+  paid_amount    Int           @default(0)
+  payment_method PaymentMethod @default(cash)
+  payment_status PaymentStatus @default(pending)
+  due_date       DateTime      @default(now()) @db.Timestamptz()
+  payment_date   DateTime?
+  notes          String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
+
+  @@index([order_id], name: "idx_billings_order_id")
+  @@map("billings")
+}
+
+enum MovementType {
+  in
+  out
+}
+
+enum ReferenceType {
+  purchase
+  sale
+  adjustment
+  return
+  transfer
+}
+
+model Stock_movement {
+  id             Int           @id @default(autoincrement())
+  movement_type  MovementType
+  reference_type ReferenceType
+  reference_id   Int
+  product_id     Int
+  product        Product       @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity       Int
+  createdAt      DateTime      @default(now()) @db.Timestamptz()
+  updatedAt      DateTime      @updatedAt @db.Timestamptz()
+
+  @@index([product_id], name: "idx_stock_movements_product_id")
+  @@map("stock_movements")
+}
