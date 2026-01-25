@@ -1,23 +1,84 @@
 services:
   db:
     image: postgres:17-alpine
+    container_name: vendinhas-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-vendapp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bolotenha}
+      POSTGRES_DB: ${POSTGRES_DB:-vendapp_db}
+      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-vendinhas}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-vendapp_user} -d ${POSTGRES_DB:-vendapp_db}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - vendinhas-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: vendinhas-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vendinhas-network
+
+  # Descomentar para rodar a aplicação via Docker
+  # app:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: vendinhas-api
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${PORT:-3001}:3001"
+  #   environment:
+  #     - NODE_ENV=production
+  #     - PORT=${PORT:-3001}
+  #     - DATABASE_URL=postgresql://${POSTGRES_USER:-vendapp_user}:${POSTGRES_PASSWORD:-bolotenha}@db:5432/${POSTGRES_DB:-vendapp_db}?schema=${POSTGRES_SCHEMA:-vendinhas}
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - JWT_SECRET=${JWT_SECRET}
+  #     - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+  #     - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
+  #     - APP_URL=${APP_URL:-http://localhost:3001}
+  #     - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./keys:/app/keys:ro
+  #   networks:
+  #     - vendinhas-network
+
+networks:
+  vendinhas-network:
+    driver: bridge
 
 volumes:
   pgdata:
+    driver: local
+  redisdata:
     driver: local

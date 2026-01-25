@@ -1,0 +1,91 @@
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/shared/prisma/prisma.service'
+
+@Injectable()
+export class DashboardService {
+	constructor(private readonly prisma: PrismaService) {}
+
+	async getStats(_accountId: string) {
+		const [
+			totalProducts,
+			totalCustomers,
+			totalOrders,
+			pendingOrders,
+			recentOrders,
+			topProducts,
+		] = await Promise.all([
+			this.prisma.product.count({
+				where: { active: true },
+			}),
+			this.prisma.customer.count({
+				where: { active: true },
+			}),
+			this.prisma.order.count(),
+			this.prisma.order.count({
+				where: { status: 'pending' },
+			}),
+			this.prisma.order.findMany({
+				take: 5,
+				orderBy: { createdAt: 'desc' },
+				include: {
+					customer: {
+						select: {
+							name: true,
+						},
+					},
+				},
+			}),
+			this.prisma.order_item.groupBy({
+				by: ['product_id'],
+				_sum: {
+					quantity: true,
+				},
+				orderBy: {
+					_sum: {
+						quantity: 'desc',
+					},
+				},
+				take: 5,
+			}),
+		])
+
+		const topProductsWithDetails = await Promise.all(
+			topProducts.map(async (item) => {
+				const product = await this.prisma.product.findUnique({
+					where: { id: item.product_id },
+					select: { name: true },
+				})
+				return {
+					name: product?.name || 'Produto removido',
+					sales: item._sum.quantity || 0,
+				}
+			}),
+		)
+
+		const totalRevenue = await this.prisma.order.aggregate({
+			where: {
+				status: { in: ['delivered', 'confirmed'] },
+			},
+			_sum: {
+				total: true,
+			},
+		})
+
+		return {
+			totalProducts,
+			totalCustomers,
+			totalOrders,
+			pendingOrders,
+			totalRevenue: totalRevenue._sum?.total || 0,
+			recentOrders: recentOrders.map((order) => ({
+				id: order.id,
+				orderNumber: order.order_number,
+				customer: order.customer?.name || 'Cliente removido',
+				total: order.total,
+				status: order.status,
+				createdAt: order.createdAt,
+			})),
+			topProducts: topProductsWithDetails,
+		}
+	}
+}

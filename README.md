@@ -1,99 +1,356 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# 🛒 Vendinhas API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+API RESTful para sistema de gestão de vendas, desenvolvida com NestJS e Fastify.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+[![NestJS](https://img.shields.io/badge/NestJS-11.x-red?logo=nestjs)](https://nestjs.com/)
+[![Fastify](https://img.shields.io/badge/Fastify-5.x-black?logo=fastify)](https://fastify.io/)
+[![Prisma](https://img.shields.io/badge/Prisma-7.x-2D3748?logo=prisma)](https://prisma.io/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Description
+## 📋 Índice
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- [Funcionalidades](#-funcionalidades)
+- [Tecnologias](#-tecnologias)
+- [Pré-requisitos](#-pré-requisitos)
+- [Instalação](#-instalação)
+- [Configuração](#-configuração)
+- [Executando](#-executando)
+- [Documentação da API](#-documentação-da-api)
+- [Autenticação](#-autenticação)
+- [Testes](#-testes)
+- [Estrutura do Projeto](#-estrutura-do-projeto)
+- [Banco de Dados](#-banco-de-dados)
+- [Licença](#-licença)
 
-## Project setup
+## ✨ Funcionalidades
 
-```bash
-$ pnpm install
-```
+- **Autenticação JWT** com RS256 (criptografia assimétrica)
+- **Refresh tokens** para renovação de sessão
+- **Logout seguro** com blacklist de tokens (Redis)
+- **Cookies HttpOnly** para máxima segurança
+- **CRUD completo** de clientes, produtos, pedidos
+- **Controle de estoque** com movimentações
+- **Faturamento** e cobranças
+- **Preços dinâmicos** por período
+- **Health checks** para monitoramento
+- **Documentação Swagger** interativa
 
-## Compile and run the project
+## 🛠 Tecnologias
 
-```bash
-# development
-$ pnpm run start
+| Tecnologia | Versão | Descrição |
+|------------|--------|-----------|
+| NestJS | 11.x | Framework Node.js |
+| Fastify | 5.x | HTTP server de alta performance |
+| Prisma | 7.x | ORM moderno para TypeScript |
+| PostgreSQL | 15+ | Banco de dados relacional |
+| Redis | 7+ | Cache e blacklist de tokens |
+| Zod | 4.x | Validação de schemas |
+| Argon2 | - | Hash de senhas (Argon2id) |
+| JWT | RS256 | Autenticação com chaves assimétricas |
 
-# watch mode
-$ pnpm run start:dev
+## 📦 Pré-requisitos
 
-# production mode
-$ pnpm run start:prod
-```
+- **Node.js** 20.x ou superior
+- **pnpm** 9.x ou superior
+- **PostgreSQL** 15 ou superior
+- **Redis** 7 ou superior
+- **OpenSSL** (para gerar chaves RSA)
 
-## Run tests
-
-```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
-```
-
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## 🚀 Instalação
 
 ```bash
-$ pnpm install -g mau
-$ mau deploy
+# Clone o repositório
+git clone https://github.com/seu-usuario/vendinhas-backend.git
+cd vendinhas-backend
+
+# Instale as dependências
+pnpm install
+
+# Gere o cliente Prisma
+pnpm prisma generate
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## ⚙️ Configuração
 
-## Resources
+### 1. Variáveis de Ambiente
 
-Check out a few resources that may come in handy when working with NestJS:
+Copie o arquivo de exemplo e configure:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+cp .env.example .env
+```
 
-## Support
+Edite o `.env`:
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```env
+# Banco de dados
+DATABASE_URL="postgresql://user:password@localhost:5432/vendinhas?schema=public"
 
-## Stay in touch
+# JWT (RS256 se keys existirem, fallback para HS256)
+JWT_KEYS_DIR=./keys
+JWT_SECRET=seu_jwt_secret_aqui
+JWT_REFRESH_SECRET=seu_refresh_secret_aqui
+JWT_ACCESS_TOKEN_EXPIRES_IN=1d
+JWT_REFRESH_TOKEN_EXPIRES_IN=7d
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
 
-## License
+### 2. Gerar Chaves RSA (Recomendado)
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+```bash
+mkdir -p keys
+openssl genrsa -out keys/private.pem 2048
+openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+```
+
+### 3. Configurar Banco de Dados
+
+```bash
+# Iniciar PostgreSQL e Redis (Docker)
+docker-compose up -d
+
+# Executar migrations
+pnpm prisma migrate dev
+
+# (Opcional) Popular com dados de exemplo
+pnpm prisma db seed
+```
+
+## ▶️ Executando
+
+```bash
+# Desenvolvimento (com hot reload)
+pnpm start:dev
+
+# Produção
+pnpm build
+pnpm start:prod
+```
+
+A API estará disponível em: `http://localhost:3000`
+
+## 📚 Documentação da API
+
+Acesse a documentação Swagger interativa:
+
+```
+http://localhost:3000/api/docs
+```
+
+### Endpoints Principais
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| POST | `/auth/register` | Criar conta |
+| POST | `/auth/login` | Login (retorna JWT) |
+| POST | `/auth/refresh` | Renovar tokens |
+| POST | `/auth/logout` | Logout (invalida token) |
+| GET | `/customers` | Listar clientes |
+| POST | `/customers` | Criar cliente |
+| GET | `/products` | Listar produtos |
+| POST | `/products` | Criar produto |
+| GET | `/orders` | Listar pedidos |
+| POST | `/orders` | Criar pedido |
+| GET | `/health` | Health check |
+
+## 🔐 Autenticação
+
+### Fluxo de Login
+
+```
+POST /auth/login
+Content-Type: application/json
+
+{
+  "email": "usuario@exemplo.com",
+  "password": "SenhaSegura123"
+}
+```
+
+Resposta:
+```json
+{
+  "accessToken": "eyJhbGciOiJSUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJSUzI1NiIs...",
+  "expiresIn": 86400
+}
+```
+
+### Usando o Token
+
+```bash
+curl -H "Authorization: Bearer {accessToken}" \
+  http://localhost:3000/customers
+```
+
+### Refresh Token
+
+```
+POST /auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "eyJhbGciOiJSUzI1NiIs..."
+}
+```
+
+### Logout
+
+```
+POST /auth/logout
+Authorization: Bearer {accessToken}
+```
+
+> O logout invalida o token no Redis e limpa os cookies HttpOnly.
+
+## 🧪 Testes
+
+```bash
+# Testes unitários
+pnpm test
+
+# Testes com coverage
+pnpm test:cov
+
+# Testes E2E
+pnpm test:e2e
+
+# Watch mode
+pnpm test:watch
+```
+
+## 📁 Estrutura do Projeto
+
+```
+src/
+├── config/              # Configurações (Swagger, etc)
+├── health/              # Health checks
+├── modules/
+│   ├── auth/            # Autenticação JWT
+│   │   ├── controllers/
+│   │   ├── decorators/
+│   │   ├── guards/
+│   │   └── services/
+│   ├── users/           # Usuários e contas
+│   ├── customers/       # Clientes
+│   ├── products/        # Produtos
+│   ├── orders/          # Pedidos
+│   ├── billings/        # Faturamento
+│   ├── product-prices/  # Preços
+│   ├── store-stock/     # Estoque
+│   └── stock-movements/ # Movimentações
+├── shared/
+│   ├── crypto/          # Password hashing (Argon2)
+│   ├── filters/         # Exception filters
+│   ├── pipes/           # Validation pipes (Zod)
+│   ├── prisma/          # PrismaService
+│   ├── redis/           # RedisService
+│   └── repositories/    # Repository interfaces
+└── main.ts              # Bootstrap
+```
+
+## 🗄️ Banco de Dados
+
+A estrutura do banco de dados foi modelada utilizando o Prisma ORM e está definida em `prisma/schema.prisma`. O diagrama abaixo ilustra as principais entidades e seus relacionamentos.
+
+```mermaid
+erDiagram
+    User {
+        String id PK
+        String name
+        String email UK
+        String role
+    }
+
+    Customer {
+        String id PK
+        String name
+        String email UK
+        String phone UK
+        String document UK
+    }
+
+    Product {
+        Int id PK
+        String name
+        String sku UK
+        String category
+        String description
+        Json specifications
+    }
+
+    Order {
+        Int id PK
+        String order_number UK
+        String customer_id FK
+        OrderStatus status
+        PaymentStatus payment_status
+        Int total
+    }
+
+    Order_item {
+        Int id PK
+        Int order_id FK
+        Int product_id FK
+        Int quantity
+        Int unit_price
+        Int total
+    }
+
+    Billing {
+        Int id PK
+        Int order_id FK
+        String billing_number UK
+        BillingStatus status
+        Int total_amount
+        Int paid_amount
+    }
+
+    Stock_movement {
+        Int id PK
+        Int product_id FK
+        MovementType movement_type
+        ReferenceType reference_type
+        Int quantity
+    }
+
+    Product_price {
+        Int id PK
+        Int product_id FK
+        PriceType price_type
+        Int price
+        DateTime valid_from
+        DateTime valid_to
+    }
+
+    Store_stock {
+        Int id PK
+        Int product_id FK
+        Int quantity
+        Int reserved_quantity
+        Int min_stock
+    }
+
+    Customer ||--|{ Order : "places"
+    Order ||--|{ Order_item : "contains"
+    Product ||--|{ Order_item : "references"
+    Order ||--|{ Billing : "generates"
+    Product ||--|{ Stock_movement : "has"
+    Product ||--o{ Product_price : "has"
+    Product ||--o{ Store_stock : "manages"
+```
+
+### Legenda
+- **PK**: Chave Primária (Primary Key)
+- **FK**: Chave Estrangeira (Foreign Key)
+- **UK**: Chave Única (Unique Key)
+
+---
+
+## Licença
+
+[MIT](LICENSE).

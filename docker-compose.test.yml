@@ -1,8 +1,7 @@
-version: '3.8'
-
 services:
   test_db:
     image: postgres:17-alpine
+    container_name: vendinhas-test-postgres
     restart: always
     environment:
       POSTGRES_USER: test_user
@@ -10,8 +9,33 @@ services:
       POSTGRES_DB: test_db
     ports:
       - "5433:5432"
-    volumes:
-      - PGDATA_TEST:/var/lib/postgresql/data
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - vendinhas-test-network
 
-volumes:
-  PGDATA_TEST:
+  test_redis:
+    image: redis:7-alpine
+    container_name: vendinhas-test-redis
+    restart: always
+    ports:
+      - "6380:6379"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - vendinhas-test-network
+
+networks:
+  vendinhas-test-network:
+    driver: bridge

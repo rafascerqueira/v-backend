@@ -1,15 +1,19 @@
 {
-  "cSpell.words": [
-    "autoincrement",
-    "healthcheck",
-    "initdb",
-    "isready",
-    "nestjs",
-    "pgdata",
-    "pkey",
-    "postgres",
-    "postgresql",
-    "Timestamptz"
-  ],
-  "cSpell.ignoreWords": ["PGDATA", "Instantiator", "cuid", "datasource"]
+	"editor.codeActionsOnSave": {
+		"source.fixAll.biome": "explicit"
+	},
+	"cSpell.words": [
+		"autoincrement",
+		"healthcheck",
+		"initdb",
+		"isready",
+		"moreinfo",
+		"nestjs",
+		"pgdata",
+		"pkey",
+		"postgres",
+		"postgresql",
+		"Timestamptz"
+	],
+	"cSpell.ignoreWords": ["PGDATA", "Instantiator", "cuid", "datasource"]
 }
