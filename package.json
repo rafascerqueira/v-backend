@@ -126,5 +126,6 @@
       "^@infrastructure/(.*)$": "<rootDir>/shared/$1",
       "^@interfaces/(.*)$": "<rootDir>/interfaces/$1"
     }
-  }
+  },
+  "packageManager": "pnpm@9.15.0"
 }
