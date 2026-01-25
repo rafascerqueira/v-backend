@@ -2,7 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { CustomersService } from './customers.service'
 import { CUSTOMER_REPOSITORY } from '@/shared/repositories/customer.repository'
-import { Prisma } from '@prisma/client'
+import { Prisma } from '@/generated/prisma/client'
 
 function makeP2002(target: string[]): Prisma.PrismaClientKnownRequestError {
   const err = new Error('Unique constraint') as unknown as Prisma.PrismaClientKnownRequestError & { code?: string; meta?: any }

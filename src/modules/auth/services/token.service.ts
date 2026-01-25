@@ -68,11 +68,11 @@ export class TokenService implements OnModuleInit {
 
 		const [accessToken, refreshToken] = await Promise.all([
 			this.jwtService.signAsync(
-				{ sub: payload.sub, email: payload.email, type: 'access' },
+				{ sub: payload.sub, email: payload.email, role: payload.role, type: 'access' },
 				{ ...signOptions, expiresIn: this.accessTokenExpiresIn },
 			),
 			this.jwtService.signAsync(
-				{ sub: payload.sub, email: payload.email, type: 'refresh' },
+				{ sub: payload.sub, email: payload.email, role: payload.role, type: 'refresh' },
 				{ ...refreshSignOptions, expiresIn: this.refreshTokenExpiresIn },
 			),
 		])
@@ -105,6 +105,7 @@ export class TokenService implements OnModuleInit {
 		return this.generateTokens({
 			sub: payload.sub,
 			email: payload.email,
+			role: payload.role,
 		})
 	}
 }

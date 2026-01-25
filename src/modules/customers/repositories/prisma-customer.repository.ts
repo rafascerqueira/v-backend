@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 import type {
 	CustomerRepository,
 	Customer,
@@ -9,7 +10,17 @@ import type {
 
 @Injectable()
 export class PrismaCustomerRepository implements CustomerRepository {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly tenantContext: TenantContext,
+	) {}
+
+	private getTenantFilter() {
+		if (this.tenantContext.isAdmin()) {
+			return {}
+		}
+		return { seller_id: this.tenantContext.requireSellerId() }
+	}
 
 	async create(data: CreateCustomerData): Promise<Customer> {
 		return this.prisma.customer.create({
@@ -28,9 +39,14 @@ export class PrismaCustomerRepository implements CustomerRepository {
 	}
 
 	async findById(id: string): Promise<Customer | null> {
-		return this.prisma.customer.findUnique({
+		const customer = await this.prisma.customer.findUnique({
 			where: { id },
-		}) as unknown as Customer | null
+		})
+		if (!customer) return null
+		if (!this.tenantContext.isAdmin() && customer.seller_id !== this.tenantContext.getSellerId()) {
+			return null
+		}
+		return customer as unknown as Customer
 	}
 
 	async findByEmail(sellerId: string, email: string): Promise<Customer | null> {
@@ -41,7 +57,7 @@ export class PrismaCustomerRepository implements CustomerRepository {
 
 	async findAll(sellerId?: string): Promise<Customer[]> {
 		return this.prisma.customer.findMany({
-			where: sellerId ? { seller_id: sellerId } : undefined,
+			where: { ...this.getTenantFilter(), ...(sellerId && { seller_id: sellerId }) },
 		}) as unknown as Customer[]
 	}
 
@@ -57,6 +73,7 @@ export class PrismaCustomerRepository implements CustomerRepository {
 		const skip = (page - 1) * limit
 
 		const where = {
+			...this.getTenantFilter(),
 			...(search && {
 				OR: [
 					{ name: { contains: search, mode: 'insensitive' as const } },
@@ -83,6 +100,10 @@ export class PrismaCustomerRepository implements CustomerRepository {
 	}
 
 	async update(id: string, data: UpdateCustomerData): Promise<Customer> {
+		const customer = await this.findById(id)
+		if (!customer) {
+			throw new Error('Customer not found or access denied')
+		}
 		return this.prisma.customer.update({
 			where: { id },
 			data: {
@@ -93,6 +114,10 @@ export class PrismaCustomerRepository implements CustomerRepository {
 	}
 
 	async delete(id: string): Promise<Customer> {
+		const customer = await this.findById(id)
+		if (!customer) {
+			throw new Error('Customer not found or access denied')
+		}
 		return this.prisma.customer.delete({
 			where: { id },
 		}) as unknown as Customer

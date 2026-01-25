@@ -8,6 +8,7 @@ import { Reflector } from '@nestjs/core'
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
 import { TokenService } from '../services/token.service'
 import { TokenBlacklistService } from '../services/token-blacklist.service'
+import { AUTH_COOKIES } from '../constants/cookies'
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -28,7 +29,7 @@ export class JwtAuthGuard implements CanActivate {
 		}
 
 		const request = context.switchToHttp().getRequest()
-		const token = this.extractTokenFromHeader(request)
+		const token = this.extractToken(request)
 
 		if (!token) {
 			throw new UnauthorizedException('Token not provided')
@@ -49,8 +50,22 @@ export class JwtAuthGuard implements CanActivate {
 		return true
 	}
 
-	private extractTokenFromHeader(request: any): string | undefined {
-		const [type, token] = request.headers.authorization?.split(' ') ?? []
-		return type === 'Bearer' ? token : undefined
+	private extractToken(request: any): string | undefined {
+		// First try Authorization header (for backward compatibility and API clients)
+		const authHeader = request.headers.authorization
+		if (authHeader) {
+			const [type, token] = authHeader.split(' ')
+			if (type === 'Bearer' && token) {
+				return token
+			}
+		}
+
+		// Then try HttpOnly cookie (more secure for browser clients)
+		const cookies = request.cookies
+		if (cookies?.[AUTH_COOKIES.ACCESS_TOKEN]) {
+			return cookies[AUTH_COOKIES.ACCESS_TOKEN]
+		}
+
+		return undefined
 	}
 }

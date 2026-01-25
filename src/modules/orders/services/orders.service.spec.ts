@@ -1,10 +1,17 @@
 import { Test } from '@nestjs/testing'
 import { OrdersService } from './orders.service'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 
 const prismaMock = {
-  order: { create: jest.fn(), findUnique: jest.fn() },
+  order: { create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
   order_item: { create: jest.fn() },
+}
+
+const tenantContextMock = {
+  getSellerId: jest.fn().mockReturnValue('test-seller-id'),
+  requireSellerId: jest.fn().mockReturnValue('test-seller-id'),
+  isAdmin: jest.fn().mockReturnValue(false),
 }
 
 describe('OrdersService', () => {
@@ -12,7 +19,11 @@ describe('OrdersService', () => {
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
-      providers: [OrdersService, { provide: PrismaService, useValue: prismaMock }],
+      providers: [
+        OrdersService, 
+        { provide: PrismaService, useValue: prismaMock },
+        { provide: TenantContext, useValue: tenantContextMock },
+      ],
     }).compile()
 
     service = module.get(OrdersService)
@@ -51,9 +62,9 @@ describe('OrdersService', () => {
   })
 
   it('findById delegates to prisma', async () => {
-    prismaMock.order.findUnique.mockResolvedValueOnce({ id: 1 })
+    prismaMock.order.findUnique.mockResolvedValueOnce({ id: 1, seller_id: 'test-seller-id' })
     const res = await service.findById(1)
-    expect(prismaMock.order.findUnique).toHaveBeenCalledWith({ where: { id: 1 }, include: { Order_item: true, Billing: true } })
-    expect(res).toEqual({ id: 1 })
+    expect(prismaMock.order.findUnique).toHaveBeenCalledWith({ where: { id: 1 }, include: { Order_item: true, Billing: true, customer: true } })
+    expect(res).toEqual({ id: 1, seller_id: 'test-seller-id' })
   })
 })

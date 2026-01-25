@@ -1,13 +1,25 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 import type { UpdateStoreStockDto } from '../dto/update-store-stock.dto'
 
 @Injectable()
 export class StoreStockService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContext,
+  ) {}
+
+  private getTenantFilter() {
+    if (this.tenantContext.isAdmin()) {
+      return {}
+    }
+    return { seller_id: this.tenantContext.requireSellerId() }
+  }
 
   async findAll() {
     const stocks = await this.prisma.store_stock.findMany({
+      where: this.getTenantFilter(),
       orderBy: { product_id: 'asc' },
     })
 

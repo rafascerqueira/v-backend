@@ -60,6 +60,7 @@ describe('ProductService', () => {
 
   describe('create', () => {
     const productData = {
+      seller_id: 'test-seller-id',
       name: 'Test Product',
       description: 'Test Description',
       sku: 'TEST-SKU-001',

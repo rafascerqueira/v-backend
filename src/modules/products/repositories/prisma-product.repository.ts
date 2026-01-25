@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 import type {
 	ProductRepository,
 	Product,
@@ -9,7 +10,17 @@ import type {
 
 @Injectable()
 export class PrismaProductRepository implements ProductRepository {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly tenantContext: TenantContext,
+	) {}
+
+	private getTenantFilter() {
+		if (this.tenantContext.isAdmin()) {
+			return {}
+		}
+		return { seller_id: this.tenantContext.requireSellerId() }
+	}
 
 	async create(data: CreateProductData): Promise<Product> {
 		return this.prisma.product.create({
@@ -29,15 +40,21 @@ export class PrismaProductRepository implements ProductRepository {
 	}
 
 	async findById(id: number): Promise<Product | null> {
-		return this.prisma.product.findUnique({
+		const product = await this.prisma.product.findUnique({
 			where: { id },
-		}) as unknown as Product | null
+		})
+		if (!product) return null
+		if (!this.tenantContext.isAdmin() && product.seller_id !== this.tenantContext.getSellerId()) {
+			return null
+		}
+		return product as unknown as Product
 	}
 
 	async findAll(sellerId?: string): Promise<Product[]> {
 		return this.prisma.product.findMany({
 			where: { 
 				deletedAt: null,
+				...this.getTenantFilter(),
 				...(sellerId && { seller_id: sellerId }),
 			},
 		}) as unknown as Product[]
@@ -57,6 +74,7 @@ export class PrismaProductRepository implements ProductRepository {
 
 		const where = {
 			deletedAt: null,
+			...this.getTenantFilter(),
 			...(search && {
 				OR: [
 					{ name: { contains: search, mode: 'insensitive' as const } },
@@ -88,6 +106,10 @@ export class PrismaProductRepository implements ProductRepository {
 	}
 
 	async update(id: number, data: UpdateProductData): Promise<Product> {
+		const product = await this.findById(id)
+		if (!product) {
+			throw new Error('Product not found or access denied')
+		}
 		return this.prisma.product.update({
 			where: { id },
 			data: {
@@ -98,6 +120,10 @@ export class PrismaProductRepository implements ProductRepository {
 	}
 
 	async softDelete(id: number): Promise<Product> {
+		const product = await this.findById(id)
+		if (!product) {
+			throw new Error('Product not found or access denied')
+		}
 		return this.prisma.product.update({
 			where: { id },
 			data: { deletedAt: new Date() },

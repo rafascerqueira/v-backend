@@ -1,13 +1,10 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../src/generated/prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import { execSync } from 'child_process'
 
-const prisma = new PrismaClient({
-	datasources: {
-		db: {
-			url: 'postgresql://test_user:test_password@localhost:5433/test_db',
-		},
-	},
-})
+const testDbUrl = 'postgresql://test_user:test_password@localhost:5433/test_db'
+const adapter = new PrismaPg({ connectionString: testDbUrl })
+const prisma = new PrismaClient({ adapter })
 
 export async function setupTestDatabase() {
 	try {

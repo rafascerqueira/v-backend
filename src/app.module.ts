@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common'
-import { APP_GUARD } from '@nestjs/core'
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
 import { CryptoModule } from './shared/crypto/crypto.module'
@@ -24,10 +24,13 @@ import { CatalogModule } from './modules/catalog/catalog.module'
 import { AdminModule } from './modules/admin/admin.module'
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module'
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
+import { TenantModule } from './shared/tenant/tenant.module'
+import { TenantInterceptor } from './shared/tenant/tenant.interceptor'
 
 @Module({
 	imports: [
 		PrismaModule,
+		TenantModule,
 		RedisModule,
 		CryptoModule,
 		AuthModule,
@@ -55,6 +58,10 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
 		{
 			provide: APP_GUARD,
 			useClass: JwtAuthGuard,
+		},
+		{
+			provide: APP_INTERCEPTOR,
+			useClass: TenantInterceptor,
 		},
 	],
 })

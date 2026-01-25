@@ -66,6 +66,7 @@ export class LoginController {
 		const tokens = await this.tokenService.generateTokens({
 			sub: account.id,
 			email: account.email,
+			role: account.role,
 		})
 
 		response.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {

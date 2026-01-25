@@ -1,8 +1,8 @@
 import { execSync } from 'node:child_process'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../src/generated/prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 
 module.exports = async () => {
-
   // Start test database container
   execSync('docker compose -f docker-compose.test.yml up -d', {
     stdio: 'inherit',
@@ -13,13 +13,8 @@ module.exports = async () => {
   process.env.DATABASE_URL = testDbUrl
 
   // Wait for DB to be ready by trying to connect with Prisma
-  const prisma = new PrismaClient({
-    datasources: {
-      db: {
-        url: process.env.DATABASE_URL || testDbUrl,
-      },
-    },
-  })
+  const adapter = new PrismaPg({ connectionString: testDbUrl })
+  const prisma = new PrismaClient({ adapter })
 
   const timeoutMs = 60000
   const start = Date.now()
@@ -40,7 +35,7 @@ module.exports = async () => {
   }
 
   // Reset database and apply all migrations to ensure a clean state
-  execSync('pnpm prisma migrate reset --force --skip-seed', {
+  execSync('pnpm prisma migrate reset --force', {
     stdio: 'inherit',
     env: {
       ...process.env,

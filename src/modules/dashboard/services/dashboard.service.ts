@@ -1,11 +1,23 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 
 @Injectable()
 export class DashboardService {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly tenantContext: TenantContext,
+	) {}
+
+	private getTenantFilter() {
+		if (this.tenantContext.isAdmin()) {
+			return {}
+		}
+		return { seller_id: this.tenantContext.requireSellerId() }
+	}
 
 	async getStats(_accountId: string) {
+		const tenantFilter = this.getTenantFilter()
 		const [
 			totalProducts,
 			totalCustomers,
@@ -15,16 +27,19 @@ export class DashboardService {
 			topProducts,
 		] = await Promise.all([
 			this.prisma.product.count({
-				where: { active: true },
+				where: { active: true, deletedAt: null, ...tenantFilter },
 			}),
 			this.prisma.customer.count({
-				where: { active: true },
+				where: { active: true, ...tenantFilter },
 			}),
-			this.prisma.order.count(),
 			this.prisma.order.count({
-				where: { status: 'pending' },
+				where: tenantFilter,
+			}),
+			this.prisma.order.count({
+				where: { status: 'pending', ...tenantFilter },
 			}),
 			this.prisma.order.findMany({
+				where: tenantFilter,
 				take: 5,
 				orderBy: { createdAt: 'desc' },
 				include: {
@@ -65,6 +80,7 @@ export class DashboardService {
 		const totalRevenue = await this.prisma.order.aggregate({
 			where: {
 				status: { in: ['delivered', 'confirmed'] },
+				...tenantFilter,
 			},
 			_sum: {
 				total: true,

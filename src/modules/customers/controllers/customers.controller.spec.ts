@@ -1,13 +1,19 @@
 import { Test } from '@nestjs/testing'
 import { CustomersController } from './customers.controller'
 import { CustomersService } from '../services/customers.service'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 
 const serviceMock = {
   create: jest.fn(),
   findAll: jest.fn(),
+  findAllPaginated: jest.fn(),
   findOne: jest.fn(),
   update: jest.fn(),
   remove: jest.fn(),
+}
+
+const mockRequest = {
+  user: { sub: 'test-seller-id', role: 'seller' },
 }
 
 describe('CustomersController', () => {
@@ -17,7 +23,10 @@ describe('CustomersController', () => {
     const module = await Test.createTestingModule({
       controllers: [CustomersController],
       providers: [{ provide: CustomersService, useValue: serviceMock }],
-    }).compile()
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile()
 
     controller = module.get(CustomersController)
     jest.clearAllMocks()
@@ -26,15 +35,16 @@ describe('CustomersController', () => {
   it('create should call service.create and return customer', async () => {
     const dto: any = { name: 'John', email: 'john@ex.com', phone: '999', address: 'Addr' }
     serviceMock.create.mockResolvedValueOnce({ id: 'c1', ...dto })
-    const res = await controller.create(dto)
-    expect(serviceMock.create).toHaveBeenCalledWith(dto)
+    const res = await controller.create(dto, mockRequest)
+    expect(serviceMock.create).toHaveBeenCalledWith({ ...dto, seller_id: 'test-seller-id' })
     expect(res.id).toBe('c1')
   })
 
-  it('findAll should return array', async () => {
-    serviceMock.findAll.mockResolvedValueOnce([{ id: 'c1' }])
-    const res = await controller.findAll()
-    expect(res).toEqual([{ id: 'c1' }])
+  it('findAll should return paginated data', async () => {
+    const paginatedResult = { data: [{ id: 'c1' }], total: 1, page: 1, limit: 10 }
+    serviceMock.findAllPaginated.mockResolvedValueOnce(paginatedResult)
+    const res = await controller.findAll({ page: '1', limit: '10' })
+    expect(res).toEqual(paginatedResult)
   })
 
   it('findOne should call service with id', async () => {

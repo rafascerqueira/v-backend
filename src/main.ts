@@ -1,3 +1,5 @@
+import { loadEnvFile } from 'node:process'
+loadEnvFile()
 import { NestFactory } from '@nestjs/core'
 import {
   FastifyAdapter,
@@ -16,7 +18,20 @@ async function bootstrap() {
   )
 
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        process.env.CORS_ORIGIN || 'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        /^http:\/\/127\.0\.0\.1:\d+$/,
+      ]
+      if (!origin || allowedOrigins.some(o => 
+        o instanceof RegExp ? o.test(origin) : o === origin
+      )) {
+        callback(null, true)
+      } else {
+        callback(null, false)
+      }
+    },
     credentials: true,
   })
 

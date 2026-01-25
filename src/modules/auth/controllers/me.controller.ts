@@ -23,6 +23,8 @@ export class MeController {
 			id: account.id,
 			name: account.name,
 			email: account.email,
+			role: account.role,
+			planType: account.plan_type,
 			createdAt: account.createdAt,
 			updatedAt: account.updatedAt,
 		}

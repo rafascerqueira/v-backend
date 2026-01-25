@@ -1,9 +1,13 @@
+import type { AccountRole, PlanType } from '@/generated/prisma/client'
+
 export interface Account {
 	id: string
 	name: string
 	email: string
 	password: string
 	salt: string
+	role: AccountRole
+	plan_type: PlanType
 	last_login_at: Date | null
 	createdAt: Date
 	updatedAt: Date

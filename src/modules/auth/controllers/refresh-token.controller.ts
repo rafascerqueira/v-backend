@@ -4,11 +4,12 @@ import {
 	HttpCode,
 	HttpStatus,
 	Post,
+	Req,
 	Res,
 	UnauthorizedException,
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
-import type { FastifyReply } from 'fastify'
+import type { FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { TokenService } from '../services/token.service'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
@@ -16,7 +17,7 @@ import { Public } from '../decorators/public.decorator'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
 
 const refreshTokenSchema = z.object({
-	refreshToken: z.string().min(1, 'Refresh token é obrigatório'),
+	refreshToken: z.string().optional(),
 })
 
 type RefreshTokenDto = z.infer<typeof refreshTokenSchema>
@@ -41,10 +42,17 @@ export class RefreshTokenController {
 	})
 	async handle(
 		@Body(new ZodValidationPipe(refreshTokenSchema)) body: RefreshTokenDto,
+		@Req() request: FastifyRequest,
 		@Res({ passthrough: true }) response: FastifyReply,
 	) {
+		const refreshToken = this.extractRefreshToken(body, request)
+
+		if (!refreshToken) {
+			throw new UnauthorizedException('Refresh token not provided')
+		}
+
 		try {
-			const tokens = await this.tokenService.refreshTokens(body.refreshToken)
+			const tokens = await this.tokenService.refreshTokens(refreshToken)
 
 			response.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {
 				...COOKIE_OPTIONS,
@@ -60,5 +68,20 @@ export class RefreshTokenController {
 		} catch {
 			throw new UnauthorizedException('Invalid or expired refresh token')
 		}
+	}
+
+	private extractRefreshToken(body: RefreshTokenDto, request: FastifyRequest): string | null {
+		// Try body first (for API clients)
+		if (body.refreshToken) {
+			return body.refreshToken
+		}
+
+		// Try HttpOnly cookie
+		const cookies = request.cookies
+		if (cookies?.[AUTH_COOKIES.REFRESH_TOKEN]) {
+			return cookies[AUTH_COOKIES.REFRESH_TOKEN] ?? null
+		}
+
+		return null
 	}
 }

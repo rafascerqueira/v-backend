@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing'
 import { CreateProductController } from './create-product.controller'
 import { ProductService } from '../services/product.service'
 import { HttpException, HttpStatus } from '@nestjs/common'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 
 describe('CreateProductController', () => {
 	let controller: CreateProductController
@@ -9,6 +10,10 @@ describe('CreateProductController', () => {
 
 	const mockProductService = {
 		create: jest.fn(),
+	}
+
+	const mockRequest = {
+		user: { sub: 'test-seller-id', role: 'seller' },
 	}
 
 	beforeEach(async () => {
@@ -20,7 +25,10 @@ describe('CreateProductController', () => {
 					useValue: mockProductService,
 				},
 			],
-		}).compile()
+		})
+			.overrideGuard(JwtAuthGuard)
+			.useValue({ canActivate: () => true })
+			.compile()
 
 		controller = module.get<CreateProductController>(CreateProductController)
 		service = module.get<ProductService>(ProductService)
@@ -54,9 +62,9 @@ describe('CreateProductController', () => {
 			const expectedProduct = { id: 1, ...validProductData }
 			mockProductService.create.mockResolvedValue(expectedProduct)
 
-			const result = await controller.handle(validProductData)
+			const result = await controller.handle(validProductData, mockRequest)
 
-			expect(service.create).toHaveBeenCalledWith(validProductData)
+			expect(service.create).toHaveBeenCalledWith({ ...validProductData, seller_id: 'test-seller-id' })
 			expect(result).toEqual(expectedProduct)
 		})
 
@@ -77,7 +85,7 @@ describe('CreateProductController', () => {
 
 			// The validation should throw an error for empty name
 			try {
-				await controller.handle(invalidData)
+				await controller.handle(invalidData, mockRequest)
 				fail('Should have thrown validation error')
 			} catch (error) {
 				expect(error).toBeDefined()
@@ -89,7 +97,7 @@ describe('CreateProductController', () => {
 				new Error('Database connection failed'),
 			)
 
-			await expect(controller.handle(validProductData)).rejects.toThrow(
+			await expect(controller.handle(validProductData, mockRequest)).rejects.toThrow(
 				'Database connection failed',
 			)
 		})
@@ -102,7 +110,7 @@ describe('CreateProductController', () => {
 				),
 			)
 
-			await expect(controller.handle(validProductData)).rejects.toThrow(
+			await expect(controller.handle(validProductData, mockRequest)).rejects.toThrow(
 				HttpException,
 			)
 		})
@@ -113,7 +121,7 @@ describe('CreateProductController', () => {
 				specifications: 'invalid' as any, // should be an object
 			}
 
-			await expect(controller.handle(dataWithInvalidSpecs)).rejects.toThrow()
+			await expect(controller.handle(dataWithInvalidSpecs, mockRequest)).rejects.toThrow()
 		})
 
 		it('should validate images array', async () => {
@@ -122,7 +130,7 @@ describe('CreateProductController', () => {
 				images: 'not-an-array' as any, // should be an array
 			}
 
-			await expect(controller.handle(dataWithInvalidImages)).rejects.toThrow()
+			await expect(controller.handle(dataWithInvalidImages, mockRequest)).rejects.toThrow()
 		})
 
 		it('should handle optional fields correctly', async () => {
@@ -142,9 +150,9 @@ describe('CreateProductController', () => {
 
 			mockProductService.create.mockResolvedValue({ id: 2, ...minimalData })
 
-			const result = await controller.handle(minimalData)
+			const result = await controller.handle(minimalData, mockRequest)
 
-			expect(service.create).toHaveBeenCalledWith(minimalData)
+			expect(service.create).toHaveBeenCalledWith({ ...minimalData, seller_id: 'test-seller-id' })
 			expect(result).toBeDefined()
 		})
 	})

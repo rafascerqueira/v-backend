@@ -1,7 +1,16 @@
-import { PrismaClient } from '@prisma/client'
+import { loadEnvFile } from 'node:process'
+loadEnvFile()
+import { PrismaClient } from '../src/generated/prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import * as argon2 from 'argon2'
 
-const prisma = new PrismaClient()
+const connectionString = process.env.DATABASE_URL
+if (!connectionString) {
+	throw new Error('DATABASE_URL environment variable is not set')
+}
+
+const adapter = new PrismaPg({ connectionString })
+const prisma = new PrismaClient({ adapter })
 
 const ARGON2_OPTIONS: argon2.Options = {
 	type: argon2.argon2id,
@@ -26,7 +35,16 @@ async function main() {
 	})
 
 	if (existingAdmin) {
-		console.log('✅ Admin user already exists, skipping...')
+		// Update existing admin to ensure correct role
+		if (existingAdmin.role !== 'admin') {
+			await prisma.account.update({
+				where: { id: existingAdmin.id },
+				data: { role: 'admin', plan_type: 'enterprise' },
+			})
+			console.log('✅ Admin user role updated to admin')
+		} else {
+			console.log('✅ Admin user already exists with correct role, skipping...')
+		}
 	} else {
 		const hashedPassword = await hashPassword(adminPassword)
 
