@@ -29,6 +29,13 @@ pnpm prisma generate
 echo "🗄️ Running database migrations..."
 pnpm prisma migrate deploy
 
+# Apply database triggers and functions
+echo "🔧 Applying database triggers and functions..."
+if [ -f "prisma/migrations/manual/subscription_triggers.sql" ]; then
+  source .env 2>/dev/null || true
+  psql "$DATABASE_URL" -f prisma/migrations/manual/subscription_triggers.sql || echo "⚠️ Warning: Could not apply triggers (may already exist)"
+fi
+
 # Build application
 echo "🏗️ Building application..."
 pnpm build

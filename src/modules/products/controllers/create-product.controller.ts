@@ -6,7 +6,7 @@ import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { createProductSchema, type CreateProductDto } from '../dto/create-product.dto'
 
 @ApiTags('products')
-@Controller('product/create-product')
+@Controller('products')
 @UseGuards(JwtAuthGuard)
 export class CreateProductController {
 	constructor(private readonly productService: ProductService) {}

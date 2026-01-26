@@ -1,11 +1,13 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
 import { OrdersService } from '../services/orders.service'
 import { createOrderSchema, type CreateOrderDto, orderItemInputSchema, type OrderItemInputDto } from '../dto/create-order.dto'
 
 @ApiTags('orders')
 @Controller('orders')
+@UseGuards(JwtAuthGuard)
 export class OrdersController {
   constructor(private readonly service: OrdersService) {}
 

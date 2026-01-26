@@ -1,10 +1,12 @@
-import { Controller, Get, Param, Query } from '@nestjs/common'
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ProductService } from '../services/product.service'
 import { paginationSchema } from '@/shared/dto/pagination.dto'
 
 @ApiTags('products')
 @Controller('products')
+@UseGuards(JwtAuthGuard)
 export class ListProductsController {
 	constructor(private readonly productService: ProductService) {}
 

@@ -1,11 +1,20 @@
-import { Controller, Get, Query } from '@nestjs/common'
+import { Controller, Get, Query, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ReportsService } from '../services/reports.service'
 
 @ApiTags('reports')
 @Controller('reports')
+@UseGuards(JwtAuthGuard)
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Get full report for dashboard' })
+  @ApiQuery({ name: 'period', required: false, enum: ['week', 'month', 'year'] })
+  async getFullReport(@Query('period') period?: 'week' | 'month' | 'year') {
+    return this.reportsService.getFullReport(period || 'month')
+  }
 
   @Get('sales')
   @ApiOperation({ summary: 'Get sales report by period' })

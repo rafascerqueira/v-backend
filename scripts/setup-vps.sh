@@ -45,6 +45,10 @@ sudo apt install -y certbot python3-certbot-nginx
 echo "📦 Installing Git..."
 sudo apt install -y git
 
+# Install PostgreSQL client for running SQL scripts
+echo "📦 Installing PostgreSQL client..."
+sudo apt install -y postgresql-client
+
 # Create app directories
 echo "📁 Creating app directories..."
 sudo mkdir -p /var/www/vendinhas/backend
@@ -119,6 +123,13 @@ sleep 10
 echo "🗄️ Running database migrations..."
 pnpm prisma generate
 pnpm prisma migrate deploy
+
+# Apply database triggers and functions
+echo "🔧 Applying database triggers and functions..."
+if [ -f "prisma/migrations/manual/subscription_triggers.sql" ]; then
+  source .env 2>/dev/null || true
+  psql "$DATABASE_URL" -f prisma/migrations/manual/subscription_triggers.sql || echo "⚠️ Warning: Could not apply triggers"
+fi
 
 # Seed database (optional)
 echo "🌱 Seeding database..."

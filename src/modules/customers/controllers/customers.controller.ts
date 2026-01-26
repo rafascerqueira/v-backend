@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, Query, Req, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Body, Param, Patch, Delete, Query, Req, UseGuards } from '@nestjs/common'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger'
 import { CustomersService } from '../services/customers.service'
@@ -54,7 +54,7 @@ export class CustomersController {
 		return this.customersService.findOne(id)
 	}
 
-	@Put(':id')
+	@Patch(':id')
 	@ApiOperation({ summary: 'Update customer' })
 	@ApiParam({ name: 'id', type: String })
 	@ApiBody({

@@ -1,11 +1,13 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common'
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
 import { StockMovementsService } from '../services/stock-movements.service'
 import { createStockMovementSchema, type CreateStockMovementDto } from '../dto/create-stock-movement.dto'
 
 @ApiTags('stock-movements')
 @Controller('stock-movements')
+@UseGuards(JwtAuthGuard)
 export class StockMovementsController {
   constructor(private readonly service: StockMovementsService) {}
 

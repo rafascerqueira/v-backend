@@ -80,13 +80,13 @@ model Customer {
   seller_id String
   seller    Account  @relation(fields: [seller_id], references: [id], onDelete: Cascade)
   name      String   @db.VarChar(100)
-  email     String   @db.VarChar(100)
+  email     String?  @db.VarChar(100)
   phone     String   @db.VarChar(15)
-  document  String   @db.VarChar(20)
-  address   Json     @db.JsonB()
+  document  String?  @db.VarChar(20)
+  address   Json     @default("{}") @db.JsonB()
   city      String   @db.VarChar(100)
   state     String   @db.VarChar(2)
-  zip_code  String   @db.VarChar(10)
+  zip_code  String?  @db.VarChar(10)
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @db.Timestamptz()
   updatedAt DateTime @updatedAt @db.Timestamptz()
@@ -105,13 +105,13 @@ model Product {
   seller_id      String
   seller         Account          @relation(fields: [seller_id], references: [id], onDelete: Cascade)
   name           String           @db.VarChar(100)
-  description    String
-  sku            String           @db.VarChar(50)
-  category       String           @db.VarChar(100)
-  brand          String           @db.VarChar(100)
+  description    String?
+  sku            String?          @db.VarChar(50)
+  category       String?          @db.VarChar(100)
+  brand          String?          @db.VarChar(100)
   unit           String           @default("un") @db.VarChar(20)
-  specifications Json             @db.JsonB()
-  images         String[]
+  specifications Json             @default("{}") @db.JsonB()
+  images         String[]         @default([])
   active         Boolean          @default(true)
   createdAt      DateTime         @default(now()) @db.Timestamptz()
   updatedAt      DateTime         @updatedAt @db.Timestamptz()

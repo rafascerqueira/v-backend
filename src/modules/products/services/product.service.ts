@@ -1,4 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common'
+import { PrismaService } from '@/shared/prisma/prisma.service'
 import {
 	PRODUCT_REPOSITORY,
 	type ProductRepository,
@@ -14,6 +15,7 @@ export class ProductService {
 	constructor(
 		@Inject(PRODUCT_REPOSITORY)
 		private readonly productRepository: ProductRepository,
+		private readonly prisma: PrismaService,
 	) {}
 
 	async create(data: CreateProductData) {
@@ -39,5 +41,29 @@ export class ProductService {
 
 	async remove(id: string) {
 		return this.productRepository.softDelete(parseInt(id))
+	}
+
+	async addPrice(productId: number, price: number, priceType: string) {
+		// Deactivate existing prices of the same type
+		await this.prisma.product_price.updateMany({
+			where: { product_id: productId, price_type: priceType as any, active: true },
+			data: { active: false },
+		})
+
+		return this.prisma.product_price.create({
+			data: {
+				product_id: productId,
+				price,
+				price_type: priceType as any,
+				active: true,
+			},
+		})
+	}
+
+	async getProductPrices(productId: number) {
+		return this.prisma.product_price.findMany({
+			where: { product_id: productId, active: true },
+			orderBy: { createdAt: 'desc' },
+		})
 	}
 }

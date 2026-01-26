@@ -1,15 +1,17 @@
-import { Body, Controller, Param, Put } from '@nestjs/common'
+import { Body, Controller, Param, Patch, UseGuards } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ProductService } from '../services/product.service'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { updateProductSchema, type UpdateProductDto } from '../dto/update-product.dto'
 
 @ApiTags('products')
-@Controller('product/update-product')
+@Controller('products')
+@UseGuards(JwtAuthGuard)
 export class UpdateProductController {
 	constructor(private readonly productService: ProductService) {}
 
-	@Put(':id')
+	@Patch(':id')
 	@ApiOperation({ summary: 'Update product' })
 	@ApiParam({ name: 'id', type: String })
 	@ApiResponse({ status: 200, description: 'Product updated successfully' })

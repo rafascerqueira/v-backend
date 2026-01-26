@@ -1,113 +1,178 @@
-import { Injectable } from '@nestjs/common'
-import { PrismaService } from '@/shared/prisma/prisma.service'
-import { TenantContext } from '@/shared/tenant/tenant.context'
-import type { CreateOrderDto, OrderItemInputDto } from '../dto/create-order.dto'
+import { Injectable, BadRequestException } from "@nestjs/common";
+import { PrismaService } from "@/shared/prisma/prisma.service";
+import { TenantContext } from "@/shared/tenant/tenant.context";
+import type {
+	CreateOrderDto,
+	OrderItemInputDto,
+} from "../dto/create-order.dto";
 
 @Injectable()
 export class OrdersService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly tenantContext: TenantContext,
-  ) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly tenantContext: TenantContext,
+	) {}
 
-  private getTenantFilter() {
-    if (this.tenantContext.isAdmin()) {
-      return {}
-    }
-    return { seller_id: this.tenantContext.requireSellerId() }
-  }
+	private getTenantFilter() {
+		if (this.tenantContext.isAdmin()) {
+			return {};
+		}
+		return { seller_id: this.tenantContext.requireSellerId() };
+	}
 
-  async create(dto: CreateOrderDto) {
-    const { items, ...rest } = dto
+	async create(dto: CreateOrderDto) {
+		const { items, ...rest } = dto;
+		const sellerId = this.tenantContext.requireSellerId();
 
-    const subtotal = items.reduce((acc, it) => acc + it.unit_price * it.quantity, 0)
-    const discount = items.reduce((acc, it) => acc + it.discount, 0)
-    const total = subtotal - discount
+		const subtotal = items.reduce(
+			(acc, it) => acc + it.unit_price * it.quantity,
+			0,
+		);
+		const discount = items.reduce((acc, it) => acc + it.discount, 0);
+		const total = subtotal - discount;
 
-    return this.prisma.order.create({
-      data: {
-        seller_id: this.tenantContext.requireSellerId(),
-        customer_id: rest.customer_id,
-        order_number: rest.order_number,
-        notes: rest.notes,
-        subtotal,
-        discount,
-        total,
-        Order_item: {
-          create: items.map((it) => ({
-            product_id: it.product_id,
-            quantity: it.quantity,
-            unit_price: it.unit_price,
-            discount: it.discount,
-            total: it.unit_price * it.quantity - it.discount,
-          })),
-        },
-      },
-      include: { Order_item: true },
-    })
-  }
+		return this.prisma.$transaction(async (tx) => {
+			// Validate stock availability for items that have stock control
+			for (const item of items) {
+				const stock = await tx.store_stock.findUnique({
+					where: { product_id: item.product_id },
+				});
+				// Only validate if stock record exists
+				if (stock) {
+					const available = stock.quantity - stock.reserved_quantity;
+					if (available < item.quantity) {
+						const product = await tx.product.findUnique({
+							where: { id: item.product_id },
+						});
+						throw new BadRequestException(
+							`Estoque insuficiente para "${product?.name || item.product_id}". Disponível: ${available}, Solicitado: ${item.quantity}`,
+						);
+					}
+				}
+			}
 
-  async addItem(orderId: number, item: OrderItemInputDto) {
-    const total = item.unit_price * item.quantity - (item.discount ?? 0)
-    return this.prisma.order_item.create({
-      data: { order_id: orderId, product_id: item.product_id, quantity: item.quantity, unit_price: item.unit_price, discount: item.discount ?? 0, total },
-    })
-  }
+			// Create order
+			const order = await tx.order.create({
+				data: {
+					seller_id: sellerId,
+					customer_id: rest.customer_id,
+					order_number: rest.order_number,
+					notes: rest.notes,
+					subtotal,
+					discount,
+					total,
+					Order_item: {
+						create: items.map((it) => ({
+							product_id: it.product_id,
+							quantity: it.quantity,
+							unit_price: it.unit_price,
+							discount: it.discount,
+							total: it.unit_price * it.quantity - it.discount,
+						})),
+					},
+				},
+				include: { Order_item: true },
+			});
 
-  async findById(id: number) {
-    const order = await this.prisma.order.findUnique({ 
-      where: { id }, 
-      include: { Order_item: true, Billing: true, customer: true } 
-    })
-    if (!order) return null
-    if (!this.tenantContext.isAdmin() && order.seller_id !== this.tenantContext.getSellerId()) {
-      return null
-    }
-    return order
-  }
+			// Decrement stock and create movements only for items with stock control
+			for (const item of items) {
+				const stock = await tx.store_stock.findUnique({
+					where: { product_id: item.product_id },
+				});
 
-  async findAll() {
-    return this.prisma.order.findMany({
-      where: this.getTenantFilter(),
-      orderBy: { createdAt: 'desc' },
-      include: {
-        customer: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        Order_item: {
-          include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-      },
-    })
-  }
+				if (stock) {
+					await tx.store_stock.update({
+						where: { product_id: item.product_id },
+						data: { quantity: { decrement: item.quantity } },
+					});
 
-  async updateStatus(id: number, status: string) {
-    const order = await this.findById(id)
-    if (!order) {
-      throw new Error('Order not found or access denied')
-    }
-    return this.prisma.order.update({
-      where: { id },
-      data: { status: status as any },
-    })
-  }
+					await tx.stock_movement.create({
+						data: {
+							movement_type: "out",
+							reference_type: "sale",
+							reference_id: order.id,
+							product_id: item.product_id,
+							quantity: item.quantity,
+						},
+					});
+				}
+			}
 
-  async delete(id: number) {
-    const order = await this.findById(id)
-    if (!order) {
-      throw new Error('Order not found or access denied')
-    }
-    return this.prisma.order.delete({ where: { id } })
-  }
+			return order;
+		});
+	}
+
+	async addItem(orderId: number, item: OrderItemInputDto) {
+		const total = item.unit_price * item.quantity - (item.discount ?? 0);
+		return this.prisma.order_item.create({
+			data: {
+				order_id: orderId,
+				product_id: item.product_id,
+				quantity: item.quantity,
+				unit_price: item.unit_price,
+				discount: item.discount ?? 0,
+				total,
+			},
+		});
+	}
+
+	async findById(id: number) {
+		const order = await this.prisma.order.findUnique({
+			where: { id },
+			include: { Order_item: true, Billing: true, customer: true },
+		});
+		if (!order) return null;
+		if (
+			!this.tenantContext.isAdmin() &&
+			order.seller_id !== this.tenantContext.getSellerId()
+		) {
+			return null;
+		}
+		return order;
+	}
+
+	async findAll() {
+		return this.prisma.order.findMany({
+			where: this.getTenantFilter(),
+			orderBy: { createdAt: "desc" },
+			include: {
+				customer: {
+					select: {
+						id: true,
+						name: true,
+						email: true,
+					},
+				},
+				Order_item: {
+					include: {
+						product: {
+							select: {
+								id: true,
+								name: true,
+							},
+						},
+					},
+				},
+			},
+		});
+	}
+
+	async updateStatus(id: number, status: string) {
+		const order = await this.findById(id);
+		if (!order) {
+			throw new Error("Order not found or access denied");
+		}
+		return this.prisma.order.update({
+			where: { id },
+			data: { status: status as any },
+		});
+	}
+
+	async delete(id: number) {
+		const order = await this.findById(id);
+		if (!order) {
+			throw new Error("Order not found or access denied");
+		}
+		return this.prisma.order.delete({ where: { id } });
+	}
 }
