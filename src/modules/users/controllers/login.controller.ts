@@ -9,12 +9,12 @@ import {
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply } from 'fastify'
-import { AccountService } from '../services/account.service'
-import { TokenService } from '@/modules/auth/services/token.service'
-import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
-import { loginSchema, type LoginDto } from '../dto/login.dto'
-import { Public } from '@/modules/auth/decorators/public.decorator'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '@/modules/auth/constants/cookies'
+import { Public } from '@/modules/auth/decorators/public.decorator'
+import type { TokenService } from '@/modules/auth/services/token.service'
+import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
+import { type LoginDto, loginSchema } from '../dto/login.dto'
+import type { AccountService } from '../services/account.service'
 
 @ApiTags('auth')
 @Controller('auth')

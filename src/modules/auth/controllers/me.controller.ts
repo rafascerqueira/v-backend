@@ -1,8 +1,8 @@
 import { Controller, Get, NotFoundException } from '@nestjs/common'
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
+import type { AccountService } from '@/modules/users/services/account.service'
 import { CurrentUser } from '../decorators/current-user.decorator'
 import type { TokenPayload } from '../dto/auth-response.dto'
-import { AccountService } from '@/modules/users/services/account.service'
 
 @ApiTags('auth')
 @ApiBearerAuth()

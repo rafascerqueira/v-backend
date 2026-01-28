@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { RedisService } from '@/shared/redis/redis.service'
+import type { RedisService } from '@/shared/redis/redis.service'
 
 @Injectable()
 export class TokenBlacklistService {

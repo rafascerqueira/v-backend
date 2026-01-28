@@ -7,8 +7,102 @@ on:
     branches: [main, develop]
 
 jobs:
-  lint-test-build:
+  lint-and-build:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Cache pnpm modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm prisma generate
+
+      - name: Lint and format check
+        run: pnpm check:ci
+
+      - name: Type check
+        run: pnpm tsc --noEmit
+
+      - name: Build app
+        run: pnpm build
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Cache pnpm modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm prisma generate
+
+      - name: Run unit tests
+        run: pnpm test -- --passWithNoTests
+        env:
+          NODE_ENV: test
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -16,33 +110,47 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20" # Alinha com nossa env (para loadEnvFile)
+          node-version: "20"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: 9 # Ou a versão do seu pnpm-lock
+          version: 9
 
       - name: Cache pnpm modules
         uses: actions/cache@v4
         with:
           path: ~/.pnpm-store
-          key: $$   {{ runner.os }}-pnpm-   $${{ hashFiles('**/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint code
-        run: pnpm lint # Assumindo comando no package.json; adicione eslint se needed
+      - name: Generate Prisma client
+        run: pnpm prisma generate
 
-      - name: Run tests
-        run: pnpm test # Inclui unitários e e2e com Jest/Supertest
+      - name: Wait for databases to be ready
+        run: |
+          sleep 5
+          until pg_isready -h localhost -p 5433; do
+            echo "Waiting for postgres..."
+            sleep 1
+          done
+          until redis-cli -h localhost -p 6380 ping; do
+            echo "Waiting for redis..."
+            sleep 1
+          done
 
-      - name: Build app
-        run: pnpm build
-
-      - name: Prisma migrate (dry-run for CI)
-        run: pnpm prisma migrate dev --skip-seed # Testa migrations sem aplicar
+      - name: Setup test database
+        run: |
+          DATABASE_URL="postgresql://test_user:test_password@localhost:5433/test_db" pnpm prisma migrate deploy
         env:
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }} # Adicione secret para DB de teste
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5433/test_db
+
+      - name: Run e2e tests
+        run: pnpm test:e2e --passWithNoTests
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5433/test_db
+          REDIS_URL: redis://localhost:6380

@@ -4,9 +4,9 @@ import { BillingsController } from './controllers/billings.controller'
 import { BillingsService } from './services/billings.service'
 
 @Module({
-  imports: [PrismaModule],
-  controllers: [BillingsController],
-  providers: [BillingsService],
-  exports: [BillingsService],
+	imports: [PrismaModule],
+	controllers: [BillingsController],
+	providers: [BillingsService],
+	exports: [BillingsService],
 })
 export class BillingsModule {}

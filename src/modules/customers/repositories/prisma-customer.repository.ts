@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common'
-import { PrismaService } from '@/shared/prisma/prisma.service'
-import { TenantContext } from '@/shared/tenant/tenant.context'
+import type { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
-	CustomerRepository,
-	Customer,
 	CreateCustomerData,
+	Customer,
+	CustomerRepository,
 	UpdateCustomerData,
 } from '@/shared/repositories/customer.repository'
+import type { TenantContext } from '@/shared/tenant/tenant.context'
 
 @Injectable()
 export class PrismaCustomerRepository implements CustomerRepository {

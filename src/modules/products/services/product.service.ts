@@ -1,14 +1,15 @@
-import { Injectable, Inject } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
+import type { PaginationDto } from '@/shared/dto/pagination.dto'
+import { createPaginatedResponse } from '@/shared/dto/pagination.dto'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import {
+	type CreateProductData,
 	PRODUCT_REPOSITORY,
 	type ProductRepository,
-	type CreateProductData,
 } from '@/shared/repositories/product.repository'
 import type { CreateProductDto } from '../dto/create-product.dto'
 import type { UpdateProductDto } from '../dto/update-product.dto'
-import type { PaginationDto } from '@/shared/dto/pagination.dto'
-import { createPaginatedResponse } from '@/shared/dto/pagination.dto'
+import type { PriceType } from '@/generated/prisma/enums'
 
 @Injectable()
 export class ProductService {
@@ -27,7 +28,7 @@ export class ProductService {
 	}
 
 	async findAllPaginated(params: PaginationDto) {
-		const { data, total } = await (this.productRepository as any).findAllPaginated(params)
+		const { data, total } = await this.productRepository.findAllPaginated(params)
 		return createPaginatedResponse(data, total, params.page, params.limit)
 	}
 
@@ -43,10 +44,10 @@ export class ProductService {
 		return this.productRepository.softDelete(parseInt(id))
 	}
 
-	async addPrice(productId: number, price: number, priceType: string) {
+	async addPrice(productId: number, price: number, priceType: PriceType) {
 		// Deactivate existing prices of the same type
 		await this.prisma.product_price.updateMany({
-			where: { product_id: productId, price_type: priceType as any, active: true },
+			where: { product_id: productId, price_type: priceType, active: true },
 			data: { active: false },
 		})
 
@@ -54,7 +55,7 @@ export class ProductService {
 			data: {
 				product_id: productId,
 				price,
-				price_type: priceType as any,
+				price_type: priceType,
 				active: true,
 			},
 		})

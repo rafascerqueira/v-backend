@@ -1,6 +1,6 @@
-import { PrismaClient } from '../src/generated/prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { execSync } from 'child_process'
+import { PrismaClient } from '../src/generated/prisma/client'
 
 const testDbUrl = 'postgresql://test_user:test_password@localhost:5433/test_db'
 const adapter = new PrismaPg({ connectionString: testDbUrl })
@@ -11,8 +11,7 @@ export async function setupTestDatabase() {
 		execSync('pnpm prisma migrate deploy', {
 			env: {
 				...process.env,
-				DATABASE_URL:
-					'postgresql://test_user:test_password@localhost:5433/test_db',
+				DATABASE_URL: 'postgresql://test_user:test_password@localhost:5433/test_db',
 			},
 		})
 	} catch (error) {

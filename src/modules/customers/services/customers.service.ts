@@ -1,13 +1,13 @@
-import { Injectable, Inject, NotFoundException, ConflictException } from '@nestjs/common'
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { Prisma } from '@/generated/prisma/client'
-import {
-	CUSTOMER_REPOSITORY,
-	type CustomerRepository,
-	type CreateCustomerData,
-} from '@/shared/repositories/customer.repository'
-import type { CreateCustomerDto } from '../dto/create-customer.dto'
 import type { PaginationDto } from '@/shared/dto/pagination.dto'
 import { createPaginatedResponse } from '@/shared/dto/pagination.dto'
+import {
+	type CreateCustomerData,
+	CUSTOMER_REPOSITORY,
+	type CustomerRepository,
+} from '@/shared/repositories/customer.repository'
+import type { CreateCustomerDto } from '../dto/create-customer.dto'
 
 @Injectable()
 export class CustomersService {

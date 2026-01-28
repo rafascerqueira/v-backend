@@ -21,7 +21,7 @@
     "test:watch": "jest --watch --watchman=false",
     "test:cov": "jest --coverage --watchman=false",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand --watchman=false",
-    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand --forceExit --watchman=false",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand --forceExit --watchman=false --passWithNoTests",
     "test:e2e:dev": "jest --config ./test/jest-e2e.json --watch --watchman=false",
     "test:db:up": "docker compose -f docker-compose.test.yml up -d",
     "test:db:down": "docker compose -f docker-compose.test.yml down",

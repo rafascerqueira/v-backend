@@ -1,14 +1,14 @@
 import {
-	CanActivate,
-	ExecutionContext,
+	type CanActivate,
+	type ExecutionContext,
 	Injectable,
 	UnauthorizedException,
 } from '@nestjs/common'
-import { Reflector } from '@nestjs/core'
-import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
-import { TokenService } from '../services/token.service'
-import { TokenBlacklistService } from '../services/token-blacklist.service'
+import type { Reflector } from '@nestjs/core'
 import { AUTH_COOKIES } from '../constants/cookies'
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
+import type { TokenService } from '../services/token.service'
+import type { TokenBlacklistService } from '../services/token-blacklist.service'
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {

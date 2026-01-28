@@ -1,11 +1,11 @@
 import {
+	type CallHandler,
+	type ExecutionContext,
 	Injectable,
 	type NestInterceptor,
-	type ExecutionContext,
-	type CallHandler,
 } from '@nestjs/common'
 import { Observable } from 'rxjs'
-import { tenantStorage, type TenantData } from './tenant.context'
+import { type TenantData, tenantStorage } from './tenant.context'
 
 @Injectable()
 export class TenantInterceptor implements NestInterceptor {

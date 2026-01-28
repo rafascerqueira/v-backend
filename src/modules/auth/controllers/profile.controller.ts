@@ -1,8 +1,8 @@
-import { Controller, Patch, Body } from '@nestjs/common'
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from '@nestjs/swagger'
+import { Body, Controller, Patch } from '@nestjs/common'
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger'
+import type { AccountService } from '@/modules/users/services/account.service'
 import { CurrentUser } from '../decorators/current-user.decorator'
 import type { TokenPayload } from '../dto/auth-response.dto'
-import { AccountService } from '@/modules/users/services/account.service'
 
 @ApiTags('auth')
 @ApiBearerAuth()
@@ -13,10 +13,7 @@ export class ProfileController {
 	@Patch('profile')
 	@ApiOperation({ summary: 'Update user profile' })
 	@ApiBody({ schema: { example: { name: 'John Doe' } } })
-	async updateProfile(
-		@CurrentUser() user: TokenPayload,
-		@Body() body: { name?: string },
-	) {
+	async updateProfile(@CurrentUser() user: TokenPayload, @Body() body: { name?: string }) {
 		return this.accountService.updateProfile(user.sub, body)
 	}
 }

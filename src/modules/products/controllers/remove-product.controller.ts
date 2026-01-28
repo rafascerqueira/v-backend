@@ -1,6 +1,6 @@
-import { Controller, Delete, Param } from "@nestjs/common";
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { ProductService } from "../services/product.service";
+import { Controller, Delete, Param } from '@nestjs/common'
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { ProductService } from '../services/product.service'
 
 @ApiTags('products')
 @Controller('products')

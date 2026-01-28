@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
-import { PrismaService } from '@/shared/prisma/prisma.service'
-import { TenantContext } from '@/shared/tenant/tenant.context'
+import type { PrismaService } from '@/shared/prisma/prisma.service'
+import type { TenantContext } from '@/shared/tenant/tenant.context'
 
 @Injectable()
 export class DashboardService {
@@ -18,51 +18,45 @@ export class DashboardService {
 
 	async getStats(_accountId: string) {
 		const tenantFilter = this.getTenantFilter()
-		const [
-			totalProducts,
-			totalCustomers,
-			totalOrders,
-			pendingOrders,
-			recentOrders,
-			topProducts,
-		] = await Promise.all([
-			this.prisma.product.count({
-				where: { active: true, deletedAt: null, ...tenantFilter },
-			}),
-			this.prisma.customer.count({
-				where: { active: true, ...tenantFilter },
-			}),
-			this.prisma.order.count({
-				where: tenantFilter,
-			}),
-			this.prisma.order.count({
-				where: { status: 'pending', ...tenantFilter },
-			}),
-			this.prisma.order.findMany({
-				where: tenantFilter,
-				take: 5,
-				orderBy: { createdAt: 'desc' },
-				include: {
-					customer: {
-						select: {
-							name: true,
+		const [totalProducts, totalCustomers, totalOrders, pendingOrders, recentOrders, topProducts] =
+			await Promise.all([
+				this.prisma.product.count({
+					where: { active: true, deletedAt: null, ...tenantFilter },
+				}),
+				this.prisma.customer.count({
+					where: { active: true, ...tenantFilter },
+				}),
+				this.prisma.order.count({
+					where: tenantFilter,
+				}),
+				this.prisma.order.count({
+					where: { status: 'pending', ...tenantFilter },
+				}),
+				this.prisma.order.findMany({
+					where: tenantFilter,
+					take: 5,
+					orderBy: { createdAt: 'desc' },
+					include: {
+						customer: {
+							select: {
+								name: true,
+							},
 						},
 					},
-				},
-			}),
-			this.prisma.order_item.groupBy({
-				by: ['product_id'],
-				_sum: {
-					quantity: true,
-				},
-				orderBy: {
+				}),
+				this.prisma.order_item.groupBy({
+					by: ['product_id'],
 					_sum: {
-						quantity: 'desc',
+						quantity: true,
 					},
-				},
-				take: 5,
-			}),
-		])
+					orderBy: {
+						_sum: {
+							quantity: 'desc',
+						},
+					},
+					take: 5,
+				}),
+			])
 
 		const topProductsWithDetails = await Promise.all(
 			topProducts.map(async (item) => {

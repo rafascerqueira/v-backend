@@ -1,8 +1,8 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
-import { ProductService } from '../services/product.service'
 import { paginationSchema } from '@/shared/dto/pagination.dto'
+import { ProductService } from '../services/product.service'
 
 @ApiTags('products')
 @Controller('products')

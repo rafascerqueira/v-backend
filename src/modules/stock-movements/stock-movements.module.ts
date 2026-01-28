@@ -4,9 +4,9 @@ import { StockMovementsController } from './controllers/stock-movements.controll
 import { StockMovementsService } from './services/stock-movements.service'
 
 @Module({
-  imports: [PrismaModule],
-  controllers: [StockMovementsController],
-  providers: [StockMovementsService],
-  exports: [StockMovementsService],
+	imports: [PrismaModule],
+	controllers: [StockMovementsController],
+	providers: [StockMovementsService],
+	exports: [StockMovementsService],
 })
 export class StockMovementsModule {}

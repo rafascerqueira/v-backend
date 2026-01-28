@@ -9,12 +9,12 @@ import {
 	UnauthorizedException,
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
-import type { FastifyRequest, FastifyReply } from 'fastify'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
-import { TokenService } from '../services/token.service'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
-import { Public } from '../decorators/public.decorator'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
+import { Public } from '../decorators/public.decorator'
+import type { TokenService } from '../services/token.service'
 
 const refreshTokenSchema = z.object({
 	refreshToken: z.string().optional(),

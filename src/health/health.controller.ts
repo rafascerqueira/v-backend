@@ -1,14 +1,14 @@
 import { Controller, Get } from '@nestjs/common'
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger'
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import {
-	HealthCheckService,
+	type DiskHealthIndicator,
 	HealthCheck,
-	PrismaHealthIndicator,
-	MemoryHealthIndicator,
-	DiskHealthIndicator,
+	type HealthCheckService,
+	type MemoryHealthIndicator,
+	type PrismaHealthIndicator,
 } from '@nestjs/terminus'
-import { PrismaService } from '../shared/prisma/prisma.service'
 import { Public } from '../modules/auth/decorators/public.decorator'
+import type { PrismaService } from '../shared/prisma/prisma.service'
 
 @ApiTags('health')
 @Controller('health')
@@ -53,8 +53,6 @@ export class HealthController {
 	@ApiResponse({ status: 200, description: 'Application is ready' })
 	@ApiResponse({ status: 503, description: 'Application is not ready' })
 	readiness() {
-		return this.health.check([
-			() => this.prismaHealth.pingCheck('database', this.prisma),
-		])
+		return this.health.check([() => this.prismaHealth.pingCheck('database', this.prisma)])
 	}
 }

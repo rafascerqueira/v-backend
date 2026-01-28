@@ -1,6 +1,6 @@
 import { Injectable, type NestMiddleware } from '@nestjs/common'
-import type { FastifyRequest, FastifyReply } from 'fastify'
-import { TenantContext } from './tenant.context'
+import type { FastifyReply, FastifyRequest } from 'fastify'
+import type { TenantContext } from './tenant.context'
 
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {
@@ -10,10 +10,7 @@ export class TenantMiddleware implements NestMiddleware {
 		const user = (req as any).user
 
 		if (user?.sub && user?.role) {
-			this.tenantContext.run(
-				{ sellerId: user.sub, role: user.role },
-				() => next(),
-			)
+			this.tenantContext.run({ sellerId: user.sub, role: user.role }, () => next())
 		} else {
 			next()
 		}

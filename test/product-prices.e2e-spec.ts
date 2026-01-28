@@ -1,7 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import { FastifyAdapter } from '@nestjs/platform-fastify'
-import * as request from 'supertest'
+import request from 'supertest'
 import { AppModule } from '../src/app.module'
 import { PrismaService } from '../src/shared/prisma/prisma.service'
 

@@ -4,9 +4,9 @@ import { CatalogController } from './controllers/catalog.controller'
 import { CatalogService } from './services/catalog.service'
 
 @Module({
-  imports: [PrismaModule],
-  controllers: [CatalogController],
-  providers: [CatalogService],
-  exports: [CatalogService],
+	imports: [PrismaModule],
+	controllers: [CatalogController],
+	providers: [CatalogService],
+	exports: [CatalogService],
 })
 export class CatalogModule {}

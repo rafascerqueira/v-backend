@@ -36,6 +36,15 @@ export interface ProductRepository {
 	create(data: CreateProductData): Promise<Product>;
 	findById(id: number): Promise<Product | null>;
 	findAll(sellerId?: string): Promise<Product[]>;
+	findAllPaginated(params: {
+		page: number;
+		limit: number;
+		search?: string;
+		category?: string;
+		status?: string;
+		sortBy?: string;
+		sortOrder?: "asc" | "desc";
+	}): Promise<{ data: Product[]; total: number }>;
 	findBySku(sellerId: string, sku: string): Promise<Product | null>;
 	update(id: number, data: UpdateProductData): Promise<Product>;
 	softDelete(id: number): Promise<Product>;

@@ -1,10 +1,21 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, Query, Req, UseGuards } from '@nestjs/common'
+import {
+	Body,
+	Controller,
+	Delete,
+	Get,
+	Param,
+	Patch,
+	Post,
+	Query,
+	Req,
+	UseGuards,
+} from '@nestjs/common'
+import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger'
-import { CustomersService } from '../services/customers.service'
-import { CreateCustomerDto, createCustomerSchema } from '../dto/create-customer.dto'
-import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { paginationSchema } from '@/shared/dto/pagination.dto'
+import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
+import { type CreateCustomerDto, createCustomerSchema } from '../dto/create-customer.dto'
+import type { CustomersService } from '../services/customers.service'
 
 @ApiTags('customers')
 @Controller('customers')
@@ -67,7 +78,7 @@ export class CustomersController {
 	})
 	update(
 		@Param('id') id: string,
-		@Body(new ZodValidationPipe(createCustomerSchema.partial())) data: Partial<CreateCustomerDto>
+		@Body(new ZodValidationPipe(createCustomerSchema.partial())) data: Partial<CreateCustomerDto>,
 	) {
 		return this.customersService.update(id, data)
 	}

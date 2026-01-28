@@ -1,16 +1,9 @@
-import {
-	Body,
-	Controller,
-	HttpCode,
-	HttpException,
-	HttpStatus,
-	Post,
-} from '@nestjs/common'
+import { Body, Controller, HttpCode, HttpException, HttpStatus, Post } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
-import { AccountService } from '../services/account.service'
-import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
-import { createAccountSchema, type CreateAccountDto } from '../dto/create-account.dto'
 import { Public } from '@/modules/auth/decorators/public.decorator'
+import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
+import { type CreateAccountDto, createAccountSchema } from '../dto/create-account.dto'
+import { AccountService } from '../services/account.service'
 
 @ApiTags('auth')
 @Controller('auth')
@@ -32,9 +25,7 @@ export class CreateAccountController {
 			},
 		},
 	})
-	async handle(
-		@Body(new ZodValidationPipe(createAccountSchema)) body: CreateAccountDto,
-	) {
+	async handle(@Body(new ZodValidationPipe(createAccountSchema)) body: CreateAccountDto) {
 		const { name, email, password } = body
 
 		const account = await this.accountService.findByEmail(email)

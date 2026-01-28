@@ -1,12 +1,12 @@
 import {
-	ExceptionFilter,
+	type ArgumentsHost,
 	Catch,
-	ArgumentsHost,
+	type ExceptionFilter,
 	HttpException,
 	HttpStatus,
 	Logger,
 } from '@nestjs/common'
-import { FastifyReply } from 'fastify'
+import type { FastifyReply } from 'fastify'
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -37,10 +37,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 			error = exception.name
 
 			// Log unexpected errors
-			this.logger.error(
-				`Unexpected error: ${exception.message}`,
-				exception.stack,
-			)
+			this.logger.error(`Unexpected error: ${exception.message}`, exception.stack)
 		}
 
 		// Prisma errors handling

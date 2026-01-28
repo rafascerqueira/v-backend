@@ -1,4 +1,4 @@
-import { Module, Global } from '@nestjs/common'
+import { Global, Module } from '@nestjs/common'
 import { PasswordHasherService } from './password-hasher.service'
 
 @Global()

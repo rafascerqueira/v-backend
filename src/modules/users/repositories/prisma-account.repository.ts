@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common'
-import { PrismaService } from '@/shared/prisma/prisma.service'
+import type { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
-	AccountRepository,
 	Account,
+	AccountRepository,
 	CreateAccountData,
 } from '@/shared/repositories/account.repository'
 

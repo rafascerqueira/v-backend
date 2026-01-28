@@ -1,8 +1,8 @@
-import { Injectable, OnModuleInit } from '@nestjs/common'
-import { JwtService } from '@nestjs/jwt'
-import { readFileSync, existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { TokenPayload, AuthResponseDto } from '../dto/auth-response.dto'
+import { Injectable, type OnModuleInit } from '@nestjs/common'
+import type { JwtService } from '@nestjs/jwt'
+import type { AuthResponseDto, TokenPayload } from '../dto/auth-response.dto'
 
 @Injectable()
 export class TokenService implements OnModuleInit {
@@ -13,9 +13,7 @@ export class TokenService implements OnModuleInit {
 	private useAsymmetric: boolean = false
 
 	constructor(private readonly jwtService: JwtService) {
-		this.accessTokenExpiresIn = this.parseExpiresIn(
-			process.env.JWT_ACCESS_TOKEN_EXPIRES_IN || '1d',
-		)
+		this.accessTokenExpiresIn = this.parseExpiresIn(process.env.JWT_ACCESS_TOKEN_EXPIRES_IN || '1d')
 		this.refreshTokenExpiresIn = this.parseExpiresIn(
 			process.env.JWT_REFRESH_TOKEN_EXPIRES_IN || '7d',
 		)

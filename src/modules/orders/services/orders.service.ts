@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "@/shared/prisma/prisma.service";
 import { TenantContext } from "@/shared/tenant/tenant.context";
 import type {

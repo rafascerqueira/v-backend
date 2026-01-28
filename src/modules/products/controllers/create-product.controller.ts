@@ -1,9 +1,9 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common'
-import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
-import { ProductService } from '../services/product.service'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
-import { createProductSchema, type CreateProductDto } from '../dto/create-product.dto'
+import { type CreateProductDto, createProductSchema } from '../dto/create-product.dto'
+import { ProductService } from '../services/product.service'
 
 @ApiTags('products')
 @Controller('products')

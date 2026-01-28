@@ -1,5 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common'
-import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
+import { Inject, Injectable } from '@nestjs/common'
+import type { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import {
 	ACCOUNT_REPOSITORY,
 	type AccountRepository,
@@ -19,11 +19,7 @@ export class AccountService {
 		private readonly passwordHasher: PasswordHasherService,
 	) {}
 
-	async verifyPassword(
-		password: string,
-		storedHash: string,
-		storedSalt: string,
-	): Promise<boolean> {
+	async verifyPassword(password: string, storedHash: string, storedSalt: string): Promise<boolean> {
 		return this.passwordHasher.verify(password, storedHash, storedSalt)
 	}
 
