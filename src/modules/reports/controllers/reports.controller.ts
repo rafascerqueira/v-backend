@@ -1,7 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
-import type { ReportsService } from '../services/reports.service'
+import { ReportsService } from '../services/reports.service'
 
 @ApiTags('reports')
 @Controller('reports')
@@ -36,5 +36,18 @@ export class ReportsController {
 	@ApiQuery({ name: 'limit', required: false, type: Number })
 	async getCustomersReport(@Query('limit') limit?: string) {
 		return this.reportsService.getCustomersReport(limit ? parseInt(limit) : 10)
+	}
+
+	@Get('charts')
+	@ApiOperation({ summary: 'Get charts data for analytics' })
+	@ApiQuery({ name: 'period', required: false, enum: ['week', 'month', 'year'] })
+	async getChartsData(@Query('period') period?: 'week' | 'month' | 'year') {
+		return this.reportsService.getChartsData(period || 'month')
+	}
+
+	@Get('growth')
+	@ApiOperation({ summary: 'Get growth metrics (current vs previous month)' })
+	async getGrowthMetrics() {
+		return this.reportsService.getGrowthMetrics()
 	}
 }

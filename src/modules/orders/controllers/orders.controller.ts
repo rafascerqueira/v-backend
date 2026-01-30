@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { CheckPlanLimit, PlanLimitsGuard } from '@/modules/subscriptions/guards/plan-limits.guard'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
 import {
 	type CreateOrderDto,
@@ -29,6 +30,8 @@ export class OrdersController {
 
 	@Post()
 	@HttpCode(HttpStatus.CREATED)
+	@UseGuards(PlanLimitsGuard)
+	@CheckPlanLimit('order')
 	@ApiOperation({ summary: 'Create order with items' })
 	@ApiBody({
 		schema: {

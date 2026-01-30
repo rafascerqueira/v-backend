@@ -3,7 +3,7 @@ import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { Public } from '../decorators/public.decorator'
 import { type ForgotPasswordDto, forgotPasswordSchema } from '../dto/forgot-password.dto'
-import type { PasswordResetService } from '../services/password-reset.service'
+import { PasswordResetService } from '../services/password-reset.service'
 
 @ApiTags('auth')
 @Controller('auth')

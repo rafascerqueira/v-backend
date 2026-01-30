@@ -12,7 +12,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { FastifyRequest } from 'fastify'
 import { Public } from '@/modules/auth/decorators/public.decorator'
-import type { WebhookService } from '../services/webhook.service'
+import { WebhookService } from '../services/webhook.service'
 
 @ApiTags('webhooks')
 @Controller('webhooks')

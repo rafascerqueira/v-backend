@@ -11,10 +11,11 @@ import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply } from 'fastify'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '@/modules/auth/constants/cookies'
 import { Public } from '@/modules/auth/decorators/public.decorator'
-import type { TokenService } from '@/modules/auth/services/token.service'
+import { TokenService } from '@/modules/auth/services/token.service'
+import { TwoFactorService } from '@/modules/auth/services/two-factor.service'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { type LoginDto, loginSchema } from '../dto/login.dto'
-import type { AccountService } from '../services/account.service'
+import { AccountService } from '../services/account.service'
 
 @ApiTags('auth')
 @Controller('auth')
@@ -22,6 +23,7 @@ export class LoginController {
 	constructor(
 		private readonly accountService: AccountService,
 		private readonly tokenService: TokenService,
+		private readonly twoFactorService: TwoFactorService,
 	) {}
 
 	@Post('login')
@@ -58,6 +60,24 @@ export class LoginController {
 
 		if (!isPasswordValid) {
 			throw new UnauthorizedException('Invalid e-mail or password')
+		}
+
+		// Check if 2FA is enabled
+		if (account.two_factor_enabled) {
+			const twoFactorToken = body.twoFactorToken
+
+			if (!twoFactorToken) {
+				return {
+					requiresTwoFactor: true,
+					message: 'Please provide your 2FA code',
+				}
+			}
+
+			const isValidToken = await this.twoFactorService.verifyToken(account.id, twoFactorToken)
+
+			if (!isValidToken) {
+				throw new UnauthorizedException('Invalid 2FA code')
+			}
 		}
 
 		// Update last login timestamp

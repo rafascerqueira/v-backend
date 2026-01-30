@@ -6,12 +6,43 @@ import {
 	type CreateCatalogOrderDto,
 	createCatalogOrderSchema,
 } from '../dto/create-catalog-order.dto'
-import type { CatalogService } from '../services/catalog.service'
+import { CatalogService } from '../services/catalog.service'
 
 @ApiTags('catalog')
 @Controller('catalog')
 export class CatalogController {
 	constructor(private readonly service: CatalogService) {}
+
+	@Public()
+	@Get('loja/:slug')
+	@ApiOperation({ summary: 'Get store info by slug (public)' })
+	@ApiParam({ name: 'slug', type: String, description: 'Store slug (e.g., minha-loja)' })
+	@ApiResponse({ status: 200, description: 'Store found' })
+	@ApiResponse({ status: 404, description: 'Store not found' })
+	async getStore(@Param('slug') slug: string) {
+		return this.service.getStoreBySlug(slug)
+	}
+
+	@Public()
+	@Get('loja/:slug/products')
+	@ApiOperation({ summary: 'List products from a specific store (public)' })
+	@ApiParam({ name: 'slug', type: String, description: 'Store slug' })
+	@ApiResponse({ status: 200, description: 'Products listed successfully' })
+	@ApiResponse({ status: 404, description: 'Store not found' })
+	async getStoreProducts(@Param('slug') slug: string) {
+		return this.service.getStoreProducts(slug)
+	}
+
+	@Public()
+	@Get('loja/:slug/products/:id')
+	@ApiOperation({ summary: 'Get product from a specific store (public)' })
+	@ApiParam({ name: 'slug', type: String, description: 'Store slug' })
+	@ApiParam({ name: 'id', type: Number, description: 'Product ID' })
+	@ApiResponse({ status: 200, description: 'Product found' })
+	@ApiResponse({ status: 404, description: 'Product or store not found' })
+	async getStoreProduct(@Param('slug') slug: string, @Param('id') id: string) {
+		return this.service.getStoreProductById(slug, Number(id))
+	}
 
 	@Public()
 	@Get('products')

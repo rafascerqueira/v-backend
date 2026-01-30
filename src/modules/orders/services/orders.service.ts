@@ -162,9 +162,46 @@ export class OrdersService {
 		if (!order) {
 			throw new Error("Order not found or access denied");
 		}
-		return this.prisma.order.update({
-			where: { id },
-			data: { status: status as any },
+
+		// Map order status to billing status
+		const billingStatusMap: Record<
+			string,
+			{ status: string; payment_status: string } | null
+		> = {
+			pending: { status: "pending", payment_status: "pending" },
+			confirmed: { status: "pending", payment_status: "pending" },
+			shipping: { status: "pending", payment_status: "pending" },
+			delivered: { status: "paid", payment_status: "confirmed" },
+			canceled: { status: "canceled", payment_status: "canceled" },
+		};
+
+		const billingUpdate = billingStatusMap[status];
+
+		return this.prisma.$transaction(async (tx) => {
+			// Update order status
+			const updatedOrder = await tx.order.update({
+				where: { id },
+				data: { status: status as any },
+			});
+
+			// Update all related billings if status mapping exists
+			if (billingUpdate) {
+				await tx.billing.updateMany({
+					where: { order_id: id },
+					data: {
+						status: billingUpdate.status as any,
+						payment_status: billingUpdate.payment_status as any,
+						...(status === "delivered"
+							? {
+									payment_date: new Date(),
+									paid_amount: order.total,
+								}
+							: {}),
+					},
+				});
+			}
+
+			return updatedOrder;
 		});
 	}
 

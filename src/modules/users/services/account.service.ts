@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
-import type { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
+import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import {
 	ACCOUNT_REPOSITORY,
 	type AccountRepository,

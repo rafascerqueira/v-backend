@@ -1,17 +1,17 @@
-import { Controller, Get } from '@nestjs/common'
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { Controller, Get } from "@nestjs/common";
+import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import {
-	type DiskHealthIndicator,
+	DiskHealthIndicator,
 	HealthCheck,
-	type HealthCheckService,
-	type MemoryHealthIndicator,
-	type PrismaHealthIndicator,
-} from '@nestjs/terminus'
-import { Public } from '../modules/auth/decorators/public.decorator'
-import type { PrismaService } from '../shared/prisma/prisma.service'
+	HealthCheckService,
+	MemoryHealthIndicator,
+	PrismaHealthIndicator,
+} from "@nestjs/terminus";
+import { Public } from "../modules/auth/decorators/public.decorator";
+import { PrismaService } from "../shared/prisma/prisma.service";
 
-@ApiTags('health')
-@Controller('health')
+@ApiTags("health")
+@Controller("health")
 @Public()
 export class HealthController {
 	constructor(
@@ -24,35 +24,37 @@ export class HealthController {
 
 	@Get()
 	@HealthCheck()
-	@ApiOperation({ summary: 'Check application health' })
-	@ApiResponse({ status: 200, description: 'Application is healthy' })
-	@ApiResponse({ status: 503, description: 'Application is unhealthy' })
+	@ApiOperation({ summary: "Check application health" })
+	@ApiResponse({ status: 200, description: "Application is healthy" })
+	@ApiResponse({ status: 503, description: "Application is unhealthy" })
 	check() {
 		return this.health.check([
-			() => this.prismaHealth.pingCheck('database', this.prisma),
-			() => this.memory.checkHeap('memory_heap', 150 * 1024 * 1024), // 150MB
-			() => this.memory.checkRSS('memory_rss', 300 * 1024 * 1024), // 300MB
+			() => this.prismaHealth.pingCheck("database", this.prisma),
+			() => this.memory.checkHeap("memory_heap", 150 * 1024 * 1024), // 150MB
+			() => this.memory.checkRSS("memory_rss", 300 * 1024 * 1024), // 300MB
 			() =>
-				this.disk.checkStorage('storage', {
-					path: '/',
+				this.disk.checkStorage("storage", {
+					path: "/",
 					thresholdPercent: 0.9,
 				}),
-		])
+		]);
 	}
 
-	@Get('liveness')
-	@ApiOperation({ summary: 'Liveness probe for Kubernetes' })
-	@ApiResponse({ status: 200, description: 'Application is alive' })
+	@Get("liveness")
+	@ApiOperation({ summary: "Liveness probe for Kubernetes" })
+	@ApiResponse({ status: 200, description: "Application is alive" })
 	liveness() {
-		return { status: 'ok', timestamp: new Date().toISOString() }
+		return { status: "ok", timestamp: new Date().toISOString() };
 	}
 
-	@Get('readiness')
+	@Get("readiness")
 	@HealthCheck()
-	@ApiOperation({ summary: 'Readiness probe for Kubernetes' })
-	@ApiResponse({ status: 200, description: 'Application is ready' })
-	@ApiResponse({ status: 503, description: 'Application is not ready' })
+	@ApiOperation({ summary: "Readiness probe for Kubernetes" })
+	@ApiResponse({ status: 200, description: "Application is ready" })
+	@ApiResponse({ status: 503, description: "Application is not ready" })
 	readiness() {
-		return this.health.check([() => this.prismaHealth.pingCheck('database', this.prisma)])
+		return this.health.check([
+			() => this.prismaHealth.pingCheck("database", this.prisma),
+		]);
 	}
 }

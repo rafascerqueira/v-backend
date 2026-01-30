@@ -3,7 +3,7 @@ import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from 
 import type { PlanType } from '@/generated/prisma/client'
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
 import { RolesGuard } from '@/modules/auth/guards/roles.guard'
-import type { AdminService } from '../services/admin.service'
+import { AdminService } from '../services/admin.service'
 
 @ApiTags('admin')
 @Controller('admin')

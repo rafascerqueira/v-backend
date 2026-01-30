@@ -20,7 +20,7 @@ import {
 	type UpdateProductPriceDto,
 	updateProductPriceSchema,
 } from '../dto/update-product-price.dto'
-import type { ProductPricesService } from '../services/product-prices.service'
+import { ProductPricesService } from '../services/product-prices.service'
 
 @ApiTags('product-prices')
 @Controller()

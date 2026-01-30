@@ -1,3 +1,4 @@
+import cookie from "@fastify/cookie";
 import { Test, type TestingModule } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import {
@@ -18,6 +19,7 @@ describe("AppController (e2e)", () => {
 		app = moduleFixture.createNestApplication<NestFastifyApplication>(
 			new FastifyAdapter(),
 		);
+		await app.register(cookie as any, { secret: "test-secret" });
 		await app.init();
 		await app.getHttpAdapter().getInstance().ready();
 	});

@@ -1,10 +1,85 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
-import type { PrismaService } from '@/shared/prisma/prisma.service'
-import type { CreateCatalogOrderDto } from '../dto/create-catalog-order.dto'
+import {
+	BadRequestException,
+	Injectable,
+	NotFoundException,
+} from "@nestjs/common";
+import { PrismaService } from "@/shared/prisma/prisma.service";
+import type { CreateCatalogOrderDto } from "../dto/create-catalog-order.dto";
 
 @Injectable()
 export class CatalogService {
 	constructor(private readonly prisma: PrismaService) {}
+
+	async getStoreBySlug(slug: string) {
+		const store = await this.prisma.account.findUnique({
+			where: { store_slug: slug },
+			select: {
+				id: true,
+				name: true,
+				store_slug: true,
+				store_name: true,
+				store_description: true,
+				store_logo: true,
+				store_banner: true,
+				store_phone: true,
+				store_whatsapp: true,
+			},
+		});
+
+		if (!store) {
+			throw new NotFoundException("Loja não encontrada");
+		}
+
+		return {
+			id: store.id,
+			slug: store.store_slug,
+			name: store.store_name || store.name,
+			description: store.store_description,
+			logo: store.store_logo,
+			banner: store.store_banner,
+			phone: store.store_phone,
+			whatsapp: store.store_whatsapp,
+		};
+	}
+
+	async getStoreProducts(slug: string) {
+		const store = await this.prisma.account.findUnique({
+			where: { store_slug: slug },
+			select: { id: true },
+		});
+
+		if (!store) {
+			throw new NotFoundException("Loja não encontrada");
+		}
+
+		return this.getProducts(store.id);
+	}
+
+	async getStoreProductById(slug: string, productId: number) {
+		const store = await this.prisma.account.findUnique({
+			where: { store_slug: slug },
+			select: { id: true },
+		});
+
+		if (!store) {
+			throw new NotFoundException("Loja não encontrada");
+		}
+
+		const product = await this.prisma.product.findFirst({
+			where: {
+				id: productId,
+				seller_id: store.id,
+				active: true,
+				deletedAt: null,
+			},
+		});
+
+		if (!product) {
+			throw new NotFoundException("Produto não encontrado");
+		}
+
+		return this.getProductById(productId);
+	}
 
 	async getProducts(sellerId?: string) {
 		const products = await this.prisma.product.findMany({
@@ -13,36 +88,36 @@ export class CatalogService {
 				deletedAt: null,
 				...(sellerId && { seller_id: sellerId }),
 			},
-			orderBy: { name: 'asc' },
-		})
+			orderBy: { name: "asc" },
+		});
 
-		const productIds = products.map((p) => p.id)
+		const productIds = products.map((p) => p.id);
 
 		const prices = await this.prisma.product_price.findMany({
 			where: {
 				product_id: { in: productIds },
 				active: true,
-				price_type: 'sale',
+				price_type: "sale",
 				OR: [{ valid_from: null }, { valid_from: { lte: new Date() } }],
 			},
-			orderBy: { createdAt: 'desc' },
-		})
+			orderBy: { createdAt: "desc" },
+		});
 
 		const stocks = await this.prisma.store_stock.findMany({
 			where: { product_id: { in: productIds } },
-		})
+		});
 
-		const priceMap = new Map<number, number>()
+		const priceMap = new Map<number, number>();
 		for (const price of prices) {
 			if (!priceMap.has(price.product_id)) {
-				priceMap.set(price.product_id, price.price)
+				priceMap.set(price.product_id, price.price);
 			}
 		}
 
-		const stockMap = new Map<number, number>()
+		const stockMap = new Map<number, number>();
 		for (const stock of stocks) {
-			const available = stock.quantity - stock.reserved_quantity
-			stockMap.set(stock.product_id, available > 0 ? available : 0)
+			const available = stock.quantity - stock.reserved_quantity;
+			stockMap.set(stock.product_id, available > 0 ? available : 0);
 		}
 
 		return products
@@ -57,7 +132,7 @@ export class CatalogService {
 				images: product.images,
 				price: priceMap.get(product.id) || 0,
 				availableStock: stockMap.get(product.id) || 0,
-			}))
+			}));
 	}
 
 	async getCustomerById(id: string) {
@@ -74,21 +149,21 @@ export class CatalogService {
 				state: true,
 				zip_code: true,
 			},
-		})
+		});
 
 		if (!customer) {
-			throw new NotFoundException('Cliente não encontrado')
+			throw new NotFoundException("Cliente não encontrado");
 		}
 
 		const address = customer.address as {
-			street?: string
-			number?: string
-			complement?: string
-			neighborhood?: string
-		} | null
+			street?: string;
+			number?: string;
+			complement?: string;
+			neighborhood?: string;
+		} | null;
 
 		// Return only first name for public display (privacy)
-		const firstName = customer.name.split(' ')[0]
+		const firstName = customer.name.split(" ")[0];
 
 		return {
 			id: customer.id,
@@ -97,14 +172,14 @@ export class CatalogService {
 			email: customer.email,
 			phone: customer.phone,
 			document: customer.document,
-			address: address?.street || '',
-			number: address?.number || '',
-			complement: address?.complement || '',
-			neighborhood: address?.neighborhood || '',
+			address: address?.street || "",
+			number: address?.number || "",
+			complement: address?.complement || "",
+			neighborhood: address?.neighborhood || "",
 			city: customer.city,
 			state: customer.state,
 			zip_code: customer.zip_code,
-		}
+		};
 	}
 
 	async getProductById(id: number) {
@@ -114,27 +189,27 @@ export class CatalogService {
 				active: true,
 				deletedAt: null,
 			},
-		})
+		});
 
 		if (!product) {
-			throw new NotFoundException('Produto não encontrado')
+			throw new NotFoundException("Produto não encontrado");
 		}
 
 		const price = await this.prisma.product_price.findFirst({
 			where: {
 				product_id: id,
 				active: true,
-				price_type: 'sale',
+				price_type: "sale",
 				OR: [{ valid_from: null }, { valid_from: { lte: new Date() } }],
 			},
-			orderBy: { createdAt: 'desc' },
-		})
+			orderBy: { createdAt: "desc" },
+		});
 
 		const stock = await this.prisma.store_stock.findUnique({
 			where: { product_id: id },
-		})
+		});
 
-		const available = stock ? stock.quantity - stock.reserved_quantity : 0
+		const available = stock ? stock.quantity - stock.reserved_quantity : 0;
 
 		return {
 			id: product.id,
@@ -147,24 +222,26 @@ export class CatalogService {
 			specifications: product.specifications,
 			price: price?.price || 0,
 			availableStock: available > 0 ? available : 0,
-		}
+		};
 	}
 
 	async createOrder(dto: CreateCatalogOrderDto) {
-		const { customer, items, notes } = dto
+		const { customer, items, notes } = dto;
 
 		if (items.length === 0) {
-			throw new BadRequestException('O pedido deve ter pelo menos um item')
+			throw new BadRequestException("O pedido deve ter pelo menos um item");
 		}
 
 		// Verify products exist and have stock
-		const productIds = items.map((item) => item.product_id)
+		const productIds = items.map((item) => item.product_id);
 		const products = await this.prisma.product.findMany({
 			where: { id: { in: productIds }, active: true, deletedAt: null },
-		})
+		});
 
 		if (products.length !== productIds.length) {
-			throw new BadRequestException('Um ou mais produtos não foram encontrados')
+			throw new BadRequestException(
+				"Um ou mais produtos não foram encontrados",
+			);
 		}
 
 		// Get prices
@@ -172,35 +249,41 @@ export class CatalogService {
 			where: {
 				product_id: { in: productIds },
 				active: true,
-				price_type: 'sale',
+				price_type: "sale",
 			},
-			orderBy: { createdAt: 'desc' },
-		})
+			orderBy: { createdAt: "desc" },
+		});
 
-		const priceMap = new Map<number, number>()
+		const priceMap = new Map<number, number>();
 		for (const price of prices) {
 			if (!priceMap.has(price.product_id)) {
-				priceMap.set(price.product_id, price.price)
+				priceMap.set(price.product_id, price.price);
 			}
 		}
 
 		// Find or create customer
-		let customerId: string
+		let customerId: string;
 
 		const existingCustomer = await this.prisma.customer.findFirst({
 			where: {
-				OR: [{ email: customer.email }, { phone: customer.phone }, { document: customer.document }],
+				OR: [
+					{ email: customer.email },
+					{ phone: customer.phone },
+					{ document: customer.document },
+				],
 			},
-		})
+		});
 
 		if (existingCustomer) {
-			customerId = existingCustomer.id
+			customerId = existingCustomer.id;
 		} else {
 			// Get seller_id from one of the products
-			const firstProduct = products[0]
-			const sellerId = firstProduct?.seller_id
+			const firstProduct = products[0];
+			const sellerId = firstProduct?.seller_id;
 			if (!sellerId) {
-				throw new BadRequestException('Não foi possível identificar o vendedor')
+				throw new BadRequestException(
+					"Não foi possível identificar o vendedor",
+				);
 			}
 
 			const newCustomer = await this.prisma.customer.create({
@@ -213,43 +296,43 @@ export class CatalogService {
 					address: {
 						street: customer.address,
 						number: customer.number,
-						complement: customer.complement || '',
+						complement: customer.complement || "",
 						neighborhood: customer.neighborhood,
 					},
 					city: customer.city,
 					state: customer.state,
 					zip_code: customer.zip_code,
 				},
-			})
-			customerId = newCustomer.id
+			});
+			customerId = newCustomer.id;
 		}
 
 		// Generate order number
 		const lastOrder = await this.prisma.order.findFirst({
-			orderBy: { id: 'desc' },
+			orderBy: { id: "desc" },
 			select: { id: true },
-		})
-		const orderNumber = `PED-${String((lastOrder?.id || 0) + 1).padStart(6, '0')}`
+		});
+		const orderNumber = `PED-${String((lastOrder?.id || 0) + 1).padStart(6, "0")}`;
 
 		// Calculate totals
 		const orderItems = items.map((item) => {
-			const unitPrice = priceMap.get(item.product_id) || 0
+			const unitPrice = priceMap.get(item.product_id) || 0;
 			return {
 				product_id: item.product_id,
 				quantity: item.quantity,
 				unit_price: unitPrice,
 				discount: 0,
 				total: unitPrice * item.quantity,
-			}
-		})
+			};
+		});
 
-		const subtotal = orderItems.reduce((acc, item) => acc + item.total, 0)
+		const subtotal = orderItems.reduce((acc, item) => acc + item.total, 0);
 
 		// Get seller_id from product
-		const firstProduct = products[0]
-		const sellerId = firstProduct?.seller_id
+		const firstProduct = products[0];
+		const sellerId = firstProduct?.seller_id;
 		if (!sellerId) {
-			throw new BadRequestException('Não foi possível identificar o vendedor')
+			throw new BadRequestException("Não foi possível identificar o vendedor");
 		}
 
 		// Create order with items
@@ -258,14 +341,14 @@ export class CatalogService {
 				seller_id: sellerId,
 				order_number: orderNumber,
 				customer_id: customerId,
-				status: 'pending',
-				payment_status: 'pending',
+				status: "pending",
+				payment_status: "pending",
 				subtotal,
 				discount: 0,
 				total: subtotal,
 				notes: notes || `Pedido via catálogo online`,
 				metadata: {
-					source: 'catalog',
+					source: "catalog",
 					customer_address: {
 						street: customer.address,
 						number: customer.number,
@@ -292,7 +375,7 @@ export class CatalogService {
 					select: { id: true, name: true, email: true, phone: true },
 				},
 			},
-		})
+		});
 
 		return {
 			id: order.id,
@@ -306,7 +389,7 @@ export class CatalogService {
 				unit_price: item.unit_price,
 				total: item.total,
 			})),
-			message: 'Pedido criado com sucesso! Em breve entraremos em contato.',
-		}
+			message: "Pedido criado com sucesso! Em breve entraremos em contato.",
+		};
 	}
 }

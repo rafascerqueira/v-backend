@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Req } from '@nestjs/common'
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { PLAN_LIMITS, PLAN_NAMES, PLAN_PRICES } from '../constants/plan-limits'
-import type { SubscriptionService } from '../services/subscription.service'
+import { SubscriptionService } from '../services/subscription.service'
 
 @ApiTags('subscriptions')
 @Controller('subscriptions')

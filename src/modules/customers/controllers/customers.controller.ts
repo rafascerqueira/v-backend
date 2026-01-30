@@ -12,10 +12,11 @@ import {
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { CheckPlanLimit, PlanLimitsGuard } from '@/modules/subscriptions/guards/plan-limits.guard'
 import { paginationSchema } from '@/shared/dto/pagination.dto'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { type CreateCustomerDto, createCustomerSchema } from '../dto/create-customer.dto'
-import type { CustomersService } from '../services/customers.service'
+import { CustomersService } from '../services/customers.service'
 
 @ApiTags('customers')
 @Controller('customers')
@@ -24,6 +25,8 @@ export class CustomersController {
 	constructor(private readonly customersService: CustomersService) {}
 
 	@Post()
+	@UseGuards(PlanLimitsGuard)
+	@CheckPlanLimit('customer')
 	@ApiOperation({ summary: 'Create a new customer' })
 	@ApiResponse({ status: 201, description: 'Customer created successfully' })
 	@ApiResponse({ status: 409, description: 'Email or phone already exists' })

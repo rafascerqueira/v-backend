@@ -2,8 +2,8 @@ import { Controller, Headers, HttpCode, HttpStatus, Post, Req, Res } from '@nest
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
-import type { TokenService } from '../services/token.service'
-import type { TokenBlacklistService } from '../services/token-blacklist.service'
+import { TokenService } from '../services/token.service'
+import { TokenBlacklistService } from '../services/token-blacklist.service'
 
 @ApiTags('auth')
 @Controller('auth')

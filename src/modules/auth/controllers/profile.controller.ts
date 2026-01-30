@@ -1,6 +1,6 @@
 import { Body, Controller, Patch } from '@nestjs/common'
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger'
-import type { AccountService } from '@/modules/users/services/account.service'
+import { AccountService } from '@/modules/users/services/account.service'
 import { CurrentUser } from '../decorators/current-user.decorator'
 import type { TokenPayload } from '../dto/auth-response.dto'
 

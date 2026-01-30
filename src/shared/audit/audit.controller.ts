@@ -1,6 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common'
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
-import type { AuditService } from './audit.service'
+import { AuditService } from './audit.service'
 
 @ApiTags('audit')
 @Controller('audit')

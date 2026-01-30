@@ -1,214 +1,217 @@
-import { Test, type TestingModule } from '@nestjs/testing'
-import type { NestFastifyApplication } from '@nestjs/platform-fastify'
-import { FastifyAdapter } from '@nestjs/platform-fastify'
-import request from 'supertest'
-import { AppModule } from '../src/app.module'
-import { PrismaService } from '../src/shared/prisma/prisma.service'
+import cookie from "@fastify/cookie";
+import { Test, type TestingModule } from "@nestjs/testing";
+import type { NestFastifyApplication } from "@nestjs/platform-fastify";
+import { FastifyAdapter } from "@nestjs/platform-fastify";
+import request from "supertest";
+import { AppModule } from "../src/app.module";
+import { PrismaService } from "../src/shared/prisma/prisma.service";
 
-describe('Customers (e2e)', () => {
-	let app: NestFastifyApplication
-	let prisma: PrismaService
+describe("Customers (e2e)", () => {
+	let app: NestFastifyApplication;
+	let prisma: PrismaService;
 
 	// Global DB setup/teardown is handled by Jest globalSetup/globalTeardown
 
 	beforeEach(async () => {
 		const moduleFixture: TestingModule = await Test.createTestingModule({
 			imports: [AppModule],
-		}).compile()
+		}).compile();
 
 		app = moduleFixture.createNestApplication<NestFastifyApplication>(
 			new FastifyAdapter(),
-		)
-		prisma = app.get<PrismaService>(PrismaService)
+		);
+		prisma = app.get<PrismaService>(PrismaService);
 
 		const { ZodExceptionFilter } = await import(
-			'../src/shared/filters/zod-exception.filter'
-		)
+			"../src/shared/filters/zod-exception.filter"
+		);
 		const { GlobalExceptionFilter } = await import(
-			'../src/shared/filters/global-exception.filter'
-		)
+			"../src/shared/filters/global-exception.filter"
+		);
 
-		app.useGlobalFilters(new GlobalExceptionFilter(), new ZodExceptionFilter())
+		app.useGlobalFilters(new GlobalExceptionFilter(), new ZodExceptionFilter());
 
-		await app.init()
-		await app.getHttpAdapter().getInstance().ready()
-	})
+		await app.register(cookie as any, { secret: "test-secret" });
+
+		await app.init();
+		await app.getHttpAdapter().getInstance().ready();
+	});
 
 	afterEach(async () => {
-		await prisma.customer.deleteMany()
-		await app.close()
-	})
+		await prisma.customer.deleteMany();
+		await app.close();
+	});
 
-	describe('/customers (POST)', () => {
+	describe("/customers (POST)", () => {
 		const validCustomerData = {
-			name: 'João Silva',
-			email: 'joao@example.com',
-			phone: '11999999999',
-			document: '12345678901',
+			name: "João Silva",
+			email: "joao@example.com",
+			phone: "11999999999",
+			document: "12345678901",
 			address: {
-				street: 'Rua A',
-				number: '123',
-				complement: 'Apto 101',
-				neighborhood: 'Centro',
+				street: "Rua A",
+				number: "123",
+				complement: "Apto 101",
+				neighborhood: "Centro",
 			},
-			city: 'São Paulo',
-			state: 'SP',
-			zip_code: '01234-567',
-		}
+			city: "São Paulo",
+			state: "SP",
+			zip_code: "01234-567",
+		};
 
-		it('should create a customer successfully', () => {
+		it("should create a customer successfully", () => {
 			return request(app.getHttpServer())
-				.post('/customers')
+				.post("/customers")
 				.send(validCustomerData)
-				.expect(201)
-		})
+				.expect(201);
+		});
 
-		it('should reject duplicate email', async () => {
+		it("should reject duplicate email", async () => {
 			await request(app.getHttpServer())
-				.post('/customers')
+				.post("/customers")
 				.send(validCustomerData)
-				.expect(201)
+				.expect(201);
 
 			const duplicateData = {
 				...validCustomerData,
-				phone: '11888888888',
-				document: '98765432101',
-			}
+				phone: "11888888888",
+				document: "98765432101",
+			};
 
 			return request(app.getHttpServer())
-				.post('/customers')
+				.post("/customers")
 				.send(duplicateData)
-				.expect(409)
-		})
+				.expect(409);
+		});
 
-		it('should reject duplicate phone', async () => {
+		it("should reject duplicate phone", async () => {
 			await request(app.getHttpServer())
-				.post('/customers')
+				.post("/customers")
 				.send(validCustomerData)
-				.expect(201)
+				.expect(201);
 
 			const duplicateData = {
 				...validCustomerData,
-				email: 'outro@example.com',
-				document: '98765432101',
-			}
+				email: "outro@example.com",
+				document: "98765432101",
+			};
 
 			return request(app.getHttpServer())
-				.post('/customers')
+				.post("/customers")
 				.send(duplicateData)
-				.expect(409)
-		})
+				.expect(409);
+		});
 
-		it('should reject invalid email format', () => {
+		it("should reject invalid email format", () => {
 			const invalidData = {
 				...validCustomerData,
-				email: 'invalid-email',
-			}
+				email: "invalid-email",
+			};
 
 			return request(app.getHttpServer())
-				.post('/customers')
+				.post("/customers")
 				.send(invalidData)
-				.expect(400)
-		})
+				.expect(400);
+		});
 
-		it('should reject invalid phone format', () => {
+		it("should reject invalid phone format", () => {
 			const invalidData = {
 				...validCustomerData,
-				phone: '123',
-			}
+				phone: "123",
+			};
 
 			return request(app.getHttpServer())
-				.post('/customers')
+				.post("/customers")
 				.send(invalidData)
-				.expect(400)
-		})
+				.expect(400);
+		});
 
-		it('should reject invalid state code', () => {
+		it("should reject invalid state code", () => {
 			const invalidData = {
 				...validCustomerData,
-				state: 'XXX',
-			}
+				state: "XXX",
+			};
 
 			return request(app.getHttpServer())
-				.post('/customers')
+				.post("/customers")
 				.send(invalidData)
-				.expect(400)
-		})
-	})
+				.expect(400);
+		});
+	});
 
-	describe('/customers (GET)', () => {
-		it('should list all customers', async () => {
+	describe("/customers (GET)", () => {
+		it("should list all customers", async () => {
 			const customer1 = {
-				name: 'Customer 1',
-				email: 'customer1@example.com',
-				phone: '11111111111',
-				document: '11111111111',
-				address: { street: 'Rua 1' },
-				city: 'City 1',
-				state: 'SP',
-				zip_code: '11111-111',
-			}
+				name: "Customer 1",
+				email: "customer1@example.com",
+				phone: "11111111111",
+				document: "11111111111",
+				address: { street: "Rua 1" },
+				city: "City 1",
+				state: "SP",
+				zip_code: "11111-111",
+			};
 
 			const customer2 = {
-				name: 'Customer 2',
-				email: 'customer2@example.com',
-				phone: '22222222222',
-				document: '22222222222',
-				address: { street: 'Rua 2' },
-				city: 'City 2',
-				state: 'RJ',
-				zip_code: '22222-222',
-			}
+				name: "Customer 2",
+				email: "customer2@example.com",
+				phone: "22222222222",
+				document: "22222222222",
+				address: { street: "Rua 2" },
+				city: "City 2",
+				state: "RJ",
+				zip_code: "22222-222",
+			};
 
 			await prisma.customer.createMany({
 				data: [customer1, customer2],
-			})
+			});
 
 			const response = await request(app.getHttpServer())
-				.get('/customers')
-				.expect(200)
+				.get("/customers")
+				.expect(200);
 
-			expect(response.body).toHaveLength(2)
-			expect(response.body[0]).toHaveProperty('name')
-			expect(response.body[0]).toHaveProperty('email')
-		})
+			expect(response.body).toHaveLength(2);
+			expect(response.body[0]).toHaveProperty("name");
+			expect(response.body[0]).toHaveProperty("email");
+		});
 
-		it('should return empty array when no customers exist', async () => {
+		it("should return empty array when no customers exist", async () => {
 			const response = await request(app.getHttpServer())
-				.get('/customers')
-				.expect(200)
+				.get("/customers")
+				.expect(200);
 
-			expect(response.body).toEqual([])
-		})
-	})
+			expect(response.body).toEqual([]);
+		});
+	});
 
-	describe('/customers/:id (GET)', () => {
-		it('should get customer by id', async () => {
+	describe("/customers/:id (GET)", () => {
+		it("should get customer by id", async () => {
 			const customer = await prisma.customer.create({
 				data: {
-					name: 'Test Customer',
-					email: 'test@example.com',
-					phone: '33333333333',
-					document: '33333333333',
-					address: { street: 'Test Street' },
-					city: 'Test City',
-					state: 'SP',
-					zip_code: '33333-333',
+					name: "Test Customer",
+					email: "test@example.com",
+					phone: "33333333333",
+					document: "33333333333",
+					address: { street: "Test Street" },
+					city: "Test City",
+					state: "SP",
+					zip_code: "33333-333",
 				},
-			})
+			});
 
 			const response = await request(app.getHttpServer())
 				.get(`/customers/${customer.id}`)
-				.expect(200)
+				.expect(200);
 
-			expect(response.body.id).toBe(customer.id)
-			expect(response.body.name).toBe(customer.name)
-		})
+			expect(response.body.id).toBe(customer.id);
+			expect(response.body.name).toBe(customer.name);
+		});
 
-		it('should return 404 for non-existent customer', () => {
+		it("should return 404 for non-existent customer", () => {
 			return request(app.getHttpServer())
-				.get('/customers/non-existent-id')
-				.expect(404)
-		})
-	})
-})
+				.get("/customers/non-existent-id")
+				.expect(404);
+		});
+	});
+});

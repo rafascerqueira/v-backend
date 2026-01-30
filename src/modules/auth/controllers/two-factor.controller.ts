@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Request } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger'
-import type { TwoFactorService } from '../services/two-factor.service'
+import { TwoFactorService } from '../services/two-factor.service'
 
 @ApiTags('auth')
 @Controller('auth/2fa')
@@ -39,6 +39,28 @@ export class TwoFactorController {
 	@ApiOperation({ summary: 'Check if 2FA is enabled' })
 	async status(@Request() req: any) {
 		const enabled = await this.twoFactorService.isTwoFactorEnabled(req.user.sub)
-		return { enabled }
+		const backupCodesRemaining = await this.twoFactorService.getRemainingBackupCodesCount(req.user.sub)
+		return { enabled, backupCodesRemaining }
+	}
+
+	@Post('backup-codes')
+	@ApiOperation({ summary: 'Generate new backup codes (invalidates old ones)' })
+	async generateBackupCodes(@Request() req: any) {
+		const codes = await this.twoFactorService.generateBackupCodes(req.user.sub)
+		return {
+			codes,
+			message: 'Guarde esses códigos em local seguro. Cada código só pode ser usado uma vez.',
+		}
+	}
+
+	@Post('verify-backup')
+	@ApiOperation({ summary: 'Verify a backup code (for recovery)' })
+	@ApiBody({ schema: { example: { code: 'ABCD-1234' } } })
+	async verifyBackupCode(@Request() req: any, @Body('code') code: string) {
+		const isValid = await this.twoFactorService.verifyBackupCode(req.user.sub, code)
+		if (!isValid) {
+			return { valid: false, message: 'Código inválido ou já utilizado' }
+		}
+		return { valid: true, message: 'Código verificado com sucesso' }
 	}
 }

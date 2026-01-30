@@ -6,7 +6,7 @@ import {
 	type CreateStockMovementDto,
 	createStockMovementSchema,
 } from '../dto/create-stock-movement.dto'
-import type { StockMovementsService } from '../services/stock-movements.service'
+import { StockMovementsService } from '../services/stock-movements.service'
 
 @ApiTags('stock-movements')
 @Controller('stock-movements')

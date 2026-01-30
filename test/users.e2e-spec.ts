@@ -1,97 +1,102 @@
-import { Test, type TestingModule } from '@nestjs/testing';
-import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { FastifyAdapter } from '@nestjs/platform-fastify';
-import request from 'supertest';
-import { AppModule } from '../src/app.module';
-import { PrismaService } from '../src/shared/prisma/prisma.service';
+import cookie from "@fastify/cookie";
+import { Test, type TestingModule } from "@nestjs/testing";
+import type { NestFastifyApplication } from "@nestjs/platform-fastify";
+import { FastifyAdapter } from "@nestjs/platform-fastify";
+import request from "supertest";
+import { AppModule } from "../src/app.module";
+import { PrismaService } from "../src/shared/prisma/prisma.service";
 
-describe('Users (e2e)', () => {
-  let app: NestFastifyApplication;
-  let prisma: PrismaService;
+describe("Users (e2e)", () => {
+	let app: NestFastifyApplication;
+	let prisma: PrismaService;
 
-  // Global DB lifecycle handled by Jest globalSetup/globalTeardown
+	// Global DB lifecycle handled by Jest globalSetup/globalTeardown
 
-  beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
+	beforeEach(async () => {
+		const moduleFixture: TestingModule = await Test.createTestingModule({
+			imports: [AppModule],
+		}).compile();
 
-    app = moduleFixture.createNestApplication<NestFastifyApplication>(
-      new FastifyAdapter(),
-    );
-    prisma = app.get<PrismaService>(PrismaService);
+		app = moduleFixture.createNestApplication<NestFastifyApplication>(
+			new FastifyAdapter(),
+		);
+		prisma = app.get<PrismaService>(PrismaService);
 
-    const { ZodExceptionFilter } = await import('../src/shared/filters/zod-exception.filter');
-    app.useGlobalFilters(new ZodExceptionFilter());
+		const { ZodExceptionFilter } = await import(
+			"../src/shared/filters/zod-exception.filter"
+		);
+		app.useGlobalFilters(new ZodExceptionFilter());
 
-    await app.init();
-    await app.getHttpAdapter().getInstance().ready();
-  });
+		await app.register(cookie as any, { secret: "test-secret" });
 
-  afterEach(async () => {
-    await prisma.account.deleteMany();
-    await app.close();
-  });
+		await app.init();
+		await app.getHttpAdapter().getInstance().ready();
+	});
 
-  describe('/create-account (POST)', () => {
-    const validAccountData = {
-      name: 'John Doe',
-      email: 'john@example.com',
-      password: 'Password123',
-    };
+	afterEach(async () => {
+		await prisma.account.deleteMany();
+		await app.close();
+	});
 
-    it('should create account successfully', () => {
-      return request(app.getHttpServer())
-        .post('/create-account')
-        .send(validAccountData)
-        .expect(201);
-    });
+	describe("/create-account (POST)", () => {
+		const validAccountData = {
+			name: "John Doe",
+			email: "john@example.com",
+			password: "Password123",
+		};
 
-    it('should reject duplicate email', async () => {
-      await request(app.getHttpServer())
-        .post('/create-account')
-        .send(validAccountData)
-        .expect(201);
+		it("should create account successfully", () => {
+			return request(app.getHttpServer())
+				.post("/create-account")
+				.send(validAccountData)
+				.expect(201);
+		});
 
-      return request(app.getHttpServer())
-        .post('/create-account')
-        .send(validAccountData)
-        .expect(400);
-    });
+		it("should reject duplicate email", async () => {
+			await request(app.getHttpServer())
+				.post("/create-account")
+				.send(validAccountData)
+				.expect(201);
 
-    it('should reject invalid email format', () => {
-      const invalidData = {
-        ...validAccountData,
-        email: 'invalid-email',
-      };
+			return request(app.getHttpServer())
+				.post("/create-account")
+				.send(validAccountData)
+				.expect(400);
+		});
 
-      return request(app.getHttpServer())
-        .post('/create-account')
-        .send(invalidData)
-        .expect(400);
-    });
+		it("should reject invalid email format", () => {
+			const invalidData = {
+				...validAccountData,
+				email: "invalid-email",
+			};
 
-    it('should reject short password', () => {
-      const invalidData = {
-        ...validAccountData,
-        password: '123',
-      };
+			return request(app.getHttpServer())
+				.post("/create-account")
+				.send(invalidData)
+				.expect(400);
+		});
 
-      return request(app.getHttpServer())
-        .post('/create-account')
-        .send(invalidData)
-        .expect(400);
-    });
+		it("should reject short password", () => {
+			const invalidData = {
+				...validAccountData,
+				password: "123",
+			};
 
-    it('should reject missing required fields', () => {
-      const incompleteData = {
-        name: 'John Doe',
-      };
+			return request(app.getHttpServer())
+				.post("/create-account")
+				.send(invalidData)
+				.expect(400);
+		});
 
-      return request(app.getHttpServer())
-        .post('/create-account')
-        .send(incompleteData)
-        .expect(400);
-    });
-  });
+		it("should reject missing required fields", () => {
+			const incompleteData = {
+				name: "John Doe",
+			};
+
+			return request(app.getHttpServer())
+				.post("/create-account")
+				.send(incompleteData)
+				.expect(400);
+		});
+	});
 });

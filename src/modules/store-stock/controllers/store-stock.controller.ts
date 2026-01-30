@@ -3,7 +3,7 @@ import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
 import { type UpdateStoreStockDto, updateStoreStockSchema } from '../dto/update-store-stock.dto'
-import type { StoreStockService } from '../services/store-stock.service'
+import { StoreStockService } from '../services/store-stock.service'
 
 @ApiTags('store-stock')
 @Controller('store-stock')

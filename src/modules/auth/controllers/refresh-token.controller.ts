@@ -14,7 +14,7 @@ import { z } from 'zod'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
 import { Public } from '../decorators/public.decorator'
-import type { TokenService } from '../services/token.service'
+import { TokenService } from '../services/token.service'
 
 const refreshTokenSchema = z.object({
 	refreshToken: z.string().optional(),
