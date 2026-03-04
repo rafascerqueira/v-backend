@@ -1,13 +1,13 @@
 import { Test } from '@nestjs/testing'
 import { ProductPricesService } from './product-prices.service'
-import { PrismaService } from '@/shared/prisma/prisma.service'
+import { PRODUCT_PRICE_REPOSITORY } from '@/shared/repositories/product-price.repository'
 
-const prismaMock = {
-  product_price: {
-    findMany: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-  },
+const repositoryMock = {
+  findByProduct: jest.fn(),
+  findById: jest.fn(),
+  create: jest.fn(),
+  update: jest.fn(),
+  deactivate: jest.fn(),
 }
 
 describe('ProductPricesService', () => {
@@ -15,27 +15,26 @@ describe('ProductPricesService', () => {
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
-      providers: [ProductPricesService, { provide: PrismaService, useValue: prismaMock }],
+      providers: [
+        ProductPricesService,
+        { provide: PRODUCT_PRICE_REPOSITORY, useValue: repositoryMock },
+      ],
     }).compile()
 
     service = module.get(ProductPricesService)
     jest.clearAllMocks()
   })
 
-  it('listByProduct should call prisma with correct where/orderBy', async () => {
-    prismaMock.product_price.findMany.mockResolvedValueOnce([])
-    const productId = 10
+  it('listByProduct should delegate to repository', async () => {
+    repositoryMock.findByProduct.mockResolvedValueOnce([])
 
-    const result = await service.listByProduct(productId)
+    const result = await service.listByProduct(10)
 
-    expect(prismaMock.product_price.findMany).toHaveBeenCalledWith({
-      where: { product_id: productId },
-      orderBy: [{ valid_from: 'desc' }, { createdAt: 'desc' }],
-    })
+    expect(repositoryMock.findByProduct).toHaveBeenCalledWith(10)
     expect(result).toEqual([])
   })
 
-  it('create should map dates and call prisma.create with product_id', async () => {
+  it('create should map dates and delegate to repository', async () => {
     const dto = {
       price: 1000,
       price_type: 'sale' as const,
@@ -44,43 +43,47 @@ describe('ProductPricesService', () => {
       active: true,
     }
     const expected = { id: 1, product_id: 20, price: 1000 }
-    prismaMock.product_price.create.mockResolvedValueOnce(expected)
+    repositoryMock.create.mockResolvedValueOnce(expected)
 
     const res = await service.create(20, dto)
 
-    expect(prismaMock.product_price.create).toHaveBeenCalled()
-    const call = prismaMock.product_price.create.mock.calls[0][0]
-    expect(call.data.product_id).toBe(20)
-    expect(call.data.price).toBe(1000)
-    expect(call.data.valid_from instanceof Date).toBe(true)
-    expect(call.data.valid_to).toBeUndefined()
+    expect(repositoryMock.create).toHaveBeenCalled()
+    const call = repositoryMock.create.mock.calls[0][0]
+    expect(call.product_id).toBe(20)
+    expect(call.price).toBe(1000)
+    expect(call.valid_from instanceof Date).toBe(true)
+    expect(call.valid_to).toBeUndefined()
     expect(res).toBe(expected)
   })
 
-  it('update should map dates and call prisma.update', async () => {
+  it('update should map dates and delegate to repository', async () => {
     const dto = { price: 1500, valid_from: '2025-02-01T00:00:00.000Z', valid_to: null }
     const expected = { id: 2, price: 1500 }
-    prismaMock.product_price.update.mockResolvedValueOnce(expected)
+    repositoryMock.update.mockResolvedValueOnce(expected)
 
     const res = await service.update(2, dto as any)
 
-    expect(prismaMock.product_price.update).toHaveBeenCalledWith({
-      where: { id: 2 },
-      data: expect.objectContaining({ price: 1500, valid_from: expect.any(Date), valid_to: undefined }),
-    })
+    expect(repositoryMock.update).toHaveBeenCalledWith(
+      2,
+      expect.objectContaining({ price: 1500, valid_from: expect.any(Date), valid_to: undefined }),
+    )
     expect(res).toBe(expected)
   })
 
-  it('deactivate should set active=false', async () => {
+  it('deactivate should delegate to repository', async () => {
     const expected = { id: 3, active: false }
-    prismaMock.product_price.update.mockResolvedValueOnce(expected)
+    repositoryMock.deactivate.mockResolvedValueOnce(expected)
 
     const res = await service.deactivate(3)
 
-    expect(prismaMock.product_price.update).toHaveBeenCalledWith({
-      where: { id: 3 },
-      data: { active: false },
-    })
+    expect(repositoryMock.deactivate).toHaveBeenCalledWith(3)
     expect(res).toBe(expected)
+  })
+
+  it('hasProductPrice should delegate to repository findById', async () => {
+    repositoryMock.findById.mockResolvedValueOnce({ id: 5 })
+    const res = await service.hasProductPrice(5)
+    expect(repositoryMock.findById).toHaveBeenCalledWith(5)
+    expect(res).toEqual({ id: 5 })
   })
 })

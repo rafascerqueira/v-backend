@@ -1,7 +1,7 @@
 # ============================================
 # Stage 1: Dependencies
 # ============================================
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -14,7 +14,7 @@ RUN pnpm install --frozen-lockfile
 # ============================================
 # Stage 2: Builder
 # ============================================
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -29,7 +29,7 @@ RUN pnpm build
 # ============================================
 # Stage 3: Production
 # ============================================
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -44,7 +44,6 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/src/prisma/generated ./src/prisma/generated
 
 RUN chown -R nestjs:nodejs /app
 

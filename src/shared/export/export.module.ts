@@ -1,6 +1,6 @@
-import { Global, Module } from "@nestjs/common";
-import { ExportController } from "./export.controller";
-import { ExportService } from "./export.service";
+import { Global, Module } from '@nestjs/common'
+import { ExportController } from './export.controller'
+import { ExportService } from './export.service'
 
 @Global()
 @Module({

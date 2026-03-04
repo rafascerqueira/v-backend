@@ -1,8 +1,8 @@
 import { Body, Controller, Get, Patch, Req, UseGuards } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { z } from 'zod'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
-import { z } from 'zod'
 import { StoreSettingsService } from '../services/store-settings.service'
 
 const updateStoreSettingsSchema = z.object({

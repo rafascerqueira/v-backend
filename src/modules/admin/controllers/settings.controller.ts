@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
-import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { RolesGuard } from '@/modules/auth/guards/roles.guard'
 import { SettingsService } from '../services/settings.service'
 
@@ -45,9 +45,7 @@ export class SettingsController {
 		},
 	})
 	@ApiResponse({ status: 200, description: 'Free period updated' })
-	async setFreePeriod(
-		@Body() body: { endDate?: string; earlyAdopterDiscount?: number },
-	) {
+	async setFreePeriod(@Body() body: { endDate?: string; earlyAdopterDiscount?: number }) {
 		if (body.endDate) {
 			await this.settingsService.setFreePeriodEndDate(new Date(body.endDate))
 		}

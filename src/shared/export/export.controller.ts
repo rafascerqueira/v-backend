@@ -54,9 +54,10 @@ export class ExportController {
 
 		const options = {
 			title: 'Relatório de Pedidos',
-			subtitle: startDate || endDate
-				? `Período: ${startDate || 'início'} a ${endDate || 'hoje'}`
-				: undefined,
+			subtitle:
+				startDate || endDate
+					? `Período: ${startDate || 'início'} a ${endDate || 'hoje'}`
+					: undefined,
 			columns: [
 				{ key: 'order_number', header: 'Nº Pedido', width: 15 },
 				{ key: 'customer', header: 'Cliente', width: 25 },
@@ -71,7 +72,10 @@ export class ExportController {
 
 		if (format === 'excel') {
 			const buffer = await this.exportService.generateExcel(options)
-			res?.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+			res?.header(
+				'Content-Type',
+				'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+			)
 			res?.header('Content-Disposition', `attachment; filename="${options.filename}.xlsx"`)
 			return res?.send(buffer)
 		}
@@ -86,10 +90,7 @@ export class ExportController {
 	@ApiOperation({ summary: 'Export products to Excel or PDF' })
 	@ApiQuery({ name: 'format', enum: ['excel', 'pdf'], required: true })
 	@ApiResponse({ status: 200, description: 'File download' })
-	async exportProducts(
-		@Query('format') format: 'excel' | 'pdf',
-		@Res() res?: FastifyReply,
-	) {
+	async exportProducts(@Query('format') format: 'excel' | 'pdf', @Res() res?: FastifyReply) {
 		const sellerId = this.tenantContext.getSellerId()
 
 		const products = await this.prisma.product.findMany({
@@ -111,7 +112,9 @@ export class ExportController {
 			where: { product_id: { in: productIds } },
 		})
 		const stockMap = new Map<number, number>()
-		stocks.forEach((s) => stockMap.set(s.product_id, s.quantity))
+		for (const s of stocks) {
+			stockMap.set(s.product_id, s.quantity)
+		}
 
 		const data = products.map((product) => ({
 			name: product.name,
@@ -140,7 +143,10 @@ export class ExportController {
 
 		if (format === 'excel') {
 			const buffer = await this.exportService.generateExcel(options)
-			res?.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+			res?.header(
+				'Content-Type',
+				'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+			)
 			res?.header('Content-Disposition', `attachment; filename="${options.filename}.xlsx"`)
 			return res?.send(buffer)
 		}
@@ -155,10 +161,7 @@ export class ExportController {
 	@ApiOperation({ summary: 'Export customers to Excel or PDF' })
 	@ApiQuery({ name: 'format', enum: ['excel', 'pdf'], required: true })
 	@ApiResponse({ status: 200, description: 'File download' })
-	async exportCustomers(
-		@Query('format') format: 'excel' | 'pdf',
-		@Res() res?: FastifyReply,
-	) {
+	async exportCustomers(@Query('format') format: 'excel' | 'pdf', @Res() res?: FastifyReply) {
 		const sellerId = this.tenantContext.getSellerId()
 
 		const customers = await this.prisma.customer.findMany({
@@ -191,7 +194,10 @@ export class ExportController {
 
 		if (format === 'excel') {
 			const buffer = await this.exportService.generateExcel(options)
-			res?.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+			res?.header(
+				'Content-Type',
+				'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+			)
 			res?.header('Content-Disposition', `attachment; filename="${options.filename}.xlsx"`)
 			return res?.send(buffer)
 		}

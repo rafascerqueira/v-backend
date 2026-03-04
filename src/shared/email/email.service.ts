@@ -23,19 +23,40 @@ export class EmailService {
 		const user = process.env.SMTP_USER
 		const pass = process.env.SMTP_PASS
 
-		if (!host || !user || !pass) {
+		if (!host) {
 			this.logger.warn('📧 SMTP not configured - emails will be logged to console')
 			return
 		}
 
-		this.transporter = createTransport({
+		// Configuração base do transporter
+		const transportConfig: {
+			host: string
+			port: number
+			secure: boolean
+			auth?: { user: string; pass: string }
+			tls?: { rejectUnauthorized: boolean }
+		} = {
 			host,
 			port,
 			secure: port === 465,
-			auth: { user, pass },
-		})
+		}
 
-		this.logger.log(`📧 SMTP configured: ${host}:${port}`)
+		// Adicionar autenticação apenas se user/pass estiverem configurados
+		// (Postfix local não precisa de autenticação)
+		if (user && pass) {
+			transportConfig.auth = { user, pass }
+		}
+
+		// Para localhost/Postfix, não verificar certificado TLS
+		if (host === 'localhost' || host === '127.0.0.1') {
+			transportConfig.tls = { rejectUnauthorized: false }
+		}
+
+		this.transporter = createTransport(transportConfig)
+
+		this.logger.log(
+			`📧 SMTP configured: ${host}:${port}${user ? ' (authenticated)' : ' (no auth)'}`,
+		)
 	}
 
 	async sendEmail(options: SendEmailOptions): Promise<boolean> {

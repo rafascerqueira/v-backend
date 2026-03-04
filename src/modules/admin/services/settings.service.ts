@@ -1,135 +1,125 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "@/shared/prisma/prisma.service";
+import { Inject, Injectable } from '@nestjs/common'
+import {
+	SETTINGS_REPOSITORY,
+	type SettingsRepository,
+} from '@/shared/repositories/settings.repository'
 
 export const SETTINGS_KEYS = {
-	FREE_PERIOD_END_DATE: "free_period_end_date",
-	EARLY_ADOPTER_DISCOUNT: "early_adopter_discount",
-	MAINTENANCE_MODE: "maintenance_mode",
-} as const;
+	FREE_PERIOD_END_DATE: 'free_period_end_date',
+	EARLY_ADOPTER_DISCOUNT: 'early_adopter_discount',
+	MAINTENANCE_MODE: 'maintenance_mode',
+} as const
 
-type SettingType = "string" | "number" | "boolean" | "date" | "json";
+type SettingType = 'string' | 'number' | 'boolean' | 'date' | 'json'
 
 export interface SettingValue {
-	key: string;
-	value: string;
-	type: SettingType;
-	parsed: unknown;
+	key: string
+	value: string
+	type: SettingType
+	parsed: unknown
 }
 
 @Injectable()
 export class SettingsService {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		@Inject(SETTINGS_REPOSITORY) private readonly settingsRepository: SettingsRepository,
+	) {}
 
 	private parseValue(value: string, type: SettingType): unknown {
 		switch (type) {
-			case "number":
-				return Number(value);
-			case "boolean":
-				return value === "true";
-			case "date":
-				return new Date(value);
-			case "json":
+			case 'number':
+				return Number(value)
+			case 'boolean':
+				return value === 'true'
+			case 'date':
+				return new Date(value)
+			case 'json':
 				try {
-					return JSON.parse(value);
+					return JSON.parse(value)
 				} catch {
-					return null;
+					return null
 				}
 			default:
-				return value;
+				return value
 		}
 	}
 
 	private stringifyValue(value: unknown, type: SettingType): string {
 		switch (type) {
-			case "date":
-				return value instanceof Date ? value.toISOString() : String(value);
-			case "json":
-				return JSON.stringify(value);
-			case "boolean":
-				return value ? "true" : "false";
+			case 'date':
+				return value instanceof Date ? value.toISOString() : String(value)
+			case 'json':
+				return JSON.stringify(value)
+			case 'boolean':
+				return value ? 'true' : 'false'
 			default:
-				return String(value);
+				return String(value)
 		}
 	}
 
 	async get(key: string): Promise<SettingValue | null> {
-		const setting = await this.prisma.system_setting.findUnique({
-			where: { key },
-		});
+		const setting = await this.settingsRepository.findByKey(key)
 
-		if (!setting) return null;
+		if (!setting) return null
 
 		return {
 			key: setting.key,
 			value: setting.value,
 			type: setting.type as SettingType,
 			parsed: this.parseValue(setting.value, setting.type as SettingType),
-		};
-	}
-
-	async set(
-		key: string,
-		value: unknown,
-		type: SettingType = "string",
-	): Promise<SettingValue> {
-		const stringValue = this.stringifyValue(value, type);
-
-		const setting = await this.prisma.system_setting.upsert({
-			where: { key },
-			update: { value: stringValue, type },
-			create: { key, value: stringValue, type },
-		});
-
-		return {
-			key: setting.key,
-			value: setting.value,
-			type: setting.type as SettingType,
-			parsed: this.parseValue(setting.value, setting.type as SettingType),
-		};
-	}
-
-	async delete(key: string): Promise<boolean> {
-		try {
-			await this.prisma.system_setting.delete({ where: { key } });
-			return true;
-		} catch {
-			return false;
 		}
 	}
 
+	async set(key: string, value: unknown, type: SettingType = 'string'): Promise<SettingValue> {
+		const stringValue = this.stringifyValue(value, type)
+
+		const setting = await this.settingsRepository.upsert(key, stringValue, type)
+
+		return {
+			key: setting.key,
+			value: setting.value,
+			type: setting.type as SettingType,
+			parsed: this.parseValue(setting.value, setting.type as SettingType),
+		}
+	}
+
+	async delete(key: string): Promise<boolean> {
+		return this.settingsRepository.deleteByKey(key)
+	}
+
 	async getAll(): Promise<SettingValue[]> {
-		const settings = await this.prisma.system_setting.findMany();
+		const settings = await this.settingsRepository.findAll()
 		return settings.map((s) => ({
 			key: s.key,
 			value: s.value,
 			type: s.type as SettingType,
 			parsed: this.parseValue(s.value, s.type as SettingType),
-		}));
+		}))
 	}
 
 	async getFreePeriodEndDate(): Promise<Date> {
-		const setting = await this.get(SETTINGS_KEYS.FREE_PERIOD_END_DATE);
+		const setting = await this.get(SETTINGS_KEYS.FREE_PERIOD_END_DATE)
 		if (setting) {
-			return setting.parsed as Date;
+			return setting.parsed as Date
 		}
-		return new Date("2026-02-28T23:59:59Z");
+		return new Date('2026-02-28T23:59:59Z')
 	}
 
 	async setFreePeriodEndDate(date: Date): Promise<void> {
-		await this.set(SETTINGS_KEYS.FREE_PERIOD_END_DATE, date, "date");
+		await this.set(SETTINGS_KEYS.FREE_PERIOD_END_DATE, date, 'date')
 	}
 
 	async isFreePeriodActive(): Promise<boolean> {
-		const endDate = await this.getFreePeriodEndDate();
-		return new Date() < endDate;
+		const endDate = await this.getFreePeriodEndDate()
+		return new Date() < endDate
 	}
 
 	async getEarlyAdopterDiscount(): Promise<number> {
-		const setting = await this.get(SETTINGS_KEYS.EARLY_ADOPTER_DISCOUNT);
-		return setting ? (setting.parsed as number) : 20;
+		const setting = await this.get(SETTINGS_KEYS.EARLY_ADOPTER_DISCOUNT)
+		return setting ? (setting.parsed as number) : 20
 	}
 
 	async setEarlyAdopterDiscount(percent: number): Promise<void> {
-		await this.set(SETTINGS_KEYS.EARLY_ADOPTER_DISCOUNT, percent, "number");
+		await this.set(SETTINGS_KEYS.EARLY_ADOPTER_DISCOUNT, percent, 'number')
 	}
 }

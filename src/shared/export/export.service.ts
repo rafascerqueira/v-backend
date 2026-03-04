@@ -128,7 +128,10 @@ export class ExportService {
 					doc.moveDown(0.5)
 				}
 
-				doc.fontSize(10).font('Helvetica').text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, { align: 'right' })
+				doc
+					.fontSize(10)
+					.font('Helvetica')
+					.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, { align: 'right' })
 				doc.moveDown(1)
 
 				// Table
@@ -144,7 +147,10 @@ export class ExportService {
 					x += colWidth
 				})
 
-				doc.moveTo(50, tableTop + 15).lineTo(50 + pageWidth, tableTop + 15).stroke()
+				doc
+					.moveTo(50, tableTop + 15)
+					.lineTo(50 + pageWidth, tableTop + 15)
+					.stroke()
 
 				// Data
 				doc.font('Helvetica').fontSize(9)
@@ -179,12 +185,12 @@ export class ExportService {
 				const pages = doc.bufferedPageRange()
 				for (let i = 0; i < pages.count; i++) {
 					doc.switchToPage(i)
-					doc.fontSize(8).text(
-						`Página ${i + 1} de ${pages.count} - Vendinhas`,
-						50,
-						doc.page.height - 30,
-						{ align: 'center', width: pageWidth },
-					)
+					doc
+						.fontSize(8)
+						.text(`Página ${i + 1} de ${pages.count} - Vendinhas`, 50, doc.page.height - 30, {
+							align: 'center',
+							width: pageWidth,
+						})
 				}
 
 				doc.end()

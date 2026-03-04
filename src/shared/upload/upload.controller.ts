@@ -59,12 +59,7 @@ export class UploadController {
 		const file = await this.parseMultipartFile(req)
 		const userId = req.user.sub
 
-		return this.uploadService.uploadProfileImage(
-			file.buffer,
-			file.filename,
-			file.mimetype,
-			userId,
-		)
+		return this.uploadService.uploadProfileImage(file.buffer, file.filename, file.mimetype, userId)
 	}
 
 	@Delete(':encodedPath')

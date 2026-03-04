@@ -1,215 +1,100 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
-import { PrismaService } from "@/shared/prisma/prisma.service";
-import { TenantContext } from "@/shared/tenant/tenant.context";
-import type {
-	CreateOrderDto,
-	OrderItemInputDto,
-} from "../dto/create-order.dto";
+import { Inject, Injectable } from '@nestjs/common'
+import { ORDER_REPOSITORY, type OrderRepository } from '@/shared/repositories/order.repository'
+import { TenantContext } from '@/shared/tenant/tenant.context'
+import type { CreateOrderDto, OrderItemInputDto } from '../dto/create-order.dto'
 
 @Injectable()
 export class OrdersService {
 	constructor(
-		private readonly prisma: PrismaService,
+		@Inject(ORDER_REPOSITORY) private readonly orderRepository: OrderRepository,
 		private readonly tenantContext: TenantContext,
 	) {}
 
-	private getTenantFilter() {
-		if (this.tenantContext.isAdmin()) {
-			return {};
-		}
-		return { seller_id: this.tenantContext.requireSellerId() };
-	}
-
 	async create(dto: CreateOrderDto) {
-		const { items, ...rest } = dto;
-		const sellerId = this.tenantContext.requireSellerId();
+		const { items, ...rest } = dto
+		const sellerId = this.tenantContext.requireSellerId()
 
-		const subtotal = items.reduce(
-			(acc, it) => acc + it.unit_price * it.quantity,
-			0,
-		);
-		const discount = items.reduce((acc, it) => acc + it.discount, 0);
-		const total = subtotal - discount;
+		const subtotal = items.reduce((acc, it) => acc + it.unit_price * it.quantity, 0)
+		const discount = items.reduce((acc, it) => acc + it.discount, 0)
+		const total = subtotal - discount
 
-		return this.prisma.$transaction(async (tx) => {
-			// Validate stock availability for items that have stock control
-			for (const item of items) {
-				const stock = await tx.store_stock.findUnique({
-					where: { product_id: item.product_id },
-				});
-				// Only validate if stock record exists
-				if (stock) {
-					const available = stock.quantity - stock.reserved_quantity;
-					if (available < item.quantity) {
-						const product = await tx.product.findUnique({
-							where: { id: item.product_id },
-						});
-						throw new BadRequestException(
-							`Estoque insuficiente para "${product?.name || item.product_id}". Disponível: ${available}, Solicitado: ${item.quantity}`,
-						);
-					}
-				}
-			}
-
-			// Create order
-			const order = await tx.order.create({
-				data: {
-					seller_id: sellerId,
-					customer_id: rest.customer_id,
-					order_number: rest.order_number,
-					notes: rest.notes,
-					subtotal,
-					discount,
-					total,
-					Order_item: {
-						create: items.map((it) => ({
-							product_id: it.product_id,
-							quantity: it.quantity,
-							unit_price: it.unit_price,
-							discount: it.discount,
-							total: it.unit_price * it.quantity - it.discount,
-						})),
-					},
-				},
-				include: { Order_item: true },
-			});
-
-			// Decrement stock and create movements only for items with stock control
-			for (const item of items) {
-				const stock = await tx.store_stock.findUnique({
-					where: { product_id: item.product_id },
-				});
-
-				if (stock) {
-					await tx.store_stock.update({
-						where: { product_id: item.product_id },
-						data: { quantity: { decrement: item.quantity } },
-					});
-
-					await tx.stock_movement.create({
-						data: {
-							movement_type: "out",
-							reference_type: "sale",
-							reference_id: order.id,
-							product_id: item.product_id,
-							quantity: item.quantity,
-						},
-					});
-				}
-			}
-
-			return order;
-		});
+		return this.orderRepository.create({
+			seller_id: sellerId,
+			customer_id: rest.customer_id,
+			order_number: rest.order_number,
+			notes: rest.notes,
+			subtotal,
+			discount,
+			total,
+			items: items.map((it) => ({
+				product_id: it.product_id,
+				quantity: it.quantity,
+				unit_price: it.unit_price,
+				discount: it.discount,
+				total: it.unit_price * it.quantity - it.discount,
+			})),
+		})
 	}
 
 	async addItem(orderId: number, item: OrderItemInputDto) {
-		const total = item.unit_price * item.quantity - (item.discount ?? 0);
-		return this.prisma.order_item.create({
-			data: {
-				order_id: orderId,
-				product_id: item.product_id,
-				quantity: item.quantity,
-				unit_price: item.unit_price,
-				discount: item.discount ?? 0,
-				total,
-			},
-		});
+		const total = item.unit_price * item.quantity - (item.discount ?? 0)
+		return this.orderRepository.addItem({
+			order_id: orderId,
+			product_id: item.product_id,
+			quantity: item.quantity,
+			unit_price: item.unit_price,
+			discount: item.discount ?? 0,
+			total,
+		})
 	}
 
 	async findById(id: number) {
-		const order = await this.prisma.order.findUnique({
-			where: { id },
-			include: { Order_item: true, Billing: true, customer: true },
-		});
-		if (!order) return null;
-		if (
-			!this.tenantContext.isAdmin() &&
-			order.seller_id !== this.tenantContext.getSellerId()
-		) {
-			return null;
-		}
-		return order;
+		return this.orderRepository.findById(id)
 	}
 
 	async findAll() {
-		return this.prisma.order.findMany({
-			where: this.getTenantFilter(),
-			orderBy: { createdAt: "desc" },
-			include: {
-				customer: {
-					select: {
-						id: true,
-						name: true,
-						email: true,
-					},
-				},
-				Order_item: {
-					include: {
-						product: {
-							select: {
-								id: true,
-								name: true,
-							},
-						},
-					},
-				},
-			},
-		});
+		return this.orderRepository.findAll({})
 	}
 
 	async updateStatus(id: number, status: string) {
-		const order = await this.findById(id);
+		const order = await this.orderRepository.findById(id)
 		if (!order) {
-			throw new Error("Order not found or access denied");
+			throw new Error('Order not found or access denied')
 		}
 
 		// Map order status to billing status
-		const billingStatusMap: Record<
-			string,
-			{ status: string; payment_status: string } | null
-		> = {
-			pending: { status: "pending", payment_status: "pending" },
-			confirmed: { status: "pending", payment_status: "pending" },
-			shipping: { status: "pending", payment_status: "pending" },
-			delivered: { status: "paid", payment_status: "confirmed" },
-			canceled: { status: "canceled", payment_status: "canceled" },
-		};
+		const billingStatusMap: Record<string, { status: string; payment_status: string } | null> = {
+			pending: { status: 'pending', payment_status: 'pending' },
+			confirmed: { status: 'pending', payment_status: 'pending' },
+			shipping: { status: 'pending', payment_status: 'pending' },
+			delivered: { status: 'paid', payment_status: 'confirmed' },
+			canceled: { status: 'canceled', payment_status: 'canceled' },
+		}
 
-		const billingUpdate = billingStatusMap[status];
+		const billingUpdate = billingStatusMap[status]
 
-		return this.prisma.$transaction(async (tx) => {
-			// Update order status
-			const updatedOrder = await tx.order.update({
-				where: { id },
-				data: { status: status as any },
-			});
-
-			// Update all related billings if status mapping exists
-			if (billingUpdate) {
-				await tx.billing.updateMany({
-					where: { order_id: id },
-					data: {
-						status: billingUpdate.status as any,
-						payment_status: billingUpdate.payment_status as any,
-						...(status === "delivered"
+		return this.orderRepository.updateStatus(
+			id,
+			status,
+			billingUpdate
+				? {
+						...billingUpdate,
+						...(status === 'delivered'
 							? {
 									payment_date: new Date(),
 									paid_amount: order.total,
 								}
 							: {}),
-					},
-				});
-			}
-
-			return updatedOrder;
-		});
+					}
+				: undefined,
+		)
 	}
 
 	async delete(id: number) {
-		const order = await this.findById(id);
+		const order = await this.orderRepository.findById(id)
 		if (!order) {
-			throw new Error("Order not found or access denied");
+			throw new Error('Order not found or access denied')
 		}
-		return this.prisma.order.delete({ where: { id } });
+		return this.orderRepository.delete(id)
 	}
 }

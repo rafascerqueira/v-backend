@@ -1,5 +1,5 @@
+import { execSync } from 'node:child_process'
 import { PrismaPg } from '@prisma/adapter-pg'
-import { execSync } from 'child_process'
 import { PrismaClient } from '../src/generated/prisma/client'
 
 const testDbUrl = 'postgresql://test_user:test_password@localhost:5433/test_db'

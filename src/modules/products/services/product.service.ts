@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
+import type { PriceType } from '@/generated/prisma/enums'
 import type { PaginationDto } from '@/shared/dto/pagination.dto'
 import { createPaginatedResponse } from '@/shared/dto/pagination.dto'
 import { PrismaService } from '@/shared/prisma/prisma.service'
@@ -9,7 +10,6 @@ import {
 } from '@/shared/repositories/product.repository'
 import type { CreateProductDto } from '../dto/create-product.dto'
 import type { UpdateProductDto } from '../dto/update-product.dto'
-import type { PriceType } from '@/generated/prisma/enums'
 
 @Injectable()
 export class ProductService {
@@ -33,15 +33,15 @@ export class ProductService {
 	}
 
 	async findById(id: string) {
-		return this.productRepository.findById(parseInt(id))
+		return this.productRepository.findById(parseInt(id, 10))
 	}
 
 	async update(id: string, data: UpdateProductDto) {
-		return this.productRepository.update(parseInt(id), data)
+		return this.productRepository.update(parseInt(id, 10), data)
 	}
 
 	async remove(id: string) {
-		return this.productRepository.softDelete(parseInt(id))
+		return this.productRepository.softDelete(parseInt(id, 10))
 	}
 
 	async addPrice(productId: number, price: number, priceType: PriceType) {

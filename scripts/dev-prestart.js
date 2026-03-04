@@ -3,8 +3,8 @@
  - Ensures Docker containers are running
 */
 
-const { spawnSync } = require('child_process')
-const fs = require('fs')
+const { spawnSync } = require('node:child_process')
+const fs = require('node:fs')
 
 async function main() {
 	const hasCompose = fs.existsSync('docker-compose.yml') || fs.existsSync('docker-compose.yaml')

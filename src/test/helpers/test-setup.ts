@@ -1,9 +1,9 @@
+import type { CanActivate } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
 import { Test } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
-import { Reflector } from '@nestjs/core'
 import { TokenService } from '@/modules/auth/services/token.service'
 import { TokenBlacklistService } from '@/modules/auth/services/token-blacklist.service'
-import type { CanActivate } from '@nestjs/common'
 
 export const createTestModule = async (controller: any, providers: any[] = []) => {
 	const testModule = Test.createTestingModule({

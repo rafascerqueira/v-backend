@@ -1,13 +1,7 @@
-import { z } from "zod";
+import { z } from 'zod'
 
-export const movementTypeEnum = z.enum(["in", "out"]);
-export const referenceTypeEnum = z.enum([
-	"purchase",
-	"sale",
-	"adjustment",
-	"return",
-	"transfer",
-]);
+export const movementTypeEnum = z.enum(['in', 'out'])
+export const referenceTypeEnum = z.enum(['purchase', 'sale', 'adjustment', 'return', 'transfer'])
 
 export const createStockMovementSchema = z.object({
 	movement_type: movementTypeEnum,
@@ -15,6 +9,6 @@ export const createStockMovementSchema = z.object({
 	reference_id: z.coerce.number().int().nonnegative(),
 	product_id: z.coerce.number().int().positive(),
 	quantity: z.coerce.number().int().positive(),
-});
+})
 
-export type CreateStockMovementDto = z.infer<typeof createStockMovementSchema>;
+export type CreateStockMovementDto = z.infer<typeof createStockMovementSchema>

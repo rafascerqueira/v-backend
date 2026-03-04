@@ -7,8 +7,9 @@ export default () => ({
 		secret: process.env.JWT_SECRET || 'your-secret-key',
 		expiresIn: process.env.JWT_EXPIRES_IN || '7d',
 	},
-	bcrypt: {
-		saltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10),
+	argon2: {
+		memoryCost: parseInt(process.env.ARGON2_MEMORY_COST || '65536', 10),
+		timeCost: parseInt(process.env.ARGON2_TIME_COST || '3', 10),
 	},
 	cors: {
 		origin: process.env.CORS_ORIGIN || '*',

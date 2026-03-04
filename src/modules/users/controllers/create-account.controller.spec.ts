@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { CreateAccountController } from './create-account.controller';
 import { AccountService } from '../services/account.service';
+import { EmailVerificationService } from '@/modules/auth/services/email-verification.service';
 
 describe('CreateAccountController', () => {
   let controller: CreateAccountController;
@@ -12,6 +13,10 @@ describe('CreateAccountController', () => {
     findByEmail: jest.fn(),
   };
 
+  const mockEmailVerificationService = {
+    createVerificationToken: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CreateAccountController],
@@ -19,6 +24,10 @@ describe('CreateAccountController', () => {
         {
           provide: AccountService,
           useValue: mockAccountService,
+        },
+        {
+          provide: EmailVerificationService,
+          useValue: mockEmailVerificationService,
         },
       ],
     }).compile();
@@ -44,12 +53,14 @@ describe('CreateAccountController', () => {
 
     it('should create account with valid data', async () => {
       mockAccountService.findByEmail.mockResolvedValue(null);
-      mockAccountService.create.mockResolvedValue(undefined);
+      mockAccountService.create.mockResolvedValue({ id: 1, name: 'John Doe', email: 'john@example.com' });
+      mockEmailVerificationService.createVerificationToken.mockResolvedValue(undefined);
 
       await controller.handle(validAccountData);
 
       expect(accountService.findByEmail).toHaveBeenCalledWith('john@example.com');
       expect(accountService.create).toHaveBeenCalledWith(validAccountData);
+      expect(mockEmailVerificationService.createVerificationToken).toHaveBeenCalledWith(1, 'john@example.com', 'John Doe');
     });
 
     it('should throw error if account already exists', async () => {

@@ -2,6 +2,7 @@ import { Test } from "@nestjs/testing";
 import { OrdersController } from "./orders.controller";
 import { OrdersService } from "../services/orders.service";
 import { JwtAuthGuard } from "@/modules/auth/guards/jwt-auth.guard";
+import { PlanLimitsGuard } from "@/modules/subscriptions/guards/plan-limits.guard";
 
 const serviceMock = {
 	create: jest.fn(),
@@ -21,6 +22,8 @@ describe("OrdersController", () => {
 			providers: [{ provide: OrdersService, useValue: serviceMock }],
 		})
 			.overrideGuard(JwtAuthGuard)
+			.useValue({ canActivate: () => true })
+			.overrideGuard(PlanLimitsGuard)
 			.useValue({ canActivate: () => true })
 			.compile();
 

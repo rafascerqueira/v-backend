@@ -6,7 +6,7 @@ import {
 	SetMetadata,
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
-import { PlanLimitsService } from '../services/plan-limits.service'
+import { type LimitCheckResult, PlanLimitsService } from '../services/plan-limits.service'
 
 export const LIMIT_TYPE_KEY = 'limit_type'
 export type LimitType = 'product' | 'customer' | 'order'
@@ -40,7 +40,7 @@ export class PlanLimitsGuard implements CanActivate {
 		const sellerId = user.sub
 		const planType = user.plan_type || 'free'
 
-		let result
+		let result: LimitCheckResult
 
 		switch (limitType) {
 			case 'product':

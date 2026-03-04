@@ -26,7 +26,7 @@ export class WebhookController {
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'Handle Stripe webhook events' })
 	async handleStripeWebhook(
-		@Req() req: RawBodyRequest<FastifyRequest>,
+		@Req() _req: RawBodyRequest<FastifyRequest>,
 		@Headers('stripe-signature') signature: string,
 		@Body() body: any,
 	) {

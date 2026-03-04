@@ -28,14 +28,14 @@ export class ReportsController {
 	@ApiOperation({ summary: 'Get top products report' })
 	@ApiQuery({ name: 'limit', required: false, type: Number })
 	async getProductsReport(@Query('limit') limit?: string) {
-		return this.reportsService.getProductsReport(limit ? parseInt(limit) : 10)
+		return this.reportsService.getProductsReport(limit ? parseInt(limit, 10) : 10)
 	}
 
 	@Get('customers')
 	@ApiOperation({ summary: 'Get top customers report' })
 	@ApiQuery({ name: 'limit', required: false, type: Number })
 	async getCustomersReport(@Query('limit') limit?: string) {
-		return this.reportsService.getCustomersReport(limit ? parseInt(limit) : 10)
+		return this.reportsService.getCustomersReport(limit ? parseInt(limit, 10) : 10)
 	}
 
 	@Get('charts')

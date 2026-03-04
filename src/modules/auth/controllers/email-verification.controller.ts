@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
-import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { z } from 'zod'
+import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { Public } from '../decorators/public.decorator'
 import { EmailVerificationService } from '../services/email-verification.service'
 

@@ -1,21 +1,15 @@
 import { Test } from "@nestjs/testing";
 import { OrdersService } from "./orders.service";
-import { PrismaService } from "@/shared/prisma/prisma.service";
+import { ORDER_REPOSITORY } from "@/shared/repositories/order.repository";
 import { TenantContext } from "@/shared/tenant/tenant.context";
 
-const prismaMock = {
-	$transaction: jest.fn((callback) => callback(prismaMock)),
-	order: {
-		create: jest.fn(),
-		findUnique: jest.fn(),
-		findMany: jest.fn(),
-		update: jest.fn(),
-		delete: jest.fn(),
-	},
-	order_item: { create: jest.fn() },
-	store_stock: { findUnique: jest.fn(), update: jest.fn() },
-	stock_movement: { create: jest.fn() },
-	product: { findUnique: jest.fn() },
+const repositoryMock = {
+	create: jest.fn(),
+	addItem: jest.fn(),
+	findById: jest.fn(),
+	findAll: jest.fn(),
+	updateStatus: jest.fn(),
+	delete: jest.fn(),
 };
 
 const tenantContextMock = {
@@ -31,7 +25,7 @@ describe("OrdersService", () => {
 		const module = await Test.createTestingModule({
 			providers: [
 				OrdersService,
-				{ provide: PrismaService, useValue: prismaMock },
+				{ provide: ORDER_REPOSITORY, useValue: repositoryMock },
 				{ provide: TenantContext, useValue: tenantContextMock },
 			],
 		}).compile();
@@ -40,7 +34,7 @@ describe("OrdersService", () => {
 		jest.clearAllMocks();
 	});
 
-	it("create should compute totals and create order with items", async () => {
+	it("create should compute totals and delegate to repository", async () => {
 		const dto = {
 			customer_id: "cuid123",
 			order_number: "ORD-1",
@@ -49,50 +43,69 @@ describe("OrdersService", () => {
 				{ product_id: 2, quantity: 1, unit_price: 500, discount: 100 },
 			],
 		};
-		prismaMock.order.create.mockResolvedValueOnce({ id: 1 });
+		repositoryMock.create.mockResolvedValueOnce({ id: 1 });
 
 		const res = await service.create(dto as any);
 
-		expect(prismaMock.order.create).toHaveBeenCalled();
-		const call = prismaMock.order.create.mock.calls[0][0];
-		expect(call.data.subtotal).toBe(2500);
-		expect(call.data.discount).toBe(100);
-		expect(call.data.total).toBe(2400);
-		expect(call.data.Order_item.create).toHaveLength(2);
+		expect(repositoryMock.create).toHaveBeenCalled();
+		const call = repositoryMock.create.mock.calls[0][0];
+		expect(call.subtotal).toBe(2500);
+		expect(call.discount).toBe(100);
+		expect(call.total).toBe(2400);
+		expect(call.items).toHaveLength(2);
+		expect(call.seller_id).toBe("test-seller-id");
 		expect(res).toEqual({ id: 1 });
 	});
 
-	it("addItem should create order_item with computed total", async () => {
-		prismaMock.order_item.create.mockResolvedValueOnce({ id: 10 });
+	it("addItem should compute total and delegate to repository", async () => {
+		repositoryMock.addItem.mockResolvedValueOnce({ id: 10 });
 		const res = await service.addItem(1, {
 			product_id: 3,
 			quantity: 2,
 			unit_price: 300,
 			discount: 50,
 		} as any);
-		expect(prismaMock.order_item.create).toHaveBeenCalledWith({
-			data: {
-				order_id: 1,
-				product_id: 3,
-				quantity: 2,
-				unit_price: 300,
-				discount: 50,
-				total: 550,
-			},
+		expect(repositoryMock.addItem).toHaveBeenCalledWith({
+			order_id: 1,
+			product_id: 3,
+			quantity: 2,
+			unit_price: 300,
+			discount: 50,
+			total: 550,
 		});
 		expect(res).toEqual({ id: 10 });
 	});
 
-	it("findById delegates to prisma", async () => {
-		prismaMock.order.findUnique.mockResolvedValueOnce({
+	it("findById delegates to repository", async () => {
+		repositoryMock.findById.mockResolvedValueOnce({
 			id: 1,
 			seller_id: "test-seller-id",
 		});
 		const res = await service.findById(1);
-		expect(prismaMock.order.findUnique).toHaveBeenCalledWith({
-			where: { id: 1 },
-			include: { Order_item: true, Billing: true, customer: true },
-		});
+		expect(repositoryMock.findById).toHaveBeenCalledWith(1);
 		expect(res).toEqual({ id: 1, seller_id: "test-seller-id" });
+	});
+
+	it("findAll delegates to repository", async () => {
+		repositoryMock.findAll.mockResolvedValueOnce([{ id: 1 }]);
+		const res = await service.findAll();
+		expect(repositoryMock.findAll).toHaveBeenCalledWith({});
+		expect(res).toEqual([{ id: 1 }]);
+	});
+
+	it("delete should throw if order not found", async () => {
+		repositoryMock.findById.mockResolvedValueOnce(null);
+		await expect(service.delete(999)).rejects.toThrow(
+			"Order not found or access denied",
+		);
+		expect(repositoryMock.delete).not.toHaveBeenCalled();
+	});
+
+	it("delete should delegate to repository when order exists", async () => {
+		repositoryMock.findById.mockResolvedValueOnce({ id: 5, seller_id: "test-seller-id" });
+		repositoryMock.delete.mockResolvedValueOnce({ id: 5 });
+		const res = await service.delete(5);
+		expect(repositoryMock.delete).toHaveBeenCalledWith(5);
+		expect(res).toEqual({ id: 5 });
 	});
 });

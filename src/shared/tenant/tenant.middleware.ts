@@ -6,7 +6,7 @@ import type { TenantContext } from './tenant.context'
 export class TenantMiddleware implements NestMiddleware {
 	constructor(private readonly tenantContext: TenantContext) {}
 
-	use(req: FastifyRequest['raw'], res: FastifyReply['raw'], next: () => void) {
+	use(req: FastifyRequest['raw'], _res: FastifyReply['raw'], next: () => void) {
 		const user = (req as any).user
 
 		if (user?.sub && user?.role) {

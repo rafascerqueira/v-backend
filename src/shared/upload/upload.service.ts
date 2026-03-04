@@ -1,6 +1,6 @@
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'fs'
-import { join } from 'path'
 import sharp from 'sharp'
 
 export interface UploadOptions {
@@ -66,13 +66,9 @@ export class UploadService {
 		return `${timestamp}-${random}.${ext}`
 	}
 
-	private validateFile(
-		buffer: Buffer,
-		mimeType: string,
-		options: UploadOptions,
-	): void {
-		const maxSize = options.maxSizeBytes || DEFAULT_OPTIONS.maxSizeBytes!
-		const allowedTypes = options.allowedMimeTypes || DEFAULT_OPTIONS.allowedMimeTypes!
+	private validateFile(buffer: Buffer, mimeType: string, options: UploadOptions): void {
+		const maxSize = options.maxSizeBytes ?? DEFAULT_OPTIONS.maxSizeBytes ?? 5 * 1024 * 1024
+		const allowedTypes = options.allowedMimeTypes ?? DEFAULT_OPTIONS.allowedMimeTypes ?? []
 
 		if (buffer.length > maxSize) {
 			throw new BadRequestException(
@@ -92,7 +88,8 @@ export class UploadService {
 		options: UploadOptions = {},
 	): Promise<{ buffer: Buffer; metadata: sharp.Metadata }> {
 		const opts = { ...DEFAULT_OPTIONS, ...options }
-		const resize = opts.resize || DEFAULT_OPTIONS.resize!
+		const resize = opts.resize ??
+			DEFAULT_OPTIONS.resize ?? { width: 1200, height: 1200, fit: 'inside' as const }
 
 		let sharpInstance = sharp(buffer)
 		const metadata = await sharpInstance.metadata()

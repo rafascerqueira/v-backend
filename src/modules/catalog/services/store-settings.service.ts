@@ -1,5 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
-import { PrismaService } from '@/shared/prisma/prisma.service'
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import {
+	STORE_SETTINGS_REPOSITORY,
+	type StoreSettingsRepository,
+} from '@/shared/repositories/store-settings.repository'
 
 interface UpdateStoreSettings {
 	store_slug?: string
@@ -11,23 +14,13 @@ interface UpdateStoreSettings {
 
 @Injectable()
 export class StoreSettingsService {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		@Inject(STORE_SETTINGS_REPOSITORY)
+		private readonly storeSettingsRepository: StoreSettingsRepository,
+	) {}
 
 	async getSettings(sellerId: string) {
-		const account = await this.prisma.account.findUnique({
-			where: { id: sellerId },
-			select: {
-				id: true,
-				name: true,
-				store_slug: true,
-				store_name: true,
-				store_description: true,
-				store_logo: true,
-				store_banner: true,
-				store_phone: true,
-				store_whatsapp: true,
-			},
-		})
+		const account = await this.storeSettingsRepository.findByAccountId(sellerId)
 
 		if (!account) {
 			throw new NotFoundException('Conta não encontrada')
@@ -51,36 +44,24 @@ export class StoreSettingsService {
 
 	async updateSettings(sellerId: string, data: UpdateStoreSettings) {
 		if (data.store_slug) {
-			const existing = await this.prisma.account.findFirst({
-				where: {
-					store_slug: data.store_slug,
-					NOT: { id: sellerId },
-				},
-			})
+			const conflict = await this.storeSettingsRepository.findSlugConflict(
+				data.store_slug,
+				sellerId,
+			)
 
-			if (existing) {
+			if (conflict) {
 				throw new ConflictException('Este slug já está em uso')
 			}
 		}
 
-		const updated = await this.prisma.account.update({
-			where: { id: sellerId },
-			data: {
-				...(data.store_slug !== undefined && { store_slug: data.store_slug }),
-				...(data.store_name !== undefined && { store_name: data.store_name }),
-				...(data.store_description !== undefined && { store_description: data.store_description }),
-				...(data.store_phone !== undefined && { store_phone: data.store_phone }),
-				...(data.store_whatsapp !== undefined && { store_whatsapp: data.store_whatsapp }),
-			},
-			select: {
-				id: true,
-				store_slug: true,
-				store_name: true,
-				store_description: true,
-				store_phone: true,
-				store_whatsapp: true,
-			},
-		})
+		const updateData: Record<string, unknown> = {}
+		if (data.store_slug !== undefined) updateData.store_slug = data.store_slug
+		if (data.store_name !== undefined) updateData.store_name = data.store_name
+		if (data.store_description !== undefined) updateData.store_description = data.store_description
+		if (data.store_phone !== undefined) updateData.store_phone = data.store_phone
+		if (data.store_whatsapp !== undefined) updateData.store_whatsapp = data.store_whatsapp
+
+		const updated = await this.storeSettingsRepository.updateSettings(sellerId, updateData)
 
 		return {
 			...updated,
@@ -92,26 +73,15 @@ export class StoreSettingsService {
 	}
 
 	async updateStoreLogo(sellerId: string, logoUrl: string) {
-		return this.prisma.account.update({
-			where: { id: sellerId },
-			data: { store_logo: logoUrl },
-			select: { store_logo: true },
-		})
+		return this.storeSettingsRepository.updateLogo(sellerId, logoUrl)
 	}
 
 	async updateStoreBanner(sellerId: string, bannerUrl: string) {
-		return this.prisma.account.update({
-			where: { id: sellerId },
-			data: { store_banner: bannerUrl },
-			select: { store_banner: true },
-		})
+		return this.storeSettingsRepository.updateBanner(sellerId, bannerUrl)
 	}
 
 	async getPreviewLink(sellerId: string) {
-		const account = await this.prisma.account.findUnique({
-			where: { id: sellerId },
-			select: { store_slug: true, name: true },
-		})
+		const account = await this.storeSettingsRepository.findSlugAndName(sellerId)
 
 		if (!account) {
 			throw new NotFoundException('Conta não encontrada')
@@ -124,9 +94,7 @@ export class StoreSettingsService {
 			slug: account.store_slug,
 			catalogUrl: account.store_slug ? `${baseUrl}/loja/${account.store_slug}` : null,
 			genericUrl: `${baseUrl}/catalog`,
-			suggestion: account.store_slug
-				? null
-				: this.generateSlugSuggestion(account.name),
+			suggestion: account.store_slug ? null : this.generateSlugSuggestion(account.name),
 		}
 	}
 

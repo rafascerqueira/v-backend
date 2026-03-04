@@ -1,5 +1,8 @@
-import { Injectable } from '@nestjs/common'
-import { PrismaService } from '@/shared/prisma/prisma.service'
+import { Inject, Injectable } from '@nestjs/common'
+import {
+	PLAN_LIMITS_REPOSITORY,
+	type PlanLimitsRepository,
+} from '@/shared/repositories/plan-limits.repository'
 
 export interface PlanLimits {
 	maxProducts: number
@@ -38,7 +41,10 @@ export interface LimitCheckResult {
 
 @Injectable()
 export class PlanLimitsService {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		@Inject(PLAN_LIMITS_REPOSITORY)
+		private readonly planLimitsRepository: PlanLimitsRepository,
+	) {}
 
 	getLimits(planType: string): PlanLimits {
 		return PLAN_LIMITS[planType] || PLAN_LIMITS.free
@@ -50,14 +56,9 @@ export class PlanLimitsService {
 		startOfMonth.setHours(0, 0, 0, 0)
 
 		const [products, customers, ordersThisMonth] = await Promise.all([
-			this.prisma.product.count({ where: { seller_id: sellerId } }),
-			this.prisma.customer.count({ where: { seller_id: sellerId } }),
-			this.prisma.order.count({
-				where: {
-					seller_id: sellerId,
-					createdAt: { gte: startOfMonth },
-				},
-			}),
+			this.planLimitsRepository.countProducts(sellerId),
+			this.planLimitsRepository.countCustomers(sellerId),
+			this.planLimitsRepository.countOrdersThisMonth(sellerId, startOfMonth),
 		])
 
 		return { products, customers, ordersThisMonth }
@@ -70,7 +71,7 @@ export class PlanLimitsService {
 			return { allowed: true, current: 0, limit: -1 }
 		}
 
-		const count = await this.prisma.product.count({ where: { seller_id: sellerId } })
+		const count = await this.planLimitsRepository.countProducts(sellerId)
 
 		if (count >= limits.maxProducts) {
 			return {
@@ -91,7 +92,7 @@ export class PlanLimitsService {
 			return { allowed: true, current: 0, limit: -1 }
 		}
 
-		const count = await this.prisma.customer.count({ where: { seller_id: sellerId } })
+		const count = await this.planLimitsRepository.countCustomers(sellerId)
 
 		if (count >= limits.maxCustomers) {
 			return {
@@ -116,12 +117,7 @@ export class PlanLimitsService {
 		startOfMonth.setDate(1)
 		startOfMonth.setHours(0, 0, 0, 0)
 
-		const count = await this.prisma.order.count({
-			where: {
-				seller_id: sellerId,
-				createdAt: { gte: startOfMonth },
-			},
-		})
+		const count = await this.planLimitsRepository.countOrdersThisMonth(sellerId, startOfMonth)
 
 		if (count >= limits.maxOrdersPerMonth) {
 			return {
@@ -153,8 +149,12 @@ export class PlanLimitsService {
 			},
 			remaining: {
 				products: limits.maxProducts === -1 ? -1 : Math.max(0, limits.maxProducts - usage.products),
-				customers: limits.maxCustomers === -1 ? -1 : Math.max(0, limits.maxCustomers - usage.customers),
-				ordersThisMonth: limits.maxOrdersPerMonth === -1 ? -1 : Math.max(0, limits.maxOrdersPerMonth - usage.ordersThisMonth),
+				customers:
+					limits.maxCustomers === -1 ? -1 : Math.max(0, limits.maxCustomers - usage.customers),
+				ordersThisMonth:
+					limits.maxOrdersPerMonth === -1
+						? -1
+						: Math.max(0, limits.maxOrdersPerMonth - usage.ordersThisMonth),
 			},
 			unlimited: limits.unlimited,
 		}

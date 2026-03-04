@@ -1,8 +1,8 @@
-import { Global, Module } from "@nestjs/common";
-import { JwtAuthGuard } from "@/modules/auth/guards/jwt-auth.guard";
-import { Reflector } from "@nestjs/core";
-import { PrismaModule } from "@/shared/prisma/prisma.module";
-import { TenantModule } from "@/shared/tenant/tenant.module";
+import { Global, Module } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { PrismaModule } from '@/shared/prisma/prisma.module'
+import { TenantModule } from '@/shared/tenant/tenant.module'
 
 @Global()
 @Module({
@@ -16,14 +16,14 @@ import { TenantModule } from "@/shared/tenant/tenant.module";
 			},
 		},
 		{
-			provide: "TokenService",
+			provide: 'TokenService',
 			useValue: {
 				verifyAccessToken: jest.fn(),
 				generateAccessToken: jest.fn(),
 			},
 		},
 		{
-			provide: "TokenBlacklistService",
+			provide: 'TokenBlacklistService',
 			useValue: {
 				isBlacklisted: jest.fn(),
 				addToBlacklist: jest.fn(),

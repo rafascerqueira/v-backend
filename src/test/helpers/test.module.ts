@@ -1,7 +1,7 @@
-import { Test } from "@nestjs/testing";
-import { JwtAuthGuard } from "@/modules/auth/guards/jwt-auth.guard";
-import { Reflector } from "@nestjs/core";
-import type { CanActivate } from "@nestjs/common";
+import type { CanActivate } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
+import { Test } from '@nestjs/testing'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 
 export const createTestingModule = (controller: any, providers: any[] = []) => {
 	return Test.createTestingModule({
@@ -9,11 +9,11 @@ export const createTestingModule = (controller: any, providers: any[] = []) => {
 		providers: [
 			{ provide: Reflector, useValue: {} },
 			{
-				provide: "TokenService",
+				provide: 'TokenService',
 				useValue: {},
 			},
 			{
-				provide: "TokenBlacklistService",
+				provide: 'TokenBlacklistService',
 				useValue: {},
 			},
 			...providers,
@@ -22,5 +22,5 @@ export const createTestingModule = (controller: any, providers: any[] = []) => {
 		.overrideGuard(JwtAuthGuard)
 		.useValue({
 			canActivate: () => true,
-		} as CanActivate);
-};
+		} as CanActivate)
+}

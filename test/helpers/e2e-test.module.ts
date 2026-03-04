@@ -1,14 +1,11 @@
-import { Test } from '@nestjs/testing'
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify'
 import type { TestingModule } from '@nestjs/testing'
-import {
-	FastifyAdapter,
-	type NestFastifyApplication,
-} from '@nestjs/platform-fastify'
+import { Test } from '@nestjs/testing'
 import { AppModule } from '../src/app.module'
-import { PrismaService } from '../src/shared/prisma/prisma.service'
-import { AuditService } from '../src/shared/audit/audit.service'
 import { TokenService } from '../src/modules/auth/services/token.service'
 import { TokenBlacklistService } from '../src/modules/auth/services/token-blacklist.service'
+import { AuditService } from '../src/shared/audit/audit.service'
+import { PrismaService } from '../src/shared/prisma/prisma.service'
 
 export const createE2ETestApp = async (): Promise<{
 	app: NestFastifyApplication
@@ -30,9 +27,7 @@ export const createE2ETestApp = async (): Promise<{
 		})
 		.compile()
 
-	const app = moduleFixture.createNestApplication<NestFastifyApplication>(
-		new FastifyAdapter(),
-	)
+	const app = moduleFixture.createNestApplication<NestFastifyApplication>(new FastifyAdapter())
 
 	await app.init()
 

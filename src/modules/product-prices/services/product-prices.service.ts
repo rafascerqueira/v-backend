@@ -1,54 +1,47 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "@/shared/prisma/prisma.service";
-import type { CreateProductPriceDto } from "../dto/create-product-price.dto";
-import type { UpdateProductPriceDto } from "../dto/update-product-price.dto";
+import { Inject, Injectable } from '@nestjs/common'
+import {
+	PRODUCT_PRICE_REPOSITORY,
+	type ProductPriceRepository,
+} from '@/shared/repositories/product-price.repository'
+import type { CreateProductPriceDto } from '../dto/create-product-price.dto'
+import type { UpdateProductPriceDto } from '../dto/update-product-price.dto'
 
 @Injectable()
 export class ProductPricesService {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		@Inject(PRODUCT_PRICE_REPOSITORY)
+		private readonly productPriceRepository: ProductPriceRepository,
+	) {}
 
 	async listByProduct(productId: number) {
-		return this.prisma.product_price.findMany({
-			where: { product_id: productId },
-			orderBy: [{ valid_from: "desc" }, { createdAt: "desc" }],
-		});
+		return this.productPriceRepository.findByProduct(productId)
 	}
 
 	async create(productId: number, dto: CreateProductPriceDto) {
-		const { valid_from, valid_to, ...rest } = dto;
+		const { valid_from, valid_to, ...rest } = dto
 
-		// TODO: add business validation for overlapping periods if needed
-
-		return this.prisma.product_price.create({
-			data: {
-				product_id: productId,
-				...rest,
-				valid_from: valid_from ? new Date(valid_from) : undefined,
-				valid_to: valid_to ? new Date(valid_to) : undefined,
-			},
-		});
+		return this.productPriceRepository.create({
+			product_id: productId,
+			...rest,
+			valid_from: valid_from ? new Date(valid_from) : undefined,
+			valid_to: valid_to ? new Date(valid_to) : undefined,
+		})
 	}
 
 	async update(id: number, dto: UpdateProductPriceDto) {
-		const { valid_from, valid_to, ...rest } = dto;
-		return this.prisma.product_price.update({
-			where: { id },
-			data: {
-				...rest,
-				valid_from: valid_from ? new Date(valid_from) : undefined,
-				valid_to: valid_to ? new Date(valid_to) : undefined,
-			},
-		});
+		const { valid_from, valid_to, ...rest } = dto
+		return this.productPriceRepository.update(id, {
+			...rest,
+			valid_from: valid_from ? new Date(valid_from) : undefined,
+			valid_to: valid_to ? new Date(valid_to) : undefined,
+		})
 	}
 
 	async deactivate(id: number) {
-		return this.prisma.product_price.update({
-			where: { id },
-			data: { active: false },
-		});
+		return this.productPriceRepository.deactivate(id)
 	}
 
 	async hasProductPrice(id: number) {
-		return this.prisma.product_price.findUnique({ where: { id } });
+		return this.productPriceRepository.findById(id)
 	}
 }

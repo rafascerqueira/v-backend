@@ -39,7 +39,9 @@ export class TwoFactorController {
 	@ApiOperation({ summary: 'Check if 2FA is enabled' })
 	async status(@Request() req: any) {
 		const enabled = await this.twoFactorService.isTwoFactorEnabled(req.user.sub)
-		const backupCodesRemaining = await this.twoFactorService.getRemainingBackupCodesCount(req.user.sub)
+		const backupCodesRemaining = await this.twoFactorService.getRemainingBackupCodesCount(
+			req.user.sub,
+		)
 		return { enabled, backupCodesRemaining }
 	}
 

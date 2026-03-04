@@ -3,6 +3,7 @@ import { CreateProductController } from './create-product.controller'
 import { ProductService } from '../services/product.service'
 import { HttpException, HttpStatus } from '@nestjs/common'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { PlanLimitsGuard } from '@/modules/subscriptions/guards/plan-limits.guard'
 
 describe('CreateProductController', () => {
 	let controller: CreateProductController
@@ -27,6 +28,8 @@ describe('CreateProductController', () => {
 			],
 		})
 			.overrideGuard(JwtAuthGuard)
+			.useValue({ canActivate: () => true })
+			.overrideGuard(PlanLimitsGuard)
 			.useValue({ canActivate: () => true })
 			.compile()
 

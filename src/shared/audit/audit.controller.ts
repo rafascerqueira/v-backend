@@ -11,7 +11,7 @@ export class AuditController {
 	@ApiOperation({ summary: 'Get recent audit logs' })
 	@ApiQuery({ name: 'limit', required: false, type: Number })
 	async getRecent(@Query('limit') limit?: string) {
-		return this.auditService.getRecent(limit ? parseInt(limit) : 100)
+		return this.auditService.getRecent(limit ? parseInt(limit, 10) : 100)
 	}
 
 	@Get('entity')
@@ -24,7 +24,7 @@ export class AuditController {
 		@Query('entityId') entityId: string,
 		@Query('limit') limit?: string,
 	) {
-		return this.auditService.getByEntity(entity, entityId, limit ? parseInt(limit) : 50)
+		return this.auditService.getByEntity(entity, entityId, limit ? parseInt(limit, 10) : 50)
 	}
 
 	@Get('user')
@@ -32,6 +32,6 @@ export class AuditController {
 	@ApiQuery({ name: 'userId', required: true, type: String })
 	@ApiQuery({ name: 'limit', required: false, type: Number })
 	async getByUser(@Query('userId') userId: string, @Query('limit') limit?: string) {
-		return this.auditService.getByUser(userId, limit ? parseInt(limit) : 50)
+		return this.auditService.getByUser(userId, limit ? parseInt(limit, 10) : 50)
 	}
 }
