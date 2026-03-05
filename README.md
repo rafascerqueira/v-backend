@@ -349,6 +349,11 @@ erDiagram
 - **FK**: Chave Estrangeira (Foreign Key)
 - **UK**: Chave Única (Unique Key)
 
+### Legenda
+- **PK**: Chave Primária (Primary Key)
+- **FK**: Chave Estrangeira (Foreign Key)
+- **UK**: Chave Única (Unique Key)
+
 ---
 
 ## Licença
