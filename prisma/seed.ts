@@ -1,6 +1,8 @@
 import { loadEnvFile } from 'node:process'
 
-loadEnvFile()
+try {
+	loadEnvFile()
+} catch {}
 
 import { PrismaPg } from '@prisma/adapter-pg'
 import * as argon2 from 'argon2'

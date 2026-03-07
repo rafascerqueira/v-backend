@@ -1,6 +1,8 @@
 import { loadEnvFile } from 'node:process'
 
-loadEnvFile()
+try {
+	loadEnvFile()
+} catch {}
 
 import { join } from 'node:path'
 import cookie from '@fastify/cookie'
