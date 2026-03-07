@@ -56,6 +56,8 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm prisma generate
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5433/test_db
 
       - name: Run lint
         run: pnpm check:ci
