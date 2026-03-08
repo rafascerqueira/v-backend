@@ -85,19 +85,28 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 10m
           script: |
             cd /var/www/vendinhas/backend
             ./scripts/deploy.sh main
 
-      - name: Health check
+      - name: External health check
         run: |
-          sleep 10
-          curl -f https://api.vendinhas.app/health || exit 1
+          for i in 1 2 3 4 5; do
+            if curl -sf https://api.vendinhas.app/health; then
+              echo "✅ External health check passed"
+              exit 0
+            fi
+            echo "⏳ Attempt $i/5 failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ External health check failed"
+          exit 1
 
       - name: Notify success
         if: success()
-        run: echo "✅ Deploy successful!"
+        run: echo "✅ Deploy to production completed successfully!"
 
       - name: Notify failure
         if: failure()
-        run: echo "❌ Deploy failed!"
+        run: echo "❌ Deploy to production failed! deploy.sh includes automatic rollback."

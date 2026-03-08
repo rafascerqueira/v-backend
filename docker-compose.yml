@@ -7,7 +7,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-vendapp_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-vendapp_db}
-      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-vendinhas}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -42,36 +41,6 @@ services:
       retries: 5
     networks:
       - vendinhas-network
-
-  # Descomentar para rodar a aplicação via Docker
-  # app:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: vendinhas-api
-  #   restart: unless-stopped
-  #   ports:
-  #     - "${PORT:-3001}:3001"
-  #   environment:
-  #     - NODE_ENV=production
-  #     - PORT=${PORT:-3001}
-  #     - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=${POSTGRES_SCHEMA}
-  #     - REDIS_HOST=redis
-  #     - REDIS_PORT=6379
-  #     - JWT_SECRET=${JWT_SECRET}
-  #     - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-  #     - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
-  #     - APP_URL=${APP_URL:-http://localhost:3001}
-  #     - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./keys:/app/keys:ro
-  #   networks:
-  #     - vendinhas-network
 
 networks:
   vendinhas-network:

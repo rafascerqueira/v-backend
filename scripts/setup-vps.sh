@@ -81,6 +81,7 @@ echo "📁 Criando diretórios da aplicação..."
 sudo mkdir -p /var/www/vendinhas/backend
 sudo mkdir -p /var/www/vendinhas/frontend
 sudo mkdir -p /var/www/vendinhas/uploads
+sudo mkdir -p /var/www/vendinhas/backups
 sudo mkdir -p /var/log/pm2
 sudo chown -R $USER:$USER /var/www/vendinhas
 sudo chown -R $USER:$USER /var/log/pm2
@@ -118,12 +119,11 @@ CORS_ORIGIN=https://vendinhas.app
 # ===========================================
 # BANCO DE DADOS (PostgreSQL)
 # ===========================================
-DATABASE_URL="postgresql://vendapp_user:${POSTGRES_PASSWORD}@localhost:5432/vendapp_db?schema=vendinhas"
+DATABASE_URL="postgresql://vendapp_user:${POSTGRES_PASSWORD}@localhost:5432/vendapp_db"
 
 POSTGRES_USER=vendapp_user
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=vendapp_db
-POSTGRES_SCHEMA=vendinhas
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 
@@ -149,7 +149,7 @@ REDIS_KEY_PREFIX=vendinhas:
 # ===========================================
 # URLs da Aplicação
 # ===========================================
-APP_URL=https://vendinhas.app/api
+APP_URL=https://api.vendinhas.app
 FRONTEND_URL=https://vendinhas.app
 
 # ===========================================
@@ -191,7 +191,6 @@ cat > .env.docker << EOF
 POSTGRES_USER=vendapp_user
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=vendapp_db
-POSTGRES_SCHEMA=vendinhas
 EOF
 
 # Start Docker containers (PostgreSQL + Redis)
@@ -228,150 +227,28 @@ cd /var/www/vendinhas/frontend
 pnpm install --frozen-lockfile
 
 # Create .env.local
-echo "NEXT_PUBLIC_API_URL=https://vendinhas.app/api" > .env.local
+echo "NEXT_PUBLIC_API_URL=https://api.vendinhas.app" > .env.local
 
 # Build frontend
 echo "🏗️ Compilando frontend..."
 pnpm build
 
-# Create PM2 ecosystem file
-echo "📝 Criando configuração do PM2..."
-cat > /var/www/vendinhas/ecosystem.config.js << 'EOF'
-module.exports = {
-  apps: [
-    {
-      name: 'vendinhas-api',
-      cwd: '/var/www/vendinhas/backend',
-      script: 'dist/main.js',
-      instances: 'max',
-      exec_mode: 'cluster',
-      env: {
-        NODE_ENV: 'production',
-        PORT: 3001
-      },
-      error_file: '/var/log/pm2/vendinhas-api-error.log',
-      out_file: '/var/log/pm2/vendinhas-api-out.log',
-      merge_logs: true,
-      max_memory_restart: '500M'
-    },
-    {
-      name: 'vendinhas-web',
-      cwd: '/var/www/vendinhas/frontend',
-      script: 'node_modules/next/dist/bin/next',
-      args: 'start -p 3000',
-      instances: 2,
-      exec_mode: 'cluster',
-      env: {
-        NODE_ENV: 'production',
-        PORT: 3000
-      },
-      error_file: '/var/log/pm2/vendinhas-web-error.log',
-      out_file: '/var/log/pm2/vendinhas-web-out.log',
-      merge_logs: true,
-      max_memory_restart: '500M'
-    }
-  ]
-};
-EOF
-
-# Start PM2 apps
+# Start PM2 with backend ecosystem.config.js (env vars loaded from .env)
 echo "▶️ Iniciando aplicações com PM2..."
-pm2 start /var/www/vendinhas/ecosystem.config.js
+cd /var/www/vendinhas/backend
+set -a
+source .env
+set +a
+pm2 start ecosystem.config.js --update-env
 
 # Save PM2 config and setup startup
 pm2 save
 sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u $USER --hp /home/$USER
 
-# Setup Nginx
+# Setup Nginx using canonical config from repo
 echo "🌐 Configurando Nginx..."
-cat > /tmp/vendinhas.app << 'NGINX_EOF'
-# Redirect www to non-www
-server {
-    listen 80;
-    listen [::]:80;
-    server_name www.vendinhas.app;
-    return 301 https://vendinhas.app$request_uri;
-}
-
-# Main server block
-server {
-    listen 80;
-    listen [::]:80;
-    server_name vendinhas.app;
-
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name vendinhas.app;
-
-    # SSL will be configured by Certbot
-    # ssl_certificate /etc/letsencrypt/live/vendinhas.app/fullchain.pem;
-    # ssl_certificate_key /etc/letsencrypt/live/vendinhas.app/privkey.pem;
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    # Gzip
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_types text/plain text/css text/xml text/javascript application/javascript application/json application/xml;
-
-    # API Backend (NestJS)
-    location /api/ {
-        rewrite ^/api/(.*) /$1 break;
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 300;
-        proxy_connect_timeout 300;
-    }
-
-    # Static uploads
-    location /uploads/ {
-        alias /var/www/vendinhas/uploads/;
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Frontend (Next.js)
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # Next.js static files
-    location /_next/static/ {
-        proxy_pass http://127.0.0.1:3000;
-        expires 365d;
-        add_header Cache-Control "public, immutable";
-    }
-}
-NGINX_EOF
-
-sudo mv /tmp/vendinhas.app /etc/nginx/sites-available/vendinhas.app
-sudo ln -sf /etc/nginx/sites-available/vendinhas.app /etc/nginx/sites-enabled/
+sudo cp /var/www/vendinhas/backend/nginx/vendinhas.conf /etc/nginx/sites-available/vendinhas.conf
+sudo ln -sf /etc/nginx/sites-available/vendinhas.conf /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
@@ -415,6 +292,6 @@ pm2 status
 echo ""
 echo "🔗 URLs (após configurar SSL):"
 echo "   Site:    https://vendinhas.app"
-echo "   API:     https://vendinhas.app/api"
-echo "   Swagger: https://vendinhas.app/api/docs"
-echo "   Health:  https://vendinhas.app/api/health"
+echo "   API:     https://api.vendinhas.app"
+echo "   Swagger: https://api.vendinhas.app/docs"
+echo "   Health:  https://api.vendinhas.app/health"

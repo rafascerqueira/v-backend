@@ -78,9 +78,14 @@ You are a senior NestJS engineer working exclusively on https://github.com/rafas
 
 ## CI/CD Alignment (keep in sync)
 - ci.yml AND deploy.yml must use: Node 22, pnpm 9, Postgres 17, Redis 7
-- Dockerfile must match CI Node version (22)
 - pnpm/action-setup@v4 in all workflows
 - CI steps: install → prisma generate → biome ci → build → test
+- Deploy: SSH to VPS → scripts/deploy.sh (with rollback + health check)
+- VPS: PM2 cluster (2 instances) + Docker (Postgres + Redis) + Nginx
+- Domain: vendinhas.app (frontend) / api.vendinhas.app (backend)
+- Database schema: always `public` (never custom schemas — @prisma/adapter-pg bug)
+- Env vars on VPS: .env sourced by deploy.sh → pm2 reload --update-env
+- Runbook: docs/VPS_RUNBOOK.md
 
 ## Forbidden (AI agents break these constantly)
 - No direct Prisma in services (use Repository Pattern)
