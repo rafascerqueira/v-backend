@@ -1,21 +1,28 @@
 ---
 trigger: model_decision
-description: when you need to refactor any code in the project
+description: Apply when refactoring any module in v-backend
 ---
 
 # Refactoring Rules
 
-## Language Consistency
-- All code parameters, functions, variables, and identifiers must be in English
-- Translate any Portuguese code elements to English during refactoring
-- Comments may remain in Portuguese for team context
+## Touch it, fix it
 
-## Martin Fowler Principles
-- When you find you have to add a feature to a program, and the program's code is not structured in a convenient way to add the feature, first refactor the program to make it easy to add the feature, then add the feature
-- Refactoring should be done in small steps, with testing after each step
-- The purpose of refactoring is to make the code easier to understand and modify
-- Any fool can write code that a computer can understand. Good programmers write code that humans can understand
-- Before you start refactoring, check that you have a solid suite of tests. These tests must be self-checking
-- Refactoring changes the programs in small steps, so if you make a mistake, it is easy to find where the mistake is
-- Each refactoring is a small transformation, but many small steps can add up to a big restructuring
+When a task requires touching a module that does not yet follow the current pattern (`controllers/`, `services/`, `repositories/`, `dto/`), bring it up to the pattern as part of the same task. Do not attempt broad migrations beyond the module being touched.
 
+## Steps when a module is out of pattern
+
+1. Create missing `repositories/` folder.
+2. Move all `PrismaService` usage from the service into a new `prisma-{entity}.repository.ts`.
+3. Define the repository interface + DI Symbol in `shared/repositories/`.
+4. Register the binding in the module's `providers` array.
+5. Update the service to inject the interface via DI token — remove `PrismaService` import.
+6. If the module reads/writes tenant-scoped data, inject `TenantContext` in the repository and add `TenantModule` to the module's `imports`.
+7. Do not change behavior. This is structural only.
+
+## Code language
+
+All identifiers (variables, functions, parameters, class names) must be in English. Portuguese identifiers found during refactoring must be translated. Comments may remain in Portuguese.
+
+## Scope discipline
+
+Change only what is necessary for the task. Do not clean up unrelated code, rename unrelated identifiers, or restructure files outside the refactor target. Surface anything else as a separate recommendation.

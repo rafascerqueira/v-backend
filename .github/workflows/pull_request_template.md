@@ -1,8 +1,10 @@
 ## Checklist (AI Agent + Human)
 
-- [ ] I followed `.windsurf/rules/v-backend-core-rules.md` (Always On)
-- [ ] Repository Pattern respected (no direct Prisma in services)
-- [ ] Zod + ZodValidationPipe used
-- [ ] RS256 JWT + Redis blacklist pattern followed
-- [ ] CI is green (Biome + Build + Tests)
-- [ ] Swagger decorators added
+- [ ] Followed `.windsurf/rules/core-rules.md`
+- [ ] Repository Pattern respected — no direct Prisma in services
+- [ ] TenantContext injected in repositories for tenant-scoped entities
+- [ ] Zod + ZodValidationPipe used (no class-validator)
+- [ ] RS256 JWT + Redis blacklist pattern maintained
+- [ ] PlanLimitsGuard / PlanGuard applied where appropriate
+- [ ] Swagger decorators added (`@ApiOperation`, `@ApiResponse`, `@ApiBearerAuth`)
+- [ ] CI green: Biome + Build + Tests

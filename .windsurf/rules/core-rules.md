@@ -1,99 +1,193 @@
 ---
 trigger: always_on
-description: always apply these rules when working on the project
+description: Always apply these rules when working on the project
 ---
 
-# v-backend Core Rules (Always On)
+# v-backend — Core Rules
 
-You are a senior NestJS engineer working exclusively on https://github.com/rafascerqueira/v-backend (sales/inventory system).
+You are a senior NestJS engineer working on https://github.com/rafascerqueira/v-backend — a multi-tenant SaaS for sales management (Vendinhas).
 
-## Tech Stack (pinned versions — keep aligned everywhere)
-- Runtime: Node.js 22 | Package manager: pnpm 9
-- Framework: NestJS 11 + FastifyAdapter 5 (NEVER Express)
-- ORM: Prisma 7 + @prisma/adapter-pg | DB: PostgreSQL 17
-- Cache/Blacklist: Redis 7 via ioredis
-- Auth: JWT RS256 (jsonwebtoken) + Argon2id (argon2)
-- Validation: Zod 3 + ZodValidationPipe (NEVER class-validator)
-- Linting: Biome 2 (NEVER ESLint — legacy config was removed)
-- Testing: Jest 30 + ts-jest + supertest
-- Docs: @nestjs/swagger with Fastify adapter
+---
+
+## Stack (pinned — do not suggest alternatives)
+
+| Layer | Package | Version |
+|---|---|---|
+| Runtime | Node.js | 22 |
+| Package manager | pnpm | 9.15.0 |
+| Framework | NestJS + FastifyAdapter | 11 (NEVER Express) |
+| ORM | Prisma + @prisma/adapter-pg | 7.3.0 |
+| Database | PostgreSQL | 17 — schema `public` only |
+| Cache / blacklist | ioredis | 5 |
+| Auth | jsonwebtoken RS256 + argon2 | — |
+| Validation | Zod | 4 (NEVER class-validator) |
+| Linter | Biome | 2 (NEVER ESLint) |
+| Testing | Jest + ts-jest + supertest | Jest 30 |
+| Docs | @nestjs/swagger with Fastify adapter | 11 |
+
+---
 
 ## Project overview
-- Language: Portuguese (Brazil) and code in English.
-- Multi-tenant SaaS: seller-based isolation via AsyncLocalStorage (shared/tenant/tenant.context.ts).
-- Login with email and password, using JWT authentication and refresh token.
-- Authentication via Google and Facebook.
-- Password recovery via email.
-- Password reset must force password change.
-- Email validation when registering new users.
-- New user registration for system access.
-- Two types of system users: Admin (Sysadmin / Help Desk) and regular user (Salesperson).
-- Two types of plans: Free (free) and Pro (paid) with PlanLimitsGuard enforcement.
 
-## Architecture (copy existing style exactly)
-- Use src/modules/{feature}/ with controllers/, services/, repositories/, dto/, *.module.ts
-- Repository Pattern is mandatory – NEVER query PrismaService directly in services
-- Reference implementations: Users, Products, Customers modules (these are compliant)
-- Each repository needs: interface in shared/repositories/, Prisma implementation in module/repositories/, DI token symbol
-- Clean Architecture: Controllers (thin) → Services (business) → Repositories (data)
-- Always register new modules in AppModule
-- Use @nestjs/config ConfigModule for environment variables (never raw process.env in constructors)
+- UI language: Portuguese (Brazil). Code identifiers: English.
+- Multi-tenant: seller isolation via `TenantContext` (AsyncLocalStorage) at `shared/tenant/tenant.context.ts`.
+- Two user roles: `admin` (Sysadmin/Help Desk) and `user` (Salesperson).
+- Two plans: `free` and `pro`, enforced via `PlanLimitsGuard` and `PlanGuard`.
+- Auth: email/password + Google + Facebook. JWT RS256 access (1d) + refresh (7d) tokens.
+- Tokens returned in response body AND set as HttpOnly cookies.
+- Password reset forces change. Email verification on registration.
+
+---
+
+## Module structure (actual — not aspirational)
+
+```
+src/modules/{feature}/
+├── {feature}.module.ts
+├── controllers/          # One controller per route group
+├── services/             # Business logic, no Prisma
+├── repositories/         # Prisma implementation only
+└── dto/                  # Zod schemas + inferred types
+```
+
+`structure.md` in the repo root describes a DDD layout (`application/`, `domain/`, `infrastructure/`) that is **not yet implemented**. Do not apply it unless explicitly instructed.
+
+---
+
+## Architecture rules
+
+- **Repository Pattern is mandatory.** Services never import or call `PrismaService` directly.
+- Each repository needs: interface + DI Symbol in `shared/repositories/`, Prisma implementation in `module/repositories/prisma-{entity}.repository.ts`.
+- **TenantContext is required in every repository** that reads or writes tenant-scoped data. Inject it alongside PrismaService. Use `tenantContext.requireSellerId()` for mutations, `tenantContext.isAdmin()` to bypass filters for admin role.
+- Controllers are HTTP boundary only — validate input, call service, return result. No business logic.
+- Always register new modules in `AppModule`.
+- Use `ConfigService` for environment variables. Never use raw `process.env` in constructors.
+
+---
+
+## Path aliases (tsconfig)
+
+```
+@/...             → src/
+@domain/...       → src/domain/       (not yet in use)
+@infrastructure/  → src/shared/
+@interfaces/...   → src/interfaces/   (not yet in use)
+```
+
+---
+
+## Auth & Security (non-negotiable — production failures have occurred here)
+
+- JWT: RS256 asymmetric keys from `JWT_KEYS_DIR`. Never HS256 in production.
+- Password hashing: `shared/crypto/` with explicit `{ type: argon2.argon2id }`. Never bcrypt.
+- Every authenticated request checks Redis blacklist before accepting the token.
+- All routes require `JwtAuthGuard` by default. Mark public routes with `@Public()`.
+- Use `@CurrentUser()` to extract user from request. Never access `request.user` directly.
+- No Passport.js — guards are custom `CanActivate` implementations.
+- Always HttpOnly + Secure cookies.
+
+---
+
+## Plan enforcement guards (two separate guards — use both correctly)
+
+| Guard | Location | Purpose |
+|---|---|---|
+| `PlanLimitsGuard` | `subscriptions/guards/plan-limits.guard.ts` | Enforces **quota limits** (max products, customers, orders/month). Use `@CheckPlanLimit('product' \| 'customer' \| 'order')` on creation endpoints. |
+| `PlanGuard` | `subscriptions/guards/plan.guard.ts` | Enforces **plan tier and feature flags**. Use `@RequiredPlan(...)` or `@RequiredFeature(...)` decorators. |
+
+Both are exported from `SubscriptionsModule` (global). Import neither — they're already available globally.
+
+---
 
 ## Validation & DTOs
-- Zod only + ZodValidationPipe (never class-validator)
-- DTOs live in dto/ folder with @ApiProperty
-- Strong password validation: min 8 chars, uppercase, lowercase, digit
 
-## Auth & Security (non-negotiable – production cases failed here)
-- Use existing auth/ module only
-- JWT = RS256 asymmetric keys from JWT_KEYS_DIR (never HS256 in prod)
-- Redis blacklist for logout + refresh tokens
-- Argon2id via shared/crypto (NEVER bcrypt)
-- Always HttpOnly + Secure cookies
-- PlanLimitsGuard on all resource-creation endpoints
+- Zod schemas only. No classes, no `class-validator`.
+- Declare schemas as `const`, export inferred type via `z.infer<typeof schema>`.
+- DTOs live in `dto/` inside the module that owns them.
+- Add `@ApiProperty()` wrappers for Swagger visibility.
+- Password validation: min 8 chars, uppercase, lowercase, digit.
 
-## Prisma & Transactions (biggest real-world failure point)
-- Use PrismaService + explicit transactions for any multi-model operation (orders, stock, billings)
-- Never raw SQL
-- Transactions go inside repository implementations, not in services
+---
 
-## Error Handling & Logging
-- GlobalExceptionFilter + ZodExceptionFilter (shared/filters)
-- NestJS Logger (no console.log in production)
-- Custom exceptions only
-- Prisma errors mapped to HTTP status in GlobalExceptionFilter
+## Prisma & Transactions
 
-## Swagger & Responses
-- Always add @ApiOperation, @ApiResponse, @ApiBearerAuth
-- Consistent responses via interceptors if present
-- Tags must match module name
+- `PrismaService` is injected only in repository implementations.
+- Wrap multi-model operations in `this.prisma.$transaction()` inside the repository.
+- Never raw SQL. Migrations via `pnpm prisma migrate dev` only.
+- Monetary values: integers (cents). Never floats.
+- `sales_db_schema.md` in repo root is aspirational SQL. Do not treat it as current state.
 
-## Testing & Quality
-- When adding features → always generate Jest unit + E2E tests
-- Controller tests MUST mock all guards (PlanLimitsGuard → PlanLimitsService, JwtAuthGuard)
-- Service tests mock repository interfaces via DI tokens
-- Biome lint + format + build must ALL pass before commit
-- E2E tests must authenticate (get JWT) before calling protected endpoints
-- Target: 60% coverage minimum, increasing over time
+---
 
-## CI/CD Alignment (keep in sync)
-- ci.yml AND deploy.yml must use: Node 22, pnpm 9, Postgres 17, Redis 7
-- pnpm/action-setup@v4 in all workflows
-- CI steps: install → prisma generate → biome ci → build → test
-- Deploy: SSH to VPS → scripts/deploy.sh (with rollback + health check)
-- VPS: PM2 cluster (2 instances) + Docker (Postgres + Redis) + Nginx
-- Domain: vendinhas.app (frontend) / api.vendinhas.app (backend)
-- Database schema: always `public` (never custom schemas — @prisma/adapter-pg bug)
-- Env vars on VPS: .env sourced by deploy.sh → pm2 reload --update-env
-- Runbook: docs/VPS_RUNBOOK.md
+## Error handling & logging
 
-## Forbidden (AI agents break these constantly)
-- No direct Prisma in services (use Repository Pattern)
-- No Express code (FastifyAdapter only)
-- No global variables or new keyword for providers
-- Never disable Redis blacklist or security middleware
-- No ESLint config or dependencies (Biome only)
-- No bcrypt (Argon2id only)
-- No raw process.env in service/repository constructors (use ConfigService)
-- No parseInt() without radix parameter
-- No non-null assertions (!) — use proper null checks
+- Throw NestJS built-in exceptions (`NotFoundException`, `UnauthorizedException`, etc.).
+- `GlobalExceptionFilter` + `ZodExceptionFilter` in `shared/filters/` handle formatting.
+- Use `NestJS Logger`. Never `console.log` in production code.
+
+---
+
+## Swagger
+
+- Every endpoint needs `@ApiTags`, `@ApiOperation`, `@ApiResponse`, `@ApiBearerAuth`.
+- Tags must match module name.
+
+---
+
+## Testing
+
+- Unit tests: `.spec.ts` co-located with the file under test.
+- E2E tests: `/test/` directory.
+- Controller tests must mock all guards:
+  ```typescript
+  .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+  .overrideGuard(PlanLimitsGuard).useValue({ canActivate: () => true })
+  .overrideGuard(PlanGuard).useValue({ canActivate: () => true })
+  ```
+- When `PlanLimitsGuard` or `PlanGuard` is present, provide a `PlanLimitsService` mock.
+- Service tests mock repository interfaces via DI tokens. Never use real PrismaService in unit tests.
+- E2E tests must authenticate (obtain JWT) before calling protected endpoints.
+- Coverage target: 60% minimum, collected from `modules/**/controllers/**` and `modules/**/services/**`.
+- Biome + build + tests must all pass before any commit.
+
+---
+
+## CI/CD
+
+- `ci.yml` and `deploy.yml`: Node 22, pnpm 9, Postgres 17, Redis 7.
+- CI steps: install → prisma generate → biome ci → build → test.
+- Deploy: SSH → `scripts/deploy.sh` (backup → pull → install → migrate → build → PM2 reload → health check → rollback on failure).
+- VPS: PM2 cluster (2 instances) + Docker (Postgres + Redis) + Nginx.
+- Domains: `vendinhas.app` (frontend) / `api.vendinhas.app` (backend).
+- Database schema: always `public` (never custom schemas — `@prisma/adapter-pg` constraint).
+
+---
+
+## Ports
+
+```
+API (NestJS/Fastify)  → :3001
+Frontend (Next.js)    → :3000
+PostgreSQL            → :5432
+Redis                 → :6379
+Swagger UI            → http://localhost:3001/api/docs
+Health check          → http://localhost:3001/health
+```
+
+---
+
+## Forbidden (agents break these constantly)
+
+- Direct Prisma calls in services
+- Express code or middleware
+- `class-validator` or `class-transformer`
+- ESLint or Prettier config/dependencies
+- `bcrypt` (use `argon2`)
+- HS256 JWT in production
+- Raw `process.env` in constructors (use `ConfigService`)
+- Instantiating `PrismaClient` or `ioredis` directly
+- `parseInt()` without radix
+- Non-null assertions (`!`) — use proper null checks
+- Disabling Redis blacklist or security middleware
+- Raw SQL migration files
+- Float values for monetary amounts

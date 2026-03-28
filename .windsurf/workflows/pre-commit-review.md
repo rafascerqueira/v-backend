@@ -1,34 +1,74 @@
 ---
-description: Pre-commit checklist to run before every commit or PR
+description: Mandatory checklist before every commit or PR
 ---
 
-# Pre-Commit / PR Review (Mandatory)
+# Pre-Commit Review
 
-// turbo
-1. Run `pnpm biome ci .` — must exit 0 with no errors.
+Run all steps in order. Fix any failure before committing.
 
-// turbo
-2. Run `pnpm build` — must compile with 0 TypeScript errors.
+---
 
-// turbo
-3. Run `pnpm test` — all suites must pass (0 failures).
+## 1. Linter + formatter
 
-4. Grep for direct Prisma usage in services:
-   `grep -rn "PrismaService" src/modules/*/services/ --include="*.ts"`
-   Must return empty. If not → refactor to Repository Pattern.
+```bash
+pnpm biome ci .
+```
+Must exit 0 with no errors.
 
-5. Verify security invariants:
-   - No `bcrypt` imports (must use `argon2`)
-   - No `HS256` in JWT config (must use `RS256`)
-   - No disabled Redis blacklist checks
+## 2. Build
 
-6. Confirm all new/changed endpoints have:
-   - `@ApiOperation` + `@ApiResponse` + `@ApiBearerAuth`
-   - `ZodValidationPipe` on request bodies
-   - `PlanLimitsGuard` on resource-creation endpoints
+```bash
+pnpm build
+```
+Must compile with 0 TypeScript errors.
 
-7. Check controller tests mock all guards:
-   - `PlanLimitsGuard` → needs `PlanLimitsService` mock
-   - `JwtAuthGuard` → override with `{ canActivate: () => true }`
+## 3. Tests
 
-8. If anything broken → propose exact fixes before committing.
+```bash
+pnpm test
+```
+All suites must pass (0 failures).
+
+## 4. Repository pattern — no direct Prisma in services
+
+```bash
+grep -rn "PrismaService" src/modules/*/services/ --include="*.ts"
+```
+Must return empty. Any hit → move to repository.
+
+## 5. Tenant isolation — repositories for scoped entities must use TenantContext
+
+```bash
+grep -rL "TenantContext" src/modules/*/repositories/prisma-*.repository.ts
+```
+Review each result. If the entity has a `seller_id` column and `TenantContext` is absent → add it.
+
+## 6. Security invariants
+
+- No `bcrypt` imports anywhere (must use `argon2`)
+- No `HS256` in JWT config (must use `RS256`)
+- Redis blacklist check not disabled in `JwtAuthGuard`
+
+## 7. Endpoint completeness
+
+Every new or changed endpoint must have:
+- `@ApiOperation` + `@ApiResponse` + `@ApiBearerAuth`
+- `ZodValidationPipe` on request bodies
+- `PlanLimitsGuard` + `@CheckPlanLimit(...)` on resource-creation endpoints (products, customers, orders)
+- `PlanGuard` + `@RequiredPlan(...)` or `@RequiredFeature(...)` where plan-tier restriction applies
+
+## 8. Controller test guard mocks
+
+Every controller spec must mock all guards applied to the controller:
+
+```typescript
+.overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+.overrideGuard(PlanLimitsGuard).useValue({ canActivate: () => true })
+.overrideGuard(PlanGuard).useValue({ canActivate: () => true })
+```
+
+When `PlanLimitsGuard` or `PlanGuard` is present, provide a `PlanLimitsService` mock in the test module.
+
+## 9. If anything fails
+
+Propose exact fixes before committing. Do not commit a broken build.
