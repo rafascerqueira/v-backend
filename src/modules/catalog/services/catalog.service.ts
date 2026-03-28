@@ -98,30 +98,14 @@ export class CatalogService {
 			throw new NotFoundException('Cliente não encontrado')
 		}
 
-		const address = customer.address as {
-			street?: string
-			number?: string
-			complement?: string
-			neighborhood?: string
-		} | null
-
 		// Return only first name for public display (privacy)
 		const firstName = customer.name.split(' ')[0]
 
 		return {
 			id: customer.id,
-			name: customer.name,
 			firstName,
-			email: customer.email,
-			phone: customer.phone,
-			document: customer.document,
-			address: address?.street || '',
-			number: address?.number || '',
-			complement: address?.complement || '',
-			neighborhood: address?.neighborhood || '',
 			city: customer.city,
 			state: customer.state,
-			zip_code: customer.zip_code,
 		}
 	}
 
@@ -159,13 +143,19 @@ export class CatalogService {
 			throw new BadRequestException('O pedido deve ter pelo menos um item')
 		}
 
-		// Verify products exist and have stock
+		// Verify products exist, have stock, and belong to same seller
 		const productIds = items.map((item) => item.product_id)
 		const products = await this.catalogRepository.findActiveProducts()
 		const validProducts = products.filter((p) => productIds.includes(p.id))
 
 		if (validProducts.length !== productIds.length) {
 			throw new BadRequestException('Um ou mais produtos não foram encontrados')
+		}
+
+		// Ensure all products belong to the same seller
+		const sellerIds = new Set(validProducts.map((p) => p.seller_id))
+		if (sellerIds.size > 1) {
+			throw new BadRequestException('Todos os produtos devem pertencer à mesma loja')
 		}
 
 		// Get prices
@@ -178,25 +168,26 @@ export class CatalogService {
 			}
 		}
 
-		// Find or create customer
+		// Get seller_id from product early
+		const firstProduct = validProducts[0]
+		const sellerId = firstProduct?.seller_id
+		if (!sellerId) {
+			throw new BadRequestException('Não foi possível identificar o vendedor')
+		}
+
+		// Find or create customer scoped to seller
 		let customerId: string
 
 		const existingCustomer = await this.catalogRepository.findCustomerByContact(
 			customer.email,
 			customer.phone,
 			customer.document,
+			sellerId,
 		)
 
 		if (existingCustomer) {
 			customerId = existingCustomer.id
 		} else {
-			// Get seller_id from one of the products
-			const firstProduct = validProducts[0]
-			const sellerId = firstProduct?.seller_id
-			if (!sellerId) {
-				throw new BadRequestException('Não foi possível identificar o vendedor')
-			}
-
 			const newCustomer = await this.catalogRepository.createCustomer({
 				seller_id: sellerId,
 				name: customer.name,
@@ -216,9 +207,10 @@ export class CatalogService {
 			customerId = newCustomer.id
 		}
 
-		// Generate order number
-		const lastOrderId = await this.catalogRepository.findLastOrderId()
-		const orderNumber = `PED-${String((lastOrderId || 0) + 1).padStart(6, '0')}`
+		// Generate order number with timestamp + random suffix to avoid collisions
+		const timestamp = Date.now().toString(36).toUpperCase()
+		const random = Math.random().toString(36).substring(2, 6).toUpperCase()
+		const orderNumber = `PED-${timestamp}${random}`
 
 		// Calculate totals
 		const orderItems = items.map((item) => {
@@ -233,13 +225,6 @@ export class CatalogService {
 		})
 
 		const subtotal = orderItems.reduce((acc, item) => acc + item.total, 0)
-
-		// Get seller_id from product
-		const firstProduct = validProducts[0]
-		const sellerId = firstProduct?.seller_id
-		if (!sellerId) {
-			throw new BadRequestException('Não foi possível identificar o vendedor')
-		}
 
 		// Create order with items
 		const order = await this.catalogRepository.createOrderWithItems({

@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { z } from 'zod'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { Public } from '../decorators/public.decorator'
@@ -23,6 +24,7 @@ export class EmailVerificationController {
 
 	@Public()
 	@Post('verify-email')
+	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 5 }, long: { ttl: 3600000, limit: 10 } })
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'Verify email with token' })
 	@ApiBody({ schema: { example: { token: 'abc123...' } } })
@@ -40,6 +42,7 @@ export class EmailVerificationController {
 
 	@Public()
 	@Post('resend-verification')
+	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 3 }, long: { ttl: 3600000, limit: 5 } })
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'Resend email verification link' })
 	@ApiBody({ schema: { example: { email: 'user@example.com' } } })

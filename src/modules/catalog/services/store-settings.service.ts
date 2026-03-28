@@ -1,4 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import {
 	STORE_SETTINGS_REPOSITORY,
 	type StoreSettingsRepository,
@@ -14,10 +15,15 @@ interface UpdateStoreSettings {
 
 @Injectable()
 export class StoreSettingsService {
+	private readonly frontendUrl: string
+
 	constructor(
 		@Inject(STORE_SETTINGS_REPOSITORY)
 		private readonly storeSettingsRepository: StoreSettingsRepository,
-	) {}
+		private readonly configService: ConfigService,
+	) {
+		this.frontendUrl = configService.get<string>('frontendUrl', 'http://localhost:3000')
+	}
 
 	async getSettings(sellerId: string) {
 		const account = await this.storeSettingsRepository.findByAccountId(sellerId)
@@ -37,7 +43,7 @@ export class StoreSettingsService {
 			phone: account.store_phone,
 			whatsapp: account.store_whatsapp,
 			catalogUrl: account.store_slug
-				? `${process.env.FRONTEND_URL || 'http://localhost:3000'}/loja/${account.store_slug}`
+				? `${this.frontendUrl}/loja/${account.store_slug}`
 				: null,
 		}
 	}
@@ -66,7 +72,7 @@ export class StoreSettingsService {
 		return {
 			...updated,
 			catalogUrl: updated.store_slug
-				? `${process.env.FRONTEND_URL || 'http://localhost:3000'}/loja/${updated.store_slug}`
+				? `${this.frontendUrl}/loja/${updated.store_slug}`
 				: null,
 			message: 'Configurações atualizadas com sucesso',
 		}
@@ -87,7 +93,7 @@ export class StoreSettingsService {
 			throw new NotFoundException('Conta não encontrada')
 		}
 
-		const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000'
+		const baseUrl = this.frontendUrl
 
 		return {
 			hasSlug: !!account.store_slug,

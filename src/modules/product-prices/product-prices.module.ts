@@ -15,6 +15,6 @@ import { ProductPricesService } from './services/product-prices.service'
 			useClass: PrismaProductPriceRepository,
 		},
 	],
-	exports: [ProductPricesService],
+	exports: [ProductPricesService, PRODUCT_PRICE_REPOSITORY],
 })
 export class ProductPricesModule {}

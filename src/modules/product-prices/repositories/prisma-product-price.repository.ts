@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateProductPriceData,
@@ -6,12 +6,32 @@ import type {
 	ProductPriceRepository,
 	UpdateProductPriceData,
 } from '@/shared/repositories/product-price.repository'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 
 @Injectable()
 export class PrismaProductPriceRepository implements ProductPriceRepository {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly tenantContext: TenantContext,
+	) {}
+
+	private getTenantFilter() {
+		if (this.tenantContext.isAdmin()) {
+			return {}
+		}
+		return { seller_id: this.tenantContext.requireSellerId() }
+	}
+
+	private async verifyProductOwnership(productId: number): Promise<void> {
+		const product = await this.prisma.product.findFirst({
+			where: { id: productId, ...this.getTenantFilter() },
+		})
+		if (!product) throw new NotFoundException('Product not found')
+	}
 
 	async findByProduct(productId: number): Promise<ProductPrice[]> {
+		await this.verifyProductOwnership(productId)
+
 		return this.prisma.product_price.findMany({
 			where: { product_id: productId },
 			orderBy: [{ valid_from: 'desc' }, { createdAt: 'desc' }],
@@ -19,12 +39,23 @@ export class PrismaProductPriceRepository implements ProductPriceRepository {
 	}
 
 	async findById(id: number): Promise<ProductPrice | null> {
-		return this.prisma.product_price.findUnique({
+		const price = await this.prisma.product_price.findUnique({
 			where: { id },
-		}) as unknown as ProductPrice | null
+			include: { product: { select: { seller_id: true } } },
+		})
+		if (!price) return null
+
+		if (!this.tenantContext.isAdmin()) {
+			const sellerId = this.tenantContext.requireSellerId()
+			if ((price as any).product.seller_id !== sellerId) return null
+		}
+
+		return price as unknown as ProductPrice
 	}
 
 	async create(data: CreateProductPriceData): Promise<ProductPrice> {
+		await this.verifyProductOwnership(data.product_id)
+
 		return this.prisma.product_price.create({
 			data: {
 				product_id: data.product_id,
@@ -38,6 +69,9 @@ export class PrismaProductPriceRepository implements ProductPriceRepository {
 	}
 
 	async update(id: number, data: UpdateProductPriceData): Promise<ProductPrice> {
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Price not found')
+
 		return this.prisma.product_price.update({
 			where: { id },
 			data: {
@@ -48,6 +82,9 @@ export class PrismaProductPriceRepository implements ProductPriceRepository {
 	}
 
 	async deactivate(id: number): Promise<ProductPrice> {
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Price not found')
+
 		return this.prisma.product_price.update({
 			where: { id },
 			data: { active: false },

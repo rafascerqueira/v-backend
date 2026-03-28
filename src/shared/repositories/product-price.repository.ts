@@ -14,16 +14,16 @@ export interface CreateProductPriceData {
 	product_id: number
 	price: number
 	price_type: string
-	valid_from?: Date
-	valid_to?: Date
+	valid_from?: Date | null
+	valid_to?: Date | null
 	active?: boolean
 }
 
 export interface UpdateProductPriceData {
 	price?: number
 	price_type?: string
-	valid_from?: Date
-	valid_to?: Date
+	valid_from?: Date | null
+	valid_to?: Date | null
 	active?: boolean
 }
 

@@ -5,12 +5,29 @@ import type {
 	StockMovement,
 	StockMovementRepository,
 } from '@/shared/repositories/stock-movement.repository'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 
 @Injectable()
 export class PrismaStockMovementRepository implements StockMovementRepository {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly tenantContext: TenantContext,
+	) {}
+
+	private getTenantFilter() {
+		if (this.tenantContext.isAdmin()) {
+			return {}
+		}
+		return { seller_id: this.tenantContext.requireSellerId() }
+	}
 
 	async findByProduct(productId: number): Promise<StockMovement[]> {
+		// Verify product belongs to tenant
+		const product = await this.prisma.product.findFirst({
+			where: { id: productId, ...this.getTenantFilter() },
+		})
+		if (!product) return []
+
 		return this.prisma.stock_movement.findMany({
 			where: { product_id: productId },
 			orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -21,9 +38,9 @@ export class PrismaStockMovementRepository implements StockMovementRepository {
 		const { movement_type, product_id, quantity } = data
 
 		return this.prisma.$transaction(async (tx) => {
-			// Ensure product exists
-			const product = await tx.product.findUnique({
-				where: { id: product_id },
+			// Ensure product exists and belongs to tenant
+			const product = await tx.product.findFirst({
+				where: { id: product_id, ...this.getTenantFilter() },
 			})
 			if (!product) throw new BadRequestException('Product not found')
 

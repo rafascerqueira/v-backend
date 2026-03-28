@@ -44,9 +44,16 @@ export class PrismaStoreStockRepository implements StoreStockRepository {
 	}
 
 	async findByProduct(productId: number): Promise<StoreStock | null> {
-		return this.prisma.store_stock.findUnique({
+		const stock = await this.prisma.store_stock.findUnique({
 			where: { product_id: productId },
-		}) as unknown as StoreStock | null
+		})
+		if (!stock) return null
+
+		if (!this.tenantContext.isAdmin() && stock.seller_id !== this.tenantContext.requireSellerId()) {
+			return null
+		}
+
+		return stock as unknown as StoreStock
 	}
 
 	async upsert(productId: number, data: UpdateStoreStockData): Promise<StoreStock> {

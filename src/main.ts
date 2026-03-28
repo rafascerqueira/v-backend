@@ -9,6 +9,7 @@ import cookie from '@fastify/cookie'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import { NestFactory } from '@nestjs/core'
+import { ConfigService } from '@nestjs/config'
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify'
 import { AppModule } from './app.module'
 import { setupSwagger } from './config/swagger.config'
@@ -17,11 +18,12 @@ import { ZodExceptionFilter } from './shared/filters/zod-exception.filter'
 
 async function bootstrap() {
 	const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter())
+	const configService = app.get(ConfigService)
 
 	app.enableCors({
 		origin: (origin, callback) => {
 			const allowedOrigins = [
-				process.env.CORS_ORIGIN || 'http://localhost:3000',
+				configService.get<string>('cors.origin', 'http://localhost:3000'),
 				'http://127.0.0.1:3000',
 				/^http:\/\/127\.0\.0\.1:\d+$/,
 			]
@@ -40,7 +42,7 @@ async function bootstrap() {
 	})
 
 	await app.register(cookie as any, {
-		secret: process.env.COOKIE_SECRET || process.env.JWT_SECRET,
+		secret: configService.get<string>('cookie.secret'),
 	})
 
 	await app.register(multipart as any, {
@@ -50,7 +52,7 @@ async function bootstrap() {
 	})
 
 	await app.register(fastifyStatic as any, {
-		root: process.env.UPLOAD_DIR || join(process.cwd(), 'uploads'),
+		root: configService.get<string>('upload.dir') || join(process.cwd(), 'uploads'),
 		prefix: '/uploads/',
 		decorateReply: false,
 	})
@@ -59,7 +61,8 @@ async function bootstrap() {
 
 	setupSwagger(app)
 
-	await app.listen(process.env.PORT ?? 3000, '0.0.0.0')
+	const port = configService.get<number>('port', 3001)
+	await app.listen(port, '0.0.0.0')
 }
 
 bootstrap()

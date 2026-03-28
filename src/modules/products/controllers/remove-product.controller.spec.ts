@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { RemoveProductController } from './remove-product.controller'
 import { ProductService } from '../services/product.service'
 
@@ -19,7 +20,10 @@ describe('RemoveProductController', () => {
 					useValue: mockProductService,
 				},
 			],
-		}).compile()
+		})
+			.overrideGuard(JwtAuthGuard)
+			.useValue({ canActivate: () => true })
+			.compile()
 
 		controller = module.get<RemoveProductController>(RemoveProductController)
 		productService = module.get<ProductService>(ProductService)

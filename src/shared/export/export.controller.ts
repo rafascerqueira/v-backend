@@ -28,7 +28,7 @@ export class ExportController {
 		@Query('endDate') endDate?: string,
 		@Res() res?: FastifyReply,
 	) {
-		const sellerId = this.tenantContext.getSellerId()
+		const sellerId = this.tenantContext.requireSellerId()
 
 		const where: any = { seller_id: sellerId }
 		if (startDate) where.createdAt = { gte: new Date(startDate) }
@@ -91,7 +91,7 @@ export class ExportController {
 	@ApiQuery({ name: 'format', enum: ['excel', 'pdf'], required: true })
 	@ApiResponse({ status: 200, description: 'File download' })
 	async exportProducts(@Query('format') format: 'excel' | 'pdf', @Res() res?: FastifyReply) {
-		const sellerId = this.tenantContext.getSellerId()
+		const sellerId = this.tenantContext.requireSellerId()
 
 		const products = await this.prisma.product.findMany({
 			where: { seller_id: sellerId, deletedAt: null },
@@ -162,7 +162,7 @@ export class ExportController {
 	@ApiQuery({ name: 'format', enum: ['excel', 'pdf'], required: true })
 	@ApiResponse({ status: 200, description: 'File download' })
 	async exportCustomers(@Query('format') format: 'excel' | 'pdf', @Res() res?: FastifyReply) {
-		const sellerId = this.tenantContext.getSellerId()
+		const sellerId = this.tenantContext.requireSellerId()
 
 		const customers = await this.prisma.customer.findMany({
 			where: { seller_id: sellerId },

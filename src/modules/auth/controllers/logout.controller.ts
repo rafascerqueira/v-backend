@@ -23,15 +23,29 @@ export class LogoutController {
 		@Req() request: FastifyRequest,
 		@Res({ passthrough: true }) response: FastifyReply,
 	) {
-		const token = this.extractToken(authHeader, request)
+		const accessToken = this.extractAccessToken(authHeader, request)
+		const refreshToken = this.extractRefreshToken(request)
 
-		if (token) {
+		if (accessToken) {
 			try {
-				const payload = await this.tokenService.verifyAccessToken(token)
+				const payload = await this.tokenService.verifyAccessToken(accessToken)
 				const expiresIn = payload.exp ? payload.exp - Math.floor(Date.now() / 1000) : 86400
 
 				if (expiresIn > 0) {
-					await this.tokenBlacklistService.addToBlacklist(token, expiresIn)
+					await this.tokenBlacklistService.addToBlacklist(accessToken, expiresIn)
+				}
+			} catch {
+				// Token invalid or expired, just clear cookies
+			}
+		}
+
+		if (refreshToken) {
+			try {
+				const payload = await this.tokenService.verifyRefreshToken(refreshToken)
+				const expiresIn = payload.exp ? payload.exp - Math.floor(Date.now() / 1000) : 7 * 86400
+
+				if (expiresIn > 0) {
+					await this.tokenBlacklistService.addToBlacklist(refreshToken, expiresIn)
 				}
 			} catch {
 				// Token invalid or expired, just clear cookies
@@ -42,16 +56,23 @@ export class LogoutController {
 		return { message: 'Logout successful' }
 	}
 
-	private extractToken(authHeader: string, request: FastifyRequest): string | null {
-		// Try Authorization header first
+	private extractAccessToken(authHeader: string, request: FastifyRequest): string | null {
 		if (authHeader?.startsWith('Bearer ')) {
 			return authHeader.substring(7)
 		}
 
-		// Try HttpOnly cookie
 		const cookies = request.cookies
 		if (cookies?.[AUTH_COOKIES.ACCESS_TOKEN]) {
 			return cookies[AUTH_COOKIES.ACCESS_TOKEN] ?? null
+		}
+
+		return null
+	}
+
+	private extractRefreshToken(request: FastifyRequest): string | null {
+		const cookies = request.cookies
+		if (cookies?.[AUTH_COOKIES.REFRESH_TOKEN]) {
+			return cookies[AUTH_COOKIES.REFRESH_TOKEN] ?? null
 		}
 
 		return null

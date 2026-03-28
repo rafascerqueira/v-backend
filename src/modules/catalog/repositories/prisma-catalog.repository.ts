@@ -127,9 +127,11 @@ export class PrismaCatalogRepository implements CatalogRepository {
 		email: string,
 		phone: string | null,
 		document: string | null,
+		sellerId?: string,
 	): Promise<CatalogCustomer | null> {
 		return this.prisma.customer.findFirst({
 			where: {
+				...(sellerId ? { seller_id: sellerId } : {}),
 				OR: [{ email }, ...(phone ? [{ phone }] : []), ...(document ? [{ document }] : [])],
 			},
 		}) as unknown as CatalogCustomer | null

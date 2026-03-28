@@ -11,6 +11,7 @@ import {
 	UseGuards,
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { z } from 'zod'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { CheckPlanLimit, PlanLimitsGuard } from '@/modules/subscriptions/guards/plan-limits.guard'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
@@ -21,6 +22,11 @@ import {
 	orderItemInputSchema,
 } from '../dto/create-order.dto'
 import { OrdersService } from '../services/orders.service'
+
+const updateStatusSchema = z.object({
+	status: z.enum(['pending', 'confirmed', 'shipping', 'delivered', 'canceled']),
+})
+type UpdateStatusDto = z.infer<typeof updateStatusSchema>
 
 @ApiTags('orders')
 @Controller('orders')
@@ -75,8 +81,11 @@ export class OrdersController {
 	@ApiOperation({ summary: 'Update order status' })
 	@ApiParam({ name: 'id', type: Number })
 	@ApiBody({ schema: { example: { status: 'confirmed' } } })
-	async updateStatus(@Param('id') id: string, @Body('status') status: string) {
-		return this.service.updateStatus(Number(id), status)
+	async updateStatus(
+		@Param('id') id: string,
+		@Body(new ZodValidationPipe(updateStatusSchema)) body: UpdateStatusDto,
+	) {
+		return this.service.updateStatus(Number(id), body.status)
 	}
 
 	@Delete(':id')

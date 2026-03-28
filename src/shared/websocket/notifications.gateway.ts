@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import {
 	ConnectedSocket,
 	MessageBody,
@@ -9,6 +9,8 @@ import {
 	WebSocketServer,
 } from '@nestjs/websockets'
 import type { Server, Socket } from 'socket.io'
+import { TokenService } from '@/modules/auth/services/token.service'
+import configuration from '@/config/configuration'
 
 export interface Notification {
 	id: string
@@ -20,12 +22,14 @@ export interface Notification {
 	data?: Record<string, unknown>
 }
 
+const config = configuration()
+
 @Injectable()
 @WebSocketGateway({
 	cors: {
 		origin: (origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
 			const allowedOrigins = [
-				process.env.FRONTEND_URL || 'http://localhost:3000',
+				config.frontendUrl,
 				'http://127.0.0.1:3000',
 			]
 			const isAllowed =
@@ -37,23 +41,41 @@ export interface Notification {
 	namespace: '/notifications',
 })
 export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+	private readonly logger = new Logger(NotificationsGateway.name)
+
+	constructor(private readonly tokenService: TokenService) {}
+
 	@WebSocketServer()
 	server!: Server
 
 	private connectedUsers = new Map<string, string[]>()
 
-	handleConnection(client: Socket) {
-		const userId = client.handshake.query.userId as string
-		if (userId) {
+	async handleConnection(client: Socket) {
+		const token = client.handshake.auth?.token || (client.handshake.query.token as string)
+
+		if (!token) {
+			this.logger.warn(`[WS] Connection rejected: no token (${client.id})`)
+			client.disconnect()
+			return
+		}
+
+		try {
+			const payload = await this.tokenService.verifyAccessToken(token)
+			const userId = payload.sub
+
+			;(client as any).userId = userId
 			const existing = this.connectedUsers.get(userId) || []
 			this.connectedUsers.set(userId, [...existing, client.id])
 			client.join(`user:${userId}`)
-			console.log(`[WS] User ${userId} connected (${client.id})`)
+			this.logger.log(`[WS] User ${userId} connected (${client.id})`)
+		} catch {
+			this.logger.warn(`[WS] Connection rejected: invalid token (${client.id})`)
+			client.disconnect()
 		}
 	}
 
 	handleDisconnect(client: Socket) {
-		const userId = client.handshake.query.userId as string
+		const userId = (client as any).userId as string
 		if (userId) {
 			const sockets = this.connectedUsers.get(userId) || []
 			const filtered = sockets.filter((id) => id !== client.id)
@@ -62,13 +84,13 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 			} else {
 				this.connectedUsers.set(userId, filtered)
 			}
-			console.log(`[WS] User ${userId} disconnected (${client.id})`)
+			this.logger.log(`[WS] User ${userId} disconnected (${client.id})`)
 		}
 	}
 
 	@SubscribeMessage('markAsRead')
 	handleMarkAsRead(@ConnectedSocket() client: Socket, @MessageBody() notificationId: string) {
-		const userId = client.handshake.query.userId as string
+		const userId = (client as any).userId as string
 		this.server.to(`user:${userId}`).emit('notificationRead', notificationId)
 		return { success: true }
 	}
@@ -94,7 +116,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 		this.sendToUser(userId, notification)
 	}
 
-	sendLowStockAlert(productName: string, quantity: number) {
+	sendLowStockAlert(userId: string, productName: string, quantity: number) {
 		const notification: Notification = {
 			id: `stock-${Date.now()}`,
 			type: 'warning',
@@ -104,7 +126,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 			read: false,
 			data: { productName, quantity },
 		}
-		this.sendToAll(notification)
+		this.sendToUser(userId, notification)
 	}
 
 	sendPaymentReceived(userId: string, amount: number, orderId: number) {
@@ -112,7 +134,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 			id: `payment-${orderId}-${Date.now()}`,
 			type: 'success',
 			title: 'Pagamento Recebido',
-			message: `Pagamento de R$ ${amount.toFixed(2)} recebido para o pedido #${orderId}`,
+			message: `Pagamento de R$ ${(amount / 100).toFixed(2)} recebido para o pedido #${orderId}`,
 			timestamp: new Date(),
 			read: false,
 			data: { amount, orderId },

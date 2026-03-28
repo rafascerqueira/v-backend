@@ -9,8 +9,10 @@ import {
 	Param,
 	Patch,
 	Post,
+	UseGuards,
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
 import {
 	type CreateProductPriceDto,
@@ -24,6 +26,7 @@ import { ProductPricesService } from '../services/product-prices.service'
 
 @ApiTags('product-prices')
 @Controller()
+@UseGuards(JwtAuthGuard)
 export class ProductPricesController {
 	constructor(private readonly service: ProductPricesService) {}
 

@@ -7,8 +7,7 @@ import {
 	type CreateProductData,
 	type UpdateProductData,
 } from "@/shared/repositories/product.repository";
-import { PrismaService } from "@/shared/prisma/prisma.service";
-import { TenantContext } from "@/shared/tenant/tenant.context";
+import { PRODUCT_PRICE_REPOSITORY } from "@/shared/repositories/product-price.repository";
 
 describe("ProductService", () => {
 	let service: ProductService;
@@ -86,28 +85,19 @@ describe("ProductService", () => {
 
 	beforeEach(async () => {
 		const repositoryMock = createRepositoryMock();
-		const prismaMock = {
-			product_price: {
-				updateMany: jest.fn(),
-				create: jest.fn(),
-				findMany: jest.fn(),
-			},
-			$transaction: jest.fn((callback) => callback(prismaMock)),
-		};
-
-		const tenantMock = {
-			getSellerId: () => "test-seller-id",
-			getRole: () => "seller",
-			isAdmin: () => false,
-			requireSellerId: () => "test-seller-id",
+		const priceRepositoryMock = {
+			findByProduct: jest.fn(async () => []),
+			findById: jest.fn(async () => null),
+			create: jest.fn(async (data: any) => ({ id: 1, ...data })),
+			update: jest.fn(async (id: number, data: any) => ({ id, ...data })),
+			deactivate: jest.fn(async (id: number) => ({ id, active: false })),
 		};
 
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
 				ProductService,
 				{ provide: PRODUCT_REPOSITORY, useValue: repositoryMock },
-				{ provide: PrismaService, useValue: prismaMock },
-				{ provide: TenantContext, useValue: tenantMock },
+				{ provide: PRODUCT_PRICE_REPOSITORY, useValue: priceRepositoryMock },
 			],
 		}).compile();
 

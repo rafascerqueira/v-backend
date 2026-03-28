@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { EmailService } from '@/shared/email/email.service'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { QueueProducer } from '@/shared/queue/queue.producer'
 import { type Notification, NotificationsGateway } from './notifications.gateway'
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error'
@@ -22,7 +22,7 @@ export class NotificationService {
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly gateway: NotificationsGateway,
-		private readonly emailService: EmailService,
+		private readonly queueProducer: QueueProducer,
 	) {}
 
 	async create(options: CreateNotificationOptions): Promise<Notification> {
@@ -52,7 +52,7 @@ export class NotificationService {
 
 		// Send email if requested
 		if (options.sendEmail) {
-			this.sendEmailNotification(options.userId, notification.id, options)
+			this.sendEmailNotification(options.userId, options)
 		}
 
 		return wsNotification
@@ -60,7 +60,6 @@ export class NotificationService {
 
 	private async sendEmailNotification(
 		userId: string,
-		notificationId: number,
 		options: CreateNotificationOptions,
 	) {
 		try {
@@ -71,22 +70,26 @@ export class NotificationService {
 
 			if (!user) return
 
-			await this.emailService.sendEmail({
+			await this.queueProducer.sendEmail({
 				to: user.email,
 				subject: options.emailSubject || options.title,
 				html: this.buildEmailHtml(options, user.name),
 				text: options.message,
 			})
 
-			await this.prisma.notification.update({
-				where: { id: notificationId },
-				data: { email_sent: true },
-			})
-
-			this.logger.log(`📧 Email notification sent to ${user.email}`)
+			this.logger.log(`📧 Email notification enqueued for ${user.email}`)
 		} catch (error) {
-			this.logger.error(`Failed to send email notification: ${error}`)
+			this.logger.error(`Failed to enqueue email notification: ${error}`)
 		}
+	}
+
+	private escapeHtml(str: string): string {
+		return str
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#039;')
 	}
 
 	private buildEmailHtml(options: CreateNotificationOptions, userName: string): string {
@@ -120,11 +123,11 @@ export class NotificationService {
 			<body>
 				<div class="container">
 					<div class="header">
-						<h1>${typeIcons[options.type]} ${options.title}</h1>
+						<h1>${typeIcons[options.type]} ${this.escapeHtml(options.title)}</h1>
 					</div>
 					<div class="content">
-						<p>Olá, <strong>${userName}</strong>!</p>
-						<p>${options.message}</p>
+						<p>Olá, <strong>${this.escapeHtml(userName)}</strong>!</p>
+						<p>${this.escapeHtml(options.message)}</p>
 					</div>
 					<div class="footer">
 						<p>© ${new Date().getFullYear()} Vendinhas - Gestão de Vendas</p>

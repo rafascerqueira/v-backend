@@ -1,37 +1,46 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Injectable, type OnModuleInit } from '@nestjs/common'
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import type { AuthResponseDto, TokenPayload } from '../dto/auth-response.dto'
 
 @Injectable()
 export class TokenService implements OnModuleInit {
+	private readonly logger = new Logger(TokenService.name)
 	private readonly accessTokenExpiresIn: number
 	private readonly refreshTokenExpiresIn: number
+	private readonly keysDir: string
 	private privateKey: string = ''
 	private publicKey: string = ''
-	private useAsymmetric: boolean = false
 
-	constructor(private readonly jwtService: JwtService) {
-		this.accessTokenExpiresIn = this.parseExpiresIn(process.env.JWT_ACCESS_TOKEN_EXPIRES_IN || '1d')
-		this.refreshTokenExpiresIn = this.parseExpiresIn(
-			process.env.JWT_REFRESH_TOKEN_EXPIRES_IN || '7d',
+	constructor(
+		private readonly jwtService: JwtService,
+		private readonly configService: ConfigService,
+	) {
+		this.accessTokenExpiresIn = this.parseExpiresIn(
+			configService.get<string>('jwt.accessTokenExpiresIn', '1d'),
 		)
+		this.refreshTokenExpiresIn = this.parseExpiresIn(
+			configService.get<string>('jwt.refreshTokenExpiresIn', '7d'),
+		)
+		this.keysDir = configService.get<string>('jwt.keysDir') || join(process.cwd(), 'keys')
 	}
 
 	onModuleInit() {
-		const keysDir = process.env.JWT_KEYS_DIR || join(process.cwd(), 'keys')
+		const keysDir = this.keysDir
 		const privateKeyPath = join(keysDir, 'private.pem')
 		const publicKeyPath = join(keysDir, 'public.pem')
 
-		if (existsSync(privateKeyPath) && existsSync(publicKeyPath)) {
-			this.privateKey = readFileSync(privateKeyPath, 'utf8')
-			this.publicKey = readFileSync(publicKeyPath, 'utf8')
-			this.useAsymmetric = true
-			console.log('🔐 JWT: Using RS256 (asymmetric keys)')
-		} else {
-			console.log('🔑 JWT: Using HS256 (symmetric secret) - keys not found')
+		if (!existsSync(privateKeyPath) || !existsSync(publicKeyPath)) {
+			throw new Error(
+				`RS256 JWT keys not found at ${keysDir}. Both private.pem and public.pem are required.`,
+			)
 		}
+
+		this.privateKey = readFileSync(privateKeyPath, 'utf8')
+		this.publicKey = readFileSync(publicKeyPath, 'utf8')
+		this.logger.log('JWT: Using RS256 (asymmetric keys)')
 	}
 
 	private parseExpiresIn(value: string): number {
@@ -56,13 +65,8 @@ export class TokenService implements OnModuleInit {
 	}
 
 	async generateTokens(payload: TokenPayload): Promise<AuthResponseDto> {
-		const signOptions = this.useAsymmetric
-			? { privateKey: this.privateKey, algorithm: 'RS256' as const }
-			: { secret: process.env.JWT_SECRET }
-
-		const refreshSignOptions = this.useAsymmetric
-			? { privateKey: this.privateKey, algorithm: 'RS256' as const }
-			: { secret: process.env.JWT_REFRESH_SECRET }
+		const signOptions = { privateKey: this.privateKey, algorithm: 'RS256' as const }
+		const refreshSignOptions = { privateKey: this.privateKey, algorithm: 'RS256' as const }
 
 		const [accessToken, refreshToken] = await Promise.all([
 			this.jwtService.signAsync(
@@ -93,23 +97,33 @@ export class TokenService implements OnModuleInit {
 	}
 
 	async verifyAccessToken(token: string): Promise<TokenPayload> {
-		const verifyOptions = this.useAsymmetric
-			? { publicKey: this.publicKey, algorithms: ['RS256' as const] }
-			: { secret: process.env.JWT_SECRET }
-
-		return this.jwtService.verifyAsync<TokenPayload>(token, verifyOptions)
+		return this.jwtService.verifyAsync<TokenPayload>(token, {
+			publicKey: this.publicKey,
+			algorithms: ['RS256' as const],
+		})
 	}
 
 	async verifyRefreshToken(token: string): Promise<TokenPayload> {
-		const verifyOptions = this.useAsymmetric
-			? { publicKey: this.publicKey, algorithms: ['RS256' as const] }
-			: { secret: process.env.JWT_REFRESH_SECRET }
-
-		return this.jwtService.verifyAsync<TokenPayload>(token, verifyOptions)
+		return this.jwtService.verifyAsync<TokenPayload>(token, {
+			publicKey: this.publicKey,
+			algorithms: ['RS256' as const],
+		})
 	}
 
-	async refreshTokens(refreshToken: string): Promise<AuthResponseDto> {
+	async refreshTokens(
+		refreshToken: string,
+		blacklistService?: TokenBlacklistService,
+	): Promise<AuthResponseDto> {
 		const payload = await this.verifyRefreshToken(refreshToken)
+
+		// Blacklist the old refresh token to prevent reuse
+		if (blacklistService) {
+			const expiresIn = payload.exp ? payload.exp - Math.floor(Date.now() / 1000) : this.refreshTokenExpiresIn
+			if (expiresIn > 0) {
+				await blacklistService.addToBlacklist(refreshToken, expiresIn)
+			}
+		}
+
 		return this.generateTokens({
 			sub: payload.sub,
 			email: payload.email,
@@ -117,3 +131,6 @@ export class TokenService implements OnModuleInit {
 		})
 	}
 }
+
+// Import at bottom to avoid circular dependency
+import { TokenBlacklistService } from './token-blacklist.service'

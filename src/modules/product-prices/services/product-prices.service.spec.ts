@@ -65,7 +65,7 @@ describe('ProductPricesService', () => {
 
     expect(repositoryMock.update).toHaveBeenCalledWith(
       2,
-      expect.objectContaining({ price: 1500, valid_from: expect.any(Date), valid_to: undefined }),
+      expect.objectContaining({ price: 1500, valid_from: expect.any(Date), valid_to: null }),
     )
     expect(res).toBe(expected)
   })

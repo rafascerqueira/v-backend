@@ -1,13 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common'
-import type { PriceType } from '@/generated/prisma/enums'
 import type { PaginationDto } from '@/shared/dto/pagination.dto'
 import { createPaginatedResponse } from '@/shared/dto/pagination.dto'
-import { PrismaService } from '@/shared/prisma/prisma.service'
 import {
 	type CreateProductData,
 	PRODUCT_REPOSITORY,
 	type ProductRepository,
 } from '@/shared/repositories/product.repository'
+import {
+	PRODUCT_PRICE_REPOSITORY,
+	type ProductPriceRepository,
+} from '@/shared/repositories/product-price.repository'
 import type { CreateProductDto } from '../dto/create-product.dto'
 import type { UpdateProductDto } from '../dto/update-product.dto'
 
@@ -16,7 +18,8 @@ export class ProductService {
 	constructor(
 		@Inject(PRODUCT_REPOSITORY)
 		private readonly productRepository: ProductRepository,
-		private readonly prisma: PrismaService,
+		@Inject(PRODUCT_PRICE_REPOSITORY)
+		private readonly productPriceRepository: ProductPriceRepository,
 	) {}
 
 	async create(data: CreateProductData) {
@@ -44,27 +47,16 @@ export class ProductService {
 		return this.productRepository.softDelete(parseInt(id, 10))
 	}
 
-	async addPrice(productId: number, price: number, priceType: PriceType) {
-		// Deactivate existing prices of the same type
-		await this.prisma.product_price.updateMany({
-			where: { product_id: productId, price_type: priceType, active: true },
-			data: { active: false },
-		})
-
-		return this.prisma.product_price.create({
-			data: {
-				product_id: productId,
-				price,
-				price_type: priceType,
-				active: true,
-			},
+	async addPrice(productId: number, price: number, priceType: string) {
+		return this.productPriceRepository.create({
+			product_id: productId,
+			price,
+			price_type: priceType,
+			active: true,
 		})
 	}
 
 	async getProductPrices(productId: number) {
-		return this.prisma.product_price.findMany({
-			where: { product_id: productId, active: true },
-			orderBy: { createdAt: 'desc' },
-		})
+		return this.productPriceRepository.findByProduct(productId)
 	}
 }

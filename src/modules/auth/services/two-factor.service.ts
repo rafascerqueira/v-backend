@@ -180,16 +180,17 @@ export class TwoFactorService {
 
 	private generateRandomCode(): string {
 		const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+		const bytes = new Uint8Array(8)
+		crypto.getRandomValues(bytes)
 		let code = ''
 		for (let i = 0; i < 8; i++) {
-			const randomIndex = Math.floor(Math.random() * chars.length)
-			code += chars[randomIndex]
+			code += chars[bytes[i] % chars.length]
 		}
 		return `${code.slice(0, 4)}-${code.slice(4)}`
 	}
 
 	private hashCode(code: string): string {
-		const crypto = require('node:crypto')
-		return crypto.createHash('sha256').update(code.replace(/-/g, '')).digest('hex')
+		const { createHash } = require('node:crypto')
+		return createHash('sha256').update(code.replace(/-/g, '')).digest('hex')
 	}
 }

@@ -70,6 +70,7 @@ export interface CatalogRepository {
 		email: string,
 		phone: string | null,
 		document: string | null,
+		sellerId?: string,
 	): Promise<CatalogCustomer | null>
 	createCustomer(data: {
 		seller_id: string

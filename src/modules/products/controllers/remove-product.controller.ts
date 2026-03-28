@@ -1,9 +1,11 @@
-import { Controller, Delete, Param } from '@nestjs/common'
+import { Controller, Delete, Param, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ProductService } from '../services/product.service'
 
 @ApiTags('products')
 @Controller('products')
+@UseGuards(JwtAuthGuard)
 export class RemoveProductController {
 	constructor(private readonly productService: ProductService) {}
 

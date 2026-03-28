@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing'
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ProductPricesController } from './product-prices.controller'
 import { ProductPricesService } from '../services/product-prices.service'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
@@ -17,7 +18,10 @@ describe('ProductPricesController', () => {
     const module = await Test.createTestingModule({
       controllers: [ProductPricesController],
       providers: [{ provide: ProductPricesService, useValue: serviceMock }],
-    }).compile()
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile()
 
     controller = module.get(ProductPricesController)
     jest.clearAllMocks()

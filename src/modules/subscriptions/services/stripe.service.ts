@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import Stripe from 'stripe'
 import {
 	SUBSCRIPTION_REPOSITORY,
@@ -9,16 +10,19 @@ import {
 export class StripeService {
 	private readonly logger = new Logger(StripeService.name)
 	private stripe: Stripe | null = null
+	private readonly webhookSecret: string | undefined
 
 	constructor(
 		@Inject(SUBSCRIPTION_REPOSITORY)
 		private readonly subscriptionRepository: SubscriptionRepository,
+		private readonly configService: ConfigService,
 	) {
+		this.webhookSecret = configService.get<string>('stripe.webhookSecret')
 		this.initializeStripe()
 	}
 
 	private initializeStripe() {
-		const secretKey = process.env.STRIPE_SECRET_KEY
+		const secretKey = this.configService.get<string>('stripe.secretKey')
 
 		if (!secretKey) {
 			this.logger.warn('💳 Stripe not configured - payments disabled')
@@ -26,7 +30,7 @@ export class StripeService {
 		}
 
 		this.stripe = new Stripe(secretKey, {
-			apiVersion: '2026-01-28.clover',
+			apiVersion: '2026-02-25.clover',
 		})
 
 		this.logger.log('💳 Stripe initialized')
@@ -128,7 +132,7 @@ export class StripeService {
 	constructWebhookEvent(payload: Buffer, signature: string): Stripe.Event | null {
 		if (!this.stripe) return null
 
-		const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
+		const webhookSecret = this.webhookSecret
 		if (!webhookSecret) {
 			this.logger.error('Stripe webhook secret not configured')
 			return null

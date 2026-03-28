@@ -10,10 +10,12 @@ import {
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply, FastifyRequest } from 'fastify'
+import { Throttle } from '@nestjs/throttler'
 import { z } from 'zod'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
 import { Public } from '../decorators/public.decorator'
+import { TokenBlacklistService } from '../services/token-blacklist.service'
 import { TokenService } from '../services/token.service'
 
 const refreshTokenSchema = z.object({
@@ -25,10 +27,14 @@ type RefreshTokenDto = z.infer<typeof refreshTokenSchema>
 @ApiTags('auth')
 @Controller('auth')
 export class RefreshTokenController {
-	constructor(private readonly tokenService: TokenService) {}
+	constructor(
+		private readonly tokenService: TokenService,
+		private readonly tokenBlacklistService: TokenBlacklistService,
+	) {}
 
 	@Post('refresh')
 	@Public()
+	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 10 }, long: { ttl: 3600000, limit: 30 } })
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'Refresh access token' })
 	@ApiResponse({ status: 200, description: 'Tokens refreshed successfully' })
@@ -52,7 +58,7 @@ export class RefreshTokenController {
 		}
 
 		try {
-			const tokens = await this.tokenService.refreshTokens(refreshToken)
+			const tokens = await this.tokenService.refreshTokens(refreshToken, this.tokenBlacklistService)
 
 			response.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {
 				...COOKIE_OPTIONS,

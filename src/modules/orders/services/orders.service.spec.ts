@@ -1,6 +1,7 @@
 import { Test } from "@nestjs/testing";
 import { OrdersService } from "./orders.service";
 import { ORDER_REPOSITORY } from "@/shared/repositories/order.repository";
+import { PrismaService } from "@/shared/prisma/prisma.service";
 import { TenantContext } from "@/shared/tenant/tenant.context";
 
 const repositoryMock = {
@@ -18,6 +19,16 @@ const tenantContextMock = {
 	isAdmin: jest.fn().mockReturnValue(false),
 };
 
+const prismaMock = {
+	$transaction: jest.fn((cb: any) => cb(prismaMock)),
+	order_item: { findMany: jest.fn().mockResolvedValue([]) },
+	store_stock: {
+		findUnique: jest.fn().mockResolvedValue(null),
+		update: jest.fn(),
+	},
+	stock_movement: { create: jest.fn() },
+};
+
 describe("OrdersService", () => {
 	let service: OrdersService;
 
@@ -27,6 +38,7 @@ describe("OrdersService", () => {
 				OrdersService,
 				{ provide: ORDER_REPOSITORY, useValue: repositoryMock },
 				{ provide: TenantContext, useValue: tenantContextMock },
+				{ provide: PrismaService, useValue: prismaMock },
 			],
 		}).compile();
 

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { Inject, Injectable } from '@nestjs/common'
-import { EmailService } from '@/shared/email/email.service'
+import { QueueProducer } from '@/shared/queue/queue.producer'
 import {
 	EMAIL_VERIFICATION_REPOSITORY,
 	type EmailVerificationRepository,
@@ -11,7 +11,7 @@ export class EmailVerificationService {
 	constructor(
 		@Inject(EMAIL_VERIFICATION_REPOSITORY)
 		private readonly emailVerificationRepository: EmailVerificationRepository,
-		private readonly emailService: EmailService,
+		private readonly queueProducer: QueueProducer,
 	) {}
 
 	private generateToken(): string {
@@ -35,7 +35,7 @@ export class EmailVerificationService {
 			expires_at: expiresAt,
 		})
 
-		await this.emailService.sendEmailVerification(email, token, name)
+		await this.queueProducer.sendEmailVerification({ to: email, name, token })
 	}
 
 	async verifyEmail(token: string): Promise<{ success: boolean; message: string }> {
@@ -56,10 +56,10 @@ export class EmailVerificationService {
 			verificationToken.id,
 		)
 
-		await this.emailService.sendWelcomeEmail(
-			verificationToken.account.email,
-			verificationToken.account.name,
-		)
+		await this.queueProducer.sendWelcomeEmail({
+			to: verificationToken.account.email,
+			name: verificationToken.account.name,
+		})
 
 		return { success: true, message: 'Email verificado com sucesso!' }
 	}
@@ -75,7 +75,10 @@ export class EmailVerificationService {
 		}
 
 		if (account.email_verified) {
-			return { success: false, message: 'Email já foi verificado' }
+			return {
+				success: true,
+				message: 'Se o email estiver cadastrado, você receberá o link de verificação.',
+			}
 		}
 
 		await this.createVerificationToken(account.id, account.email, account.name)

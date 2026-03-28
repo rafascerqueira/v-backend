@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import sharp from 'sharp'
 
 export interface UploadOptions {
@@ -42,9 +43,9 @@ export class UploadService {
 	private readonly uploadDir: string
 	private readonly baseUrl: string
 
-	constructor() {
-		this.uploadDir = process.env.UPLOAD_DIR || join(process.cwd(), 'uploads')
-		this.baseUrl = process.env.APP_URL || 'http://localhost:3001'
+	constructor(private readonly configService: ConfigService) {
+		this.uploadDir = configService.get<string>('upload.dir') || join(process.cwd(), 'uploads')
+		this.baseUrl = configService.get<string>('appUrl', 'http://localhost:3001')
 		this.ensureUploadDir()
 	}
 
@@ -205,9 +206,17 @@ export class UploadService {
 	async deleteFile(path: string): Promise<boolean> {
 		try {
 			const fullPath = join(this.uploadDir, path)
+			const resolved = require('node:path').resolve(fullPath)
+			const resolvedUploadDir = require('node:path').resolve(this.uploadDir)
+
+			if (!resolved.startsWith(resolvedUploadDir + '/')) {
+				this.logger.warn(`Path traversal attempt blocked: ${path}`)
+				return false
+			}
+
 			if (existsSync(fullPath)) {
 				unlinkSync(fullPath)
-				this.logger.log(`🗑️ File deleted: ${path}`)
+				this.logger.log(`File deleted: ${path}`)
 				return true
 			}
 			return false

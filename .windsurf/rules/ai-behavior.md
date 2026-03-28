@@ -1,4 +1,4 @@
-  ---
+---
 trigger: always_on
 description: AI agent interaction and decision rules for v-backend
 ---
@@ -46,4 +46,4 @@ description: AI agent interaction and decision rules for v-backend
 - Run `pnpm biome ci .` and `pnpm build` before marking complete. Fix any errors introduced.
 - Summarize every decision made, including alternatives discarded and why.
 - List any assumptions explicitly so the user can validate them.
-- Ask the user to update project context files when done.
+- If the task changed an architecture rule, added a package, or introduced a new convention: flag that both `core-rules.md` and `CLAUDE.md` may need updating. Do not update them unilaterally — present what changed and ask the user to confirm before touching either file.

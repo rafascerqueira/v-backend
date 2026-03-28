@@ -56,8 +56,8 @@ export class BillingsService {
 		const { due_date, payment_date, ...rest } = dto
 		return this.billingRepository.update(id, {
 			...rest,
-			due_date: due_date ? new Date(due_date) : undefined,
-			payment_date: payment_date ? new Date(payment_date) : undefined,
+			due_date: due_date ? new Date(due_date) : due_date === null ? null : undefined,
+			payment_date: payment_date ? new Date(payment_date) : payment_date === null ? null : undefined,
 		})
 	}
 }

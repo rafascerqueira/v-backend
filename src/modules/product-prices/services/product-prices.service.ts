@@ -23,8 +23,8 @@ export class ProductPricesService {
 		return this.productPriceRepository.create({
 			product_id: productId,
 			...rest,
-			valid_from: valid_from ? new Date(valid_from) : undefined,
-			valid_to: valid_to ? new Date(valid_to) : undefined,
+			valid_from: valid_from ? new Date(valid_from) : valid_from === null ? null : undefined,
+			valid_to: valid_to ? new Date(valid_to) : valid_to === null ? null : undefined,
 		})
 	}
 
@@ -32,8 +32,8 @@ export class ProductPricesService {
 		const { valid_from, valid_to, ...rest } = dto
 		return this.productPriceRepository.update(id, {
 			...rest,
-			valid_from: valid_from ? new Date(valid_from) : undefined,
-			valid_to: valid_to ? new Date(valid_to) : undefined,
+			valid_from: valid_from ? new Date(valid_from) : valid_from === null ? null : undefined,
+			valid_to: valid_to ? new Date(valid_to) : valid_to === null ? null : undefined,
 		})
 	}
 

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { createTransport, type Transporter } from 'nodemailer'
 
 export interface SendEmailOptions {
@@ -12,16 +13,20 @@ export interface SendEmailOptions {
 export class EmailService {
 	private readonly logger = new Logger(EmailService.name)
 	private transporter: Transporter | null = null
+	private readonly smtpFrom: string
+	private readonly frontendUrl: string
 
-	constructor() {
+	constructor(private readonly configService: ConfigService) {
+		this.smtpFrom = configService.get<string>('smtp.from', 'noreply@vendinhas.app')
+		this.frontendUrl = configService.get<string>('frontendUrl', 'http://localhost:3000')
 		this.initializeTransporter()
 	}
 
 	private initializeTransporter() {
-		const host = process.env.SMTP_HOST
-		const port = parseInt(process.env.SMTP_PORT || '587', 10)
-		const user = process.env.SMTP_USER
-		const pass = process.env.SMTP_PASS
+		const host = this.configService.get<string>('smtp.host')
+		const port = this.configService.get<number>('smtp.port', 587)
+		const user = this.configService.get<string>('smtp.user')
+		const pass = this.configService.get<string>('smtp.pass')
 
 		if (!host) {
 			this.logger.warn('📧 SMTP not configured - emails will be logged to console')
@@ -60,7 +65,7 @@ export class EmailService {
 	}
 
 	async sendEmail(options: SendEmailOptions): Promise<boolean> {
-		const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@vendinhas.app'
+		const from = this.smtpFrom
 
 		if (!this.transporter) {
 			this.logger.log(`📧 [DEV] Email to ${options.to}:`)
@@ -86,7 +91,7 @@ export class EmailService {
 	}
 
 	async sendPasswordResetEmail(to: string, token: string, name: string): Promise<boolean> {
-		const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`
+		const resetUrl = `${this.frontendUrl}/reset-password?token=${token}`
 
 		return this.sendEmail({
 			to,
@@ -134,7 +139,7 @@ export class EmailService {
 	}
 
 	async sendEmailVerification(to: string, token: string, name: string): Promise<boolean> {
-		const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email?token=${token}`
+		const verifyUrl = `${this.frontendUrl}/verify-email?token=${token}`
 
 		return this.sendEmail({
 			to,
@@ -180,7 +185,7 @@ export class EmailService {
 	}
 
 	async sendWelcomeEmail(to: string, name: string): Promise<boolean> {
-		const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`
+		const loginUrl = `${this.frontendUrl}/login`
 
 		return this.sendEmail({
 			to,

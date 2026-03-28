@@ -8,6 +8,7 @@ import {
 	UnauthorizedException,
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import type { FastifyReply } from 'fastify'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '@/modules/auth/constants/cookies'
 import { Public } from '@/modules/auth/decorators/public.decorator'
@@ -28,6 +29,7 @@ export class LoginController {
 
 	@Post('login')
 	@Public()
+	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 5 }, long: { ttl: 3600000, limit: 20 } })
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'User login' })
 	@ApiResponse({ status: 200, description: 'Login successful, returns JWT tokens' })

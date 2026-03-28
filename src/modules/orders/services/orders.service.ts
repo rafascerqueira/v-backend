@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
+import { PrismaService } from '@/shared/prisma/prisma.service'
 import { ORDER_REPOSITORY, type OrderRepository } from '@/shared/repositories/order.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import type { CreateOrderDto, OrderItemInputDto } from '../dto/create-order.dto'
@@ -8,6 +9,7 @@ export class OrdersService {
 	constructor(
 		@Inject(ORDER_REPOSITORY) private readonly orderRepository: OrderRepository,
 		private readonly tenantContext: TenantContext,
+		private readonly prisma: PrismaService,
 	) {}
 
 	async create(dto: CreateOrderDto) {
@@ -62,6 +64,11 @@ export class OrdersService {
 			throw new Error('Order not found or access denied')
 		}
 
+		// Restore stock on cancellation (only if not already canceled)
+		if (status === 'canceled' && order.status !== 'canceled') {
+			await this.restoreStock(id)
+		}
+
 		// Map order status to billing status
 		const billingStatusMap: Record<string, { status: string; payment_status: string } | null> = {
 			pending: { status: 'pending', payment_status: 'pending' },
@@ -88,6 +95,33 @@ export class OrdersService {
 					}
 				: undefined,
 		)
+	}
+
+	private async restoreStock(orderId: number) {
+		await this.prisma.$transaction(async (tx) => {
+			const items = await tx.order_item.findMany({ where: { order_id: orderId } })
+
+			for (const item of items) {
+				const stock = await tx.store_stock.findUnique({
+					where: { product_id: item.product_id },
+				})
+				if (stock) {
+					await tx.store_stock.update({
+						where: { product_id: item.product_id },
+						data: { quantity: { increment: item.quantity } },
+					})
+					await tx.stock_movement.create({
+						data: {
+							movement_type: 'in',
+							reference_type: 'return',
+							reference_id: orderId,
+							product_id: item.product_id,
+							quantity: item.quantity,
+						},
+					})
+				}
+			}
+		})
 	}
 
 	async delete(id: number) {

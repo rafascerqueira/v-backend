@@ -3,6 +3,7 @@ import {
 	PLAN_LIMITS_REPOSITORY,
 	type PlanLimitsRepository,
 } from '@/shared/repositories/plan-limits.repository'
+import { PLAN_LIMITS as CANONICAL_LIMITS } from '../constants/plan-limits'
 
 export interface PlanLimits {
 	maxProducts: number
@@ -13,15 +14,21 @@ export interface PlanLimits {
 
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
 	free: {
-		maxProducts: 60,
-		maxCustomers: 40,
-		maxOrdersPerMonth: 30,
+		maxProducts: CANONICAL_LIMITS.free.maxProducts,
+		maxCustomers: CANONICAL_LIMITS.free.maxCustomers,
+		maxOrdersPerMonth: CANONICAL_LIMITS.free.maxOrdersPerMonth,
 		unlimited: false,
 	},
 	pro: {
-		maxProducts: -1, // unlimited
-		maxCustomers: -1,
-		maxOrdersPerMonth: -1,
+		maxProducts: CANONICAL_LIMITS.pro.maxProducts,
+		maxCustomers: CANONICAL_LIMITS.pro.maxCustomers,
+		maxOrdersPerMonth: CANONICAL_LIMITS.pro.maxOrdersPerMonth,
+		unlimited: true,
+	},
+	enterprise: {
+		maxProducts: CANONICAL_LIMITS.enterprise.maxProducts,
+		maxCustomers: CANONICAL_LIMITS.enterprise.maxCustomers,
+		maxOrdersPerMonth: CANONICAL_LIMITS.enterprise.maxOrdersPerMonth,
 		unlimited: true,
 	},
 }

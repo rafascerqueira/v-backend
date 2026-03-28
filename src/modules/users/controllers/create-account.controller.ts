@@ -1,5 +1,6 @@
 import { Body, Controller, HttpCode, HttpException, HttpStatus, Post } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { Public } from '@/modules/auth/decorators/public.decorator'
 import { EmailVerificationService } from '@/modules/auth/services/email-verification.service'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
@@ -16,6 +17,7 @@ export class CreateAccountController {
 
 	@Post('register')
 	@Public()
+	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 3 }, long: { ttl: 3600000, limit: 10 } })
 	@HttpCode(HttpStatus.CREATED)
 	@ApiOperation({ summary: 'Create user account' })
 	@ApiResponse({ status: 201, description: 'Account created successfully' })
@@ -38,11 +40,20 @@ export class CreateAccountController {
 			throw new HttpException('Account already exists', HttpStatus.BAD_REQUEST)
 		}
 
-		const account = await this.accountService.create({
-			name,
-			email,
-			password,
-		})
+		let account: any
+		try {
+			account = await this.accountService.create({
+				name,
+				email,
+				password,
+			})
+		} catch (error: any) {
+			// Handle race condition: concurrent requests with same email
+			if (error?.code === 'P2002') {
+				throw new HttpException('Account already exists', HttpStatus.BAD_REQUEST)
+			}
+			throw error
+		}
 
 		await this.emailVerificationService.createVerificationToken(account.id, email, name)
 

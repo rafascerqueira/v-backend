@@ -38,4 +38,5 @@ export interface AccountRepository {
 	findByEmail(email: string): Promise<Account | null>
 	update(id: string, data: UpdateAccountData): Promise<Account>
 	delete(id: string): Promise<Account>
+	anonymize(id: string): Promise<void>
 }

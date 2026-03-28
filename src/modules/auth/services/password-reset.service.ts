@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { Inject, Injectable } from '@nestjs/common'
 import { AccountService } from '@/modules/users/services/account.service'
-import { EmailService } from '@/shared/email/email.service'
+import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
+import { QueueProducer } from '@/shared/queue/queue.producer'
 import {
 	PASSWORD_RESET_REPOSITORY,
 	type PasswordResetRepository,
@@ -13,7 +14,8 @@ export class PasswordResetService {
 		@Inject(PASSWORD_RESET_REPOSITORY)
 		private readonly passwordResetRepository: PasswordResetRepository,
 		private readonly accountService: AccountService,
-		private readonly emailService: EmailService,
+		private readonly queueProducer: QueueProducer,
+		private readonly passwordHasher: PasswordHasherService,
 	) {}
 
 	private generateToken(): string {
@@ -43,7 +45,7 @@ export class PasswordResetService {
 			expires_at: expiresAt,
 		})
 
-		await this.emailService.sendPasswordResetEmail(email, token, account.name)
+		await this.queueProducer.sendPasswordResetEmail({ to: email, name: account.name, token })
 
 		return { success: true }
 	}
@@ -57,15 +59,12 @@ export class PasswordResetService {
 			return false
 		}
 
-		const salt = randomBytes(16).toString('hex')
-		const hashedPassword = createHash('sha256')
-			.update(newPassword + salt)
-			.digest('hex')
+		const { hash, salt } = await this.passwordHasher.hash(newPassword)
 
 		await this.passwordResetRepository.resetPasswordTransaction(
 			resetToken.account_id,
 			resetToken.id,
-			hashedPassword,
+			hash,
 			salt,
 		)
 

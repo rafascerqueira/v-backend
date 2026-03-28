@@ -49,4 +49,15 @@ export class AccountService {
 	async updateLastLogin(id: string) {
 		return this.accountRepository.update(id, { last_login_at: new Date() })
 	}
+
+	async anonymizeAccount(id: string, password: string): Promise<boolean> {
+		const account = await this.accountRepository.findById(id)
+		if (!account) return false
+
+		const isPasswordValid = await this.passwordHasher.verify(password, account.password, account.salt)
+		if (!isPasswordValid) return false
+
+		await this.accountRepository.anonymize(id)
+		return true
+	}
 }

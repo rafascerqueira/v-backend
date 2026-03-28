@@ -38,6 +38,9 @@ export class PrismaDashboardRepository implements DashboardRepository {
 				}),
 				this.prisma.order_item.groupBy({
 					by: ['product_id'],
+					where: {
+						order: tenantFilter,
+					},
 					_sum: {
 						quantity: true,
 					},
