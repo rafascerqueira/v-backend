@@ -34,9 +34,10 @@ Application type: SaaS (Software as a Service) Freemium, giving free basic acces
 - Email validation when registering a new user.
 - New user registration for system access.
 - Two types of system users: Admin (Sysadmin / Help Desk) and common user (Seller).
-- Two types of plans: Free (free) and Pro (paid).
-- Free plan allows registering up to 60 products and 40 customers in total, with a monthly limit of 30 sales.
-- Pro plan unlocks advanced system features, unlimited data, sales insights based on customer data analysis.
+- Three types of plans: Free (free), Pro (paid) and Enterprise (paid).
+- Free plan allows registering up to 50 products and 100 customers in total, with a monthly limit of 30 orders.
+- Pro plan allows up to 500 products, 1000 customers, and 500 orders/month, and unlocks reports, data export, and multiple product images.
+- Enterprise plan unlocks unlimited data, priority support, custom branding, and API access.
 - Admin user can create, edit and delete system users.
 - Admin user can manage user plans and general system settings.
 - Admin user can manage all users' customers.

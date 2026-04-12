@@ -29,6 +29,9 @@ export class CustomersService {
 					if (target?.includes('phone')) {
 						throw new ConflictException('Phone already exists')
 					}
+					if (target?.includes('document')) {
+						throw new ConflictException('Document already exists')
+					}
 					throw new ConflictException('Duplicate field value')
 				}
 			}

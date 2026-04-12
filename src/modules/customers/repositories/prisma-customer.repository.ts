@@ -34,6 +34,8 @@ export class PrismaCustomerRepository implements CustomerRepository {
 				city: data.city,
 				state: data.state,
 				zip_code: data.zip_code,
+				billing_day: data.billing_day,
+				billing_mode: data.billing_mode,
 			},
 		}) as unknown as Customer
 	}

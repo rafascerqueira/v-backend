@@ -1,15 +1,21 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import { ORDER_REPOSITORY, type OrderRepository } from '@/shared/repositories/order.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
+import { BillingsService } from '../../billings/services/billings.service'
+import { CustomersService } from '../../customers/services/customers.service'
 import type { CreateOrderDto, OrderItemInputDto } from '../dto/create-order.dto'
 
 @Injectable()
 export class OrdersService {
+	private readonly logger = new Logger(OrdersService.name)
+
 	constructor(
 		@Inject(ORDER_REPOSITORY) private readonly orderRepository: OrderRepository,
 		private readonly tenantContext: TenantContext,
 		private readonly prisma: PrismaService,
+		private readonly customersService: CustomersService,
+		private readonly billingsService: BillingsService,
 	) {}
 
 	async create(dto: CreateOrderDto) {
@@ -20,7 +26,7 @@ export class OrdersService {
 		const discount = items.reduce((acc, it) => acc + it.discount, 0)
 		const total = subtotal - discount
 
-		return this.orderRepository.create({
+		const order = await this.orderRepository.create({
 			seller_id: sellerId,
 			customer_id: rest.customer_id,
 			order_number: rest.order_number,
@@ -36,6 +42,36 @@ export class OrdersService {
 				total: it.unit_price * it.quantity - it.discount,
 			})),
 		})
+
+		await this.createBillingIfPerSale(order.id, rest.customer_id, rest.order_number, total)
+
+		return order
+	}
+
+	private async createBillingIfPerSale(
+		orderId: number,
+		customerId: string,
+		orderNumber: string,
+		total: number,
+	) {
+		try {
+			const customer = await this.customersService.findOne(customerId)
+			if (customer.billing_mode !== 'per_sale') return
+
+			const billingNumber = orderNumber.replace(/^ORD/, 'COB') || `COB-${orderId}`
+			await this.billingsService.create(orderId, {
+				billing_number: billingNumber,
+				total_amount: total,
+				paid_amount: 0,
+				status: 'pending',
+				payment_status: 'pending',
+				payment_method: 'cash',
+			} as any)
+
+			this.logger.log(`Cobrança ${billingNumber} criada automaticamente para pedido ${orderNumber}`)
+		} catch (error) {
+			this.logger.warn(`Falha ao criar cobrança automática para pedido ${orderNumber}: ${error}`)
+		}
 	}
 
 	async addItem(orderId: number, item: OrderItemInputDto) {

@@ -57,4 +57,26 @@ describe("OrdersController", () => {
 		expect(serviceMock.findById).toHaveBeenCalledWith(5);
 		expect(res).toEqual({ id: 5 });
 	});
+
+	it("findAll should call service.findAll and return orders", async () => {
+		const orders = [{ id: 1 }, { id: 2 }];
+		serviceMock.findAll.mockResolvedValueOnce(orders);
+		const res = await controller.findAll();
+		expect(serviceMock.findAll).toHaveBeenCalled();
+		expect(res).toEqual(orders);
+	});
+
+	it("updateStatus should call service.updateStatus with numeric id and status", async () => {
+		const updated = { id: 3, status: "confirmed" };
+		serviceMock.updateStatus.mockResolvedValueOnce(updated);
+		const res = await controller.updateStatus("3", { status: "confirmed" });
+		expect(serviceMock.updateStatus).toHaveBeenCalledWith(3, "confirmed");
+		expect(res).toEqual(updated);
+	});
+
+	it("delete should call service.delete with numeric id", async () => {
+		serviceMock.delete.mockResolvedValueOnce(undefined);
+		await controller.delete("4");
+		expect(serviceMock.delete).toHaveBeenCalledWith(4);
+	});
 });

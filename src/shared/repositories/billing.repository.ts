@@ -19,6 +19,7 @@ export interface BillingWithOrder extends BillingRecord {
 		id: number
 		order_number: string
 		seller_id: string
+		status: string
 		customer?: { id: string; name: string }
 	}
 }

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateProductPriceData,
+	PriceHistoryEntry,
 	ProductPrice,
 	ProductPriceRepository,
 	UpdateProductPriceData,
@@ -89,5 +90,22 @@ export class PrismaProductPriceRepository implements ProductPriceRepository {
 			where: { id },
 			data: { active: false },
 		}) as unknown as ProductPrice
+	}
+
+	async findPriceHistory(productId: number): Promise<PriceHistoryEntry[]> {
+		await this.verifyProductOwnership(productId)
+
+		const records = await this.prisma.product_price.findMany({
+			where: { product_id: productId },
+			orderBy: { createdAt: 'asc' },
+		})
+
+		return records.map((record, index) => ({
+			id: record.id,
+			old_price: index === 0 ? 0 : records[index - 1].price,
+			new_price: record.price,
+			change_type: 'manual' as const,
+			changed_at: record.createdAt,
+		})).reverse()
 	}
 }

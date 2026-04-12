@@ -1,10 +1,15 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import type { PlanType } from '@/generated/prisma/client'
+import { Prisma } from '@/generated/prisma/client'
+import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import { ADMIN_REPOSITORY, type AdminRepository } from '@/shared/repositories/admin.repository'
 
 @Injectable()
 export class AdminService {
-	constructor(@Inject(ADMIN_REPOSITORY) private readonly adminRepository: AdminRepository) {}
+	constructor(
+		@Inject(ADMIN_REPOSITORY) private readonly adminRepository: AdminRepository,
+		private readonly passwordHasher: PasswordHasherService,
+	) {}
 
 	async getStats() {
 		const now = new Date()
@@ -312,6 +317,72 @@ export class AdminService {
 				totalPages: Math.ceil(total / limit),
 			},
 		}
+	}
+
+	async createAccount(data: {
+		name: string
+		email: string
+		password: string
+		plan_type?: PlanType
+		adminId: string
+	}) {
+		const { hash, salt } = await this.passwordHasher.hash(data.password)
+
+		let account: Awaited<ReturnType<typeof this.adminRepository.createAccount>>
+		try {
+			account = await this.adminRepository.createAccount({
+				name: data.name,
+				email: data.email,
+				password: hash,
+				salt,
+				role: 'seller',
+				plan_type: data.plan_type ?? 'free',
+			})
+		} catch (err) {
+			if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+				throw new ConflictException('Email already in use')
+			}
+			throw err
+		}
+
+		await this.adminRepository.createAuditLog({
+			action: 'ADMIN_CREATE_ACCOUNT',
+			entity: 'Account',
+			entity_id: account.id,
+			user_id: data.adminId,
+			new_value: { name: data.name, email: data.email, plan_type: data.plan_type ?? 'free' },
+			metadata: { created_by: 'admin' },
+		})
+
+		return account
+	}
+
+	async deleteAccount(accountId: string, adminId: string) {
+		const account = await this.adminRepository.findAccountBasicInfo(accountId, {
+			id: true,
+			name: true,
+			email: true,
+			role: true,
+		})
+
+		if (!account) {
+			throw new NotFoundException('Conta não encontrada')
+		}
+
+		if (account.role === 'admin') {
+			throw new BadRequestException('Não é possível excluir uma conta de administrador')
+		}
+
+		await this.adminRepository.deleteAccount(accountId)
+
+		await this.adminRepository.createAuditLog({
+			action: 'ADMIN_DELETE_ACCOUNT',
+			entity: 'Account',
+			entity_id: accountId,
+			user_id: adminId,
+			old_value: { name: account.name, email: account.email },
+			metadata: { deleted_by: 'admin' },
+		})
 	}
 
 	async getSystemHealth() {

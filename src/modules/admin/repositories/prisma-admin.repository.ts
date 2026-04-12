@@ -9,6 +9,7 @@ import type {
 	AdminRepository,
 	AdminStats,
 	AuditLogEntry,
+	CreateAccountData,
 	SubscriptionStatsResult,
 } from '@/shared/repositories/admin.repository'
 
@@ -334,5 +335,28 @@ export class PrismaAdminRepository implements AdminRepository {
 		} catch {
 			return false
 		}
+	}
+
+	async createAccount(data: CreateAccountData): Promise<AccountBasicInfo> {
+		return this.prisma.account.create({
+			data: {
+				name: data.name,
+				email: data.email,
+				password: data.password,
+				salt: data.salt,
+				role: data.role ?? 'seller',
+				plan_type: data.plan_type ?? 'free',
+			},
+			select: {
+				id: true,
+				name: true,
+				email: true,
+				plan_type: true,
+			},
+		}) as unknown as AccountBasicInfo
+	}
+
+	async deleteAccount(accountId: string): Promise<void> {
+		await this.prisma.account.delete({ where: { id: accountId } })
 	}
 }

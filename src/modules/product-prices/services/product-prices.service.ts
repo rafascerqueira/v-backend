@@ -44,4 +44,8 @@ export class ProductPricesService {
 	async hasProductPrice(id: number) {
 		return this.productPriceRepository.findById(id)
 	}
+
+	async getPriceHistory(productId: number) {
+		return this.productPriceRepository.findPriceHistory(productId)
+	}
 }

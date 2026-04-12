@@ -125,6 +125,7 @@
       "json-summary"
     ],
     "testEnvironment": "node",
+    "forceExit": true,
     "setupFilesAfterEnv": [
       "<rootDir>/../jest.setup.js"
     ],

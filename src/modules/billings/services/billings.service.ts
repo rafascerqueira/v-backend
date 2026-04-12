@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import {
 	BILLING_REPOSITORY,
 	type BillingRepository,
@@ -29,7 +29,7 @@ export class BillingsService {
 			this.tenantContext.isAdmin(),
 		)
 		if (!order) {
-			throw new Error('Order not found')
+			throw new NotFoundException('Pedido não encontrado')
 		}
 
 		const { due_date, payment_date, ...rest } = dto
@@ -44,20 +44,24 @@ export class BillingsService {
 	async update(id: number, dto: UpdateBillingDto) {
 		const billing = await this.billingRepository.findById(id)
 		if (!billing) {
-			throw new Error('Billing not found')
+			throw new NotFoundException('Cobrança não encontrada')
 		}
 		if (
 			!this.tenantContext.isAdmin() &&
 			billing.order.seller_id !== this.tenantContext.getSellerId()
 		) {
-			throw new Error('Access denied')
+			throw new ForbiddenException('Acesso negado')
 		}
 
 		const { due_date, payment_date, ...rest } = dto
 		return this.billingRepository.update(id, {
 			...rest,
 			due_date: due_date ? new Date(due_date) : due_date === null ? null : undefined,
-			payment_date: payment_date ? new Date(payment_date) : payment_date === null ? null : undefined,
+			payment_date: payment_date
+				? new Date(payment_date)
+				: payment_date === null
+					? null
+					: undefined,
 		})
 	}
 }

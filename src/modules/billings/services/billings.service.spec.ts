@@ -1,3 +1,4 @@
+import { NotFoundException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { BillingsService } from "./billings.service";
 import { BILLING_REPOSITORY } from "@/shared/repositories/billing.repository";
@@ -63,7 +64,7 @@ describe("BillingsService", () => {
 		repositoryMock.verifyOrderAccess.mockResolvedValueOnce(null);
 		await expect(
 			service.create(999, { billing_number: "B-X" } as any),
-		).rejects.toThrow("Order not found");
+		).rejects.toThrow(NotFoundException);
 	});
 
 	it("update should map nullable dates and delegate to repository", async () => {
@@ -85,6 +86,6 @@ describe("BillingsService", () => {
 
 	it("update should throw if billing not found", async () => {
 		repositoryMock.findById.mockResolvedValueOnce(null);
-		await expect(service.update(999, {} as any)).rejects.toThrow("Billing not found");
+		await expect(service.update(999, {} as any)).rejects.toThrow(NotFoundException);
 	});
 });

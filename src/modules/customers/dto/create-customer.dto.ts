@@ -25,6 +25,8 @@ export const createCustomerSchema = z.object({
 	city: z.string().min(1, 'Cidade é obrigatória'),
 	state: z.string().length(2, 'Estado deve ter 2 caracteres'),
 	zip_code: z.string().min(8, 'CEP inválido').optional().or(z.literal('')).transform(emptyToNull),
+	billing_day: z.number().int().min(1).max(31).optional().nullable(),
+	billing_mode: z.enum(['per_sale', 'weekly', 'biweekly', 'monthly', 'custom']).optional(),
 })
 
 export type CreateCustomerDto = z.infer<typeof createCustomerSchema>

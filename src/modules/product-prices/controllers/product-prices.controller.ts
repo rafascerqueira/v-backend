@@ -1,5 +1,4 @@
 import {
-	BadRequestException,
 	Body,
 	Controller,
 	Delete,
@@ -35,6 +34,13 @@ export class ProductPricesController {
 	@ApiParam({ name: 'productId', type: Number })
 	async list(@Param('productId') productId: string) {
 		return this.service.listByProduct(Number(productId))
+	}
+
+	@Get('products/:productId/price-history')
+	@ApiOperation({ summary: 'Get price change history for a product' })
+	@ApiParam({ name: 'productId', type: Number })
+	async priceHistory(@Param('productId') productId: string) {
+		return this.service.getPriceHistory(Number(productId))
 	}
 
 	@Post('products/:productId/prices')

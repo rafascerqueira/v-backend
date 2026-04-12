@@ -32,6 +32,14 @@ enum SubscriptionStatus {
   paused
 }
 
+enum BillingMode {
+  per_sale
+  weekly
+  biweekly
+  monthly
+  custom
+}
+
 model System_setting {
   id        Int      @id @default(autoincrement())
   key       String   @unique @db.VarChar(100)
@@ -76,6 +84,9 @@ model Account {
   customers                 Customer[]
   orders                    Order[]
   store_stocks              Store_stock[]
+  bundles                   Bundle[]
+  suppliers                 Supplier[]
+  promotions                Promotion[]
 
   @@index([email(sort: Asc)], name: "idx_accounts_email")
   @@index([role], name: "idx_accounts_role")
@@ -125,8 +136,10 @@ model Customer {
   address   Json     @default("{}") @db.JsonB()
   city      String   @db.VarChar(100)
   state     String   @db.VarChar(2)
-  zip_code  String?  @db.VarChar(10)
-  active    Boolean  @default(true)
+  zip_code     String?     @db.VarChar(10)
+  billing_day  Int?
+  billing_mode BillingMode @default(per_sale)
+  active       Boolean     @default(true)
   createdAt DateTime @default(now()) @db.Timestamptz()
   updatedAt DateTime @updatedAt @db.Timestamptz()
   Order     Order[]
@@ -159,6 +172,8 @@ model Product {
   Stock_movement Stock_movement[]
   prices         Product_price[]
   stock          Store_stock?
+  bundle_items   Bundle_item[]
+  promotions     Promotion[]
 
   @@unique([seller_id, sku])
   @@index([seller_id], name: "idx_products_seller")
@@ -413,6 +428,103 @@ model Webhook_event {
   @@index([provider, event_type], name: "idx_webhook_events_provider")
   @@index([processed], name: "idx_webhook_events_processed")
   @@map("webhook_events")
+}
+
+enum SupplierDebtStatus {
+  pending
+  partial
+  paid
+}
+
+enum PromotionStatus {
+  active
+  scheduled
+  expired
+}
+
+model Supplier {
+  id        String          @id @default(cuid())
+  seller_id String
+  seller    Account         @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  name      String          @db.VarChar(100)
+  email     String?         @db.VarChar(100)
+  phone     String?         @db.VarChar(20)
+  address   String?         @db.VarChar(255)
+  notes     String?
+  active    Boolean         @default(true)
+  createdAt DateTime        @default(now()) @db.Timestamptz()
+  updatedAt DateTime        @updatedAt @db.Timestamptz()
+  debts     Supplier_debt[]
+
+  @@index([seller_id], name: "idx_suppliers_seller")
+  @@map("suppliers")
+}
+
+model Supplier_debt {
+  id          Int                @id @default(autoincrement())
+  supplier_id String
+  supplier    Supplier           @relation(fields: [supplier_id], references: [id], onDelete: Cascade)
+  amount      Int
+  paid_amount Int                @default(0)
+  description String             @db.VarChar(255)
+  status      SupplierDebtStatus @default(pending)
+  due_date    DateTime?          @db.Timestamptz()
+  createdAt   DateTime           @default(now()) @db.Timestamptz()
+  updatedAt   DateTime           @updatedAt @db.Timestamptz()
+
+  @@index([supplier_id], name: "idx_supplier_debts_supplier")
+  @@map("supplier_debts")
+}
+
+model Promotion {
+  id                Int             @id @default(autoincrement())
+  seller_id         String
+  seller            Account         @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  product_id        Int
+  product           Product         @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  discount_percent  Int
+  original_price    Int
+  promotional_price Int
+  start_date        DateTime        @db.Timestamptz()
+  end_date          DateTime        @db.Timestamptz()
+  description       String?         @db.VarChar(255)
+  status            PromotionStatus @default(scheduled)
+  createdAt         DateTime        @default(now()) @db.Timestamptz()
+  updatedAt         DateTime        @updatedAt @db.Timestamptz()
+
+  @@index([seller_id], name: "idx_promotions_seller")
+  @@index([product_id], name: "idx_promotions_product")
+  @@map("promotions")
+}
+
+model Bundle {
+  id          Int           @id @default(autoincrement())
+  seller_id   String
+  seller      Account       @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  name        String        @db.VarChar(100)
+  description String?
+  discount_percent Int       @default(0)
+  active      Boolean       @default(true)
+  deletedAt   DateTime?     @db.Timestamptz()
+  createdAt   DateTime      @default(now()) @db.Timestamptz()
+  updatedAt   DateTime      @updatedAt @db.Timestamptz()
+  items       Bundle_item[]
+
+  @@index([seller_id], name: "idx_bundles_seller")
+  @@map("bundles")
+}
+
+model Bundle_item {
+  id         Int     @id @default(autoincrement())
+  bundle_id  Int
+  bundle     Bundle  @relation(fields: [bundle_id], references: [id], onDelete: Cascade)
+  product_id Int
+  product    Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity   Int     @default(1)
+
+  @@unique([bundle_id, product_id])
+  @@index([bundle_id], name: "idx_bundle_items_bundle")
+  @@map("bundle_items")
 }
 
 model Notification {

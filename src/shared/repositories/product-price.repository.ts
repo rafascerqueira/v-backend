@@ -27,6 +27,14 @@ export interface UpdateProductPriceData {
 	active?: boolean
 }
 
+export interface PriceHistoryEntry {
+	id: number
+	old_price: number
+	new_price: number
+	change_type: 'manual' | 'promotion' | 'restock'
+	changed_at: Date
+}
+
 export const PRODUCT_PRICE_REPOSITORY = Symbol('PRODUCT_PRICE_REPOSITORY')
 
 export interface ProductPriceRepository {
@@ -35,4 +43,5 @@ export interface ProductPriceRepository {
 	create(data: CreateProductPriceData): Promise<ProductPrice>
 	update(id: number, data: UpdateProductPriceData): Promise<ProductPrice>
 	deactivate(id: number): Promise<ProductPrice>
+	findPriceHistory(productId: number): Promise<PriceHistoryEntry[]>
 }

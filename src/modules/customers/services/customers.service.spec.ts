@@ -42,6 +42,13 @@ describe('CustomersService', () => {
     expect(res).toEqual({ id: 'c1' })
   })
 
+  it('create should pass billing_day to repository', async () => {
+    customerRepository.create.mockResolvedValueOnce({ id: 'c1', billing_day: 15 })
+    const res = await service.create({ name: 'John', phone: '9', billing_day: 15 } as any)
+    expect(customerRepository.create).toHaveBeenCalledWith(expect.objectContaining({ billing_day: 15 }))
+    expect(res).toMatchObject({ billing_day: 15 })
+  })
+
   it('create should throw ConflictException for email unique violation', async () => {
     customerRepository.create.mockRejectedValueOnce(makeP2002(['email']))
     await expect(service.create({} as any)).rejects.toBeInstanceOf(ConflictException)
@@ -50,6 +57,11 @@ describe('CustomersService', () => {
   it('create should throw ConflictException for phone unique violation', async () => {
     customerRepository.create.mockRejectedValueOnce(makeP2002(['phone']))
     await expect(service.create({} as any)).rejects.toBeInstanceOf(ConflictException)
+  })
+
+  it('create should throw ConflictException for document unique violation', async () => {
+    customerRepository.create.mockRejectedValueOnce(makeP2002(['document']))
+    await expect(service.create({} as any)).rejects.toThrow(ConflictException)
   })
 
   it('findOne should throw NotFoundException when missing', async () => {

@@ -3,13 +3,17 @@ import {
 	DASHBOARD_REPOSITORY,
 	type DashboardRepository,
 } from '@/shared/repositories/dashboard.repository'
+import { RedisService } from '@/shared/redis/redis.service'
 import { TenantContext } from '@/shared/tenant/tenant.context'
+
+const CACHE_TTL_SECONDS = 60
 
 @Injectable()
 export class DashboardService {
 	constructor(
 		@Inject(DASHBOARD_REPOSITORY) private readonly dashboardRepository: DashboardRepository,
 		private readonly tenantContext: TenantContext,
+		private readonly redis: RedisService,
 	) {}
 
 	private getTenantFilter() {
@@ -19,7 +23,18 @@ export class DashboardService {
 		return { seller_id: this.tenantContext.requireSellerId() }
 	}
 
-	async getStats(_accountId: string) {
+	private getCacheKey(accountId: string) {
+		return `dashboard:stats:${accountId}`
+	}
+
+	async getStats(accountId: string) {
+		const cacheKey = this.getCacheKey(accountId)
+
+		const cached = await this.redis.get(cacheKey)
+		if (cached) {
+			return JSON.parse(cached)
+		}
+
 		const tenantFilter = this.getTenantFilter()
 		const stats = await this.dashboardRepository.getStats(tenantFilter)
 
@@ -28,7 +43,7 @@ export class DashboardService {
 			sales: item._sum.quantity || 0,
 		}))
 
-		return {
+		const result = {
 			totalProducts: stats.totalProducts,
 			totalCustomers: stats.totalCustomers,
 			totalOrders: stats.totalOrders,
@@ -44,5 +59,9 @@ export class DashboardService {
 			})),
 			topProducts: topProductsWithDetails,
 		}
+
+		await this.redis.setWithExpiry(cacheKey, JSON.stringify(result), CACHE_TTL_SECONDS)
+
+		return result
 	}
 }

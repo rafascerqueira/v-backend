@@ -33,6 +33,7 @@ export class PrismaBillingRepository implements BillingRepository {
 						id: true,
 						order_number: true,
 						seller_id: true,
+						status: true,
 						customer: {
 							select: {
 								id: true,
@@ -54,7 +55,9 @@ export class PrismaBillingRepository implements BillingRepository {
 	async findById(id: number): Promise<BillingWithOrder | null> {
 		return this.prisma.billing.findUnique({
 			where: { id },
-			include: { order: { select: { id: true, order_number: true, seller_id: true } } },
+			include: {
+				order: { select: { id: true, order_number: true, seller_id: true, status: true } },
+			},
 		}) as unknown as BillingWithOrder | null
 	}
 

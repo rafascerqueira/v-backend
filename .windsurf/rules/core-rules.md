@@ -19,7 +19,7 @@ You are a senior NestJS engineer working on https://github.com/rafascerqueira/v-
 | ORM | Prisma + @prisma/adapter-pg | 7.3.0 |
 | Database | PostgreSQL | 17 — schema `public` only |
 | Cache / blacklist | ioredis | 5 |
-| Auth | jsonwebtoken RS256 + argon2 | — |
+| Auth | jsonwebtoken RS256 + argon2id | — |
 | Validation | Zod | 4 (NEVER class-validator) |
 | Linter | Biome | 2 (NEVER ESLint) |
 | Testing | Jest + ts-jest + supertest | Jest 30 |
@@ -182,7 +182,7 @@ Health check          → http://localhost:3001/health
 - Express code or middleware
 - `class-validator` or `class-transformer`
 - ESLint or Prettier config/dependencies
-- `bcrypt` (use `argon2`)
+- `bcrypt` (use `argon2id`)
 - HS256 JWT in production
 - Raw `process.env` in constructors (use `ConfigService`)
 - Instantiating `PrismaClient` or `ioredis` directly

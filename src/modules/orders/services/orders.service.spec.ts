@@ -3,6 +3,8 @@ import { OrdersService } from "./orders.service";
 import { ORDER_REPOSITORY } from "@/shared/repositories/order.repository";
 import { PrismaService } from "@/shared/prisma/prisma.service";
 import { TenantContext } from "@/shared/tenant/tenant.context";
+import { CustomersService } from "../../customers/services/customers.service";
+import { BillingsService } from "../../billings/services/billings.service";
 
 const repositoryMock = {
 	create: jest.fn(),
@@ -29,6 +31,14 @@ const prismaMock = {
 	stock_movement: { create: jest.fn() },
 };
 
+const customersServiceMock = {
+	findOne: jest.fn().mockResolvedValue({ billing_mode: "monthly" }),
+};
+
+const billingsServiceMock = {
+	create: jest.fn().mockResolvedValue({ id: 1 }),
+};
+
 describe("OrdersService", () => {
 	let service: OrdersService;
 
@@ -39,6 +49,8 @@ describe("OrdersService", () => {
 				{ provide: ORDER_REPOSITORY, useValue: repositoryMock },
 				{ provide: TenantContext, useValue: tenantContextMock },
 				{ provide: PrismaService, useValue: prismaMock },
+				{ provide: CustomersService, useValue: customersServiceMock },
+				{ provide: BillingsService, useValue: billingsServiceMock },
 			],
 		}).compile();
 
@@ -56,6 +68,7 @@ describe("OrdersService", () => {
 			],
 		};
 		repositoryMock.create.mockResolvedValueOnce({ id: 1 });
+		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: "monthly" });
 
 		const res = await service.create(dto as any);
 
@@ -67,6 +80,28 @@ describe("OrdersService", () => {
 		expect(call.items).toHaveLength(2);
 		expect(call.seller_id).toBe("test-seller-id");
 		expect(res).toEqual({ id: 1 });
+		expect(billingsServiceMock.create).not.toHaveBeenCalled();
+	});
+
+	it("create should auto-create billing for per_sale customer", async () => {
+		const dto = {
+			customer_id: "cuid-ps",
+			order_number: "ORD-100",
+			items: [
+				{ product_id: 1, quantity: 1, unit_price: 5000, discount: 0 },
+			],
+		};
+		repositoryMock.create.mockResolvedValueOnce({ id: 10 });
+		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: "per_sale" });
+
+		await service.create(dto as any);
+
+		expect(billingsServiceMock.create).toHaveBeenCalledWith(10, expect.objectContaining({
+			billing_number: "COB-100",
+			total_amount: 5000,
+			paid_amount: 0,
+			status: "pending",
+		}));
 	});
 
 	it("addItem should compute total and delegate to repository", async () => {

@@ -1,5 +1,14 @@
 import type { PlanType } from '@/generated/prisma/client'
 
+export interface CreateAccountData {
+	name: string
+	email: string
+	password: string
+	salt: string
+	role?: 'seller' | 'admin'
+	plan_type?: PlanType
+}
+
 export interface AdminStats {
 	totalAccounts: number
 	totalCustomers: number
@@ -131,4 +140,8 @@ export interface AdminRepository {
 	): Promise<{ data: AuditLogEntry[]; total: number }>
 
 	checkDatabaseHealth(): Promise<boolean>
+
+	createAccount(data: CreateAccountData): Promise<AccountBasicInfo>
+
+	deleteAccount(accountId: string): Promise<void>
 }

@@ -1,3 +1,5 @@
+export type BillingMode = 'per_sale' | 'weekly' | 'biweekly' | 'monthly' | 'custom'
+
 export interface Customer {
 	id: string
 	seller_id: string
@@ -9,6 +11,8 @@ export interface Customer {
 	city: string
 	state: string
 	zip_code: string | null
+	billing_day: number | null
+	billing_mode: BillingMode
 	createdAt: Date
 	updatedAt: Date
 }
@@ -23,6 +27,8 @@ export interface CreateCustomerData {
 	city: string
 	state: string
 	zip_code: string | null
+	billing_day?: number | null
+	billing_mode?: BillingMode
 }
 
 export type UpdateCustomerData = Partial<CreateCustomerData>
