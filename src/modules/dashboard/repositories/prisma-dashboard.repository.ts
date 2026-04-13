@@ -60,13 +60,13 @@ export class PrismaDashboardRepository implements DashboardRepository {
 		})
 		const productNames = new Map(products.map((p) => [p.id, p.name]))
 
-		const totalRevenueResult = await this.prisma.order.aggregate({
+		const totalRevenueResult = await this.prisma.billing.aggregate({
 			where: {
-				status: { in: ['delivered', 'confirmed'] },
-				...tenantFilter,
+				status: { in: ['paid', 'partial'] },
+				order: tenantFilter as any,
 			},
 			_sum: {
-				total: true,
+				paid_amount: true,
 			},
 		})
 
@@ -77,7 +77,7 @@ export class PrismaDashboardRepository implements DashboardRepository {
 			pendingOrders,
 			recentOrders: recentOrders as unknown as DashboardStats['recentOrders'],
 			topProducts: topProducts as unknown as DashboardStats['topProducts'],
-			totalRevenue: totalRevenueResult._sum?.total || 0,
+			totalRevenue: totalRevenueResult._sum?.paid_amount ?? 0,
 			productNames,
 		}
 	}

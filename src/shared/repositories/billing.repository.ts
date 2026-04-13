@@ -48,14 +48,23 @@ export interface UpdateBillingData {
 	notes?: string
 }
 
+export interface UnbilledOrder {
+	id: number
+	order_number: string
+	total: number
+	seller_id: string
+}
+
 export const BILLING_REPOSITORY = Symbol('BILLING_REPOSITORY')
 
 export interface BillingRepository {
 	findAll(filter: Record<string, unknown>): Promise<BillingWithOrder[]>
 	findByOrderId(orderId: number, filter: Record<string, unknown>): Promise<BillingRecord[]>
 	findById(id: number): Promise<BillingWithOrder | null>
+	findUnbilledPerSaleOrders(): Promise<UnbilledOrder[]>
 	create(data: CreateBillingData): Promise<BillingRecord>
 	update(id: number, data: UpdateBillingData): Promise<BillingRecord>
+	delete(id: number): Promise<void>
 	verifyOrderAccess(
 		orderId: number,
 		sellerId: string | null,

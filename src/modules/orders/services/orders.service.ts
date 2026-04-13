@@ -1,8 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { computeDueDate } from '@/shared/billing/billing-scheduler'
+import {
+	BILLING_REPOSITORY,
+	type BillingRepository,
+} from '@/shared/repositories/billing.repository'
 import { ORDER_REPOSITORY, type OrderRepository } from '@/shared/repositories/order.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
-import { BillingsService } from '../../billings/services/billings.service'
 import { CustomersService } from '../../customers/services/customers.service'
 import type { CreateOrderDto, OrderItemInputDto } from '../dto/create-order.dto'
 
@@ -12,10 +16,10 @@ export class OrdersService {
 
 	constructor(
 		@Inject(ORDER_REPOSITORY) private readonly orderRepository: OrderRepository,
+		@Inject(BILLING_REPOSITORY) private readonly billingRepository: BillingRepository,
 		private readonly tenantContext: TenantContext,
 		private readonly prisma: PrismaService,
 		private readonly customersService: CustomersService,
-		private readonly billingsService: BillingsService,
 	) {}
 
 	async create(dto: CreateOrderDto) {
@@ -43,12 +47,12 @@ export class OrdersService {
 			})),
 		})
 
-		await this.createBillingIfPerSale(order.id, rest.customer_id, rest.order_number, total)
+		await this.createBillingIfNeeded(order.id, rest.customer_id, rest.order_number, total)
 
 		return order
 	}
 
-	private async createBillingIfPerSale(
+	private async createBillingIfNeeded(
 		orderId: number,
 		customerId: string,
 		orderNumber: string,
@@ -56,17 +60,22 @@ export class OrdersService {
 	) {
 		try {
 			const customer = await this.customersService.findOne(customerId)
+			// Only auto-create for per_sale; periodic modes are handled by the scheduled sync
 			if (customer.billing_mode !== 'per_sale') return
 
 			const billingNumber = orderNumber.replace(/^ORD/, 'COB') || `COB-${orderId}`
-			await this.billingsService.create(orderId, {
+			const dueDate = computeDueDate(customer.billing_mode, customer.billing_day)
+
+			await this.billingRepository.create({
+				order_id: orderId,
 				billing_number: billingNumber,
 				total_amount: total,
 				paid_amount: 0,
-				status: 'pending',
-				payment_status: 'pending',
 				payment_method: 'cash',
-			} as any)
+				payment_status: 'pending',
+				status: 'pending',
+				due_date: dueDate ?? undefined,
+			})
 
 			this.logger.log(`Cobrança ${billingNumber} criada automaticamente para pedido ${orderNumber}`)
 		} catch (error) {
@@ -105,32 +114,13 @@ export class OrdersService {
 			await this.restoreStock(id)
 		}
 
-		// Map order status to billing status
-		const billingStatusMap: Record<string, { status: string; payment_status: string } | null> = {
-			pending: { status: 'pending', payment_status: 'pending' },
-			confirmed: { status: 'pending', payment_status: 'pending' },
-			shipping: { status: 'pending', payment_status: 'pending' },
-			delivered: { status: 'paid', payment_status: 'confirmed' },
-			canceled: { status: 'canceled', payment_status: 'canceled' },
-		}
+		// Only propagate canceled status to billing — delivery does not mean payment
+		const billingUpdate =
+			status === 'canceled'
+				? { status: 'canceled', payment_status: 'canceled' }
+				: undefined
 
-		const billingUpdate = billingStatusMap[status]
-
-		return this.orderRepository.updateStatus(
-			id,
-			status,
-			billingUpdate
-				? {
-						...billingUpdate,
-						...(status === 'delivered'
-							? {
-									payment_date: new Date(),
-									paid_amount: order.total,
-								}
-							: {}),
-					}
-				: undefined,
-		)
+		return this.orderRepository.updateStatus(id, status, billingUpdate)
 	}
 
 	private async restoreStock(orderId: number) {

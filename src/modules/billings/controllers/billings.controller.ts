@@ -1,5 +1,16 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post } from '@nestjs/common'
-import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import {
+	Body,
+	Controller,
+	Delete,
+	Get,
+	HttpCode,
+	HttpStatus,
+	Param,
+	Patch,
+	Post,
+	Query,
+} from '@nestjs/common'
+import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
 import { type CreateBillingDto, createBillingSchema } from '../dto/create-billing.dto'
 import { type UpdateBillingDto, updateBillingSchema } from '../dto/update-billing.dto'
@@ -12,8 +23,17 @@ export class BillingsController {
 
 	@Get('billings')
 	@ApiOperation({ summary: 'List all billings' })
-	async findAll() {
-		return this.service.findAll()
+	@ApiQuery({ name: 'status', required: false, enum: ['pending', 'partial', 'paid', 'overdue', 'canceled'] })
+	async findAll(@Query('status') status?: string) {
+		return this.service.findAll(status)
+	}
+
+	@Post('billings/sync')
+	@HttpCode(HttpStatus.OK)
+	@ApiOperation({ summary: 'Sync billings for per_sale orders without billing' })
+	@ApiResponse({ status: 200, description: 'Sync result with created count' })
+	async sync() {
+		return this.service.syncBillings()
 	}
 
 	@Get('orders/:orderId/billings')
@@ -53,5 +73,15 @@ export class BillingsController {
 		@Body(new ZodValidationPipe(updateBillingSchema)) body: UpdateBillingDto,
 	) {
 		return this.service.update(Number(id), body)
+	}
+
+	@Delete('billings/:id')
+	@HttpCode(HttpStatus.NO_CONTENT)
+	@ApiOperation({ summary: 'Delete billing' })
+	@ApiParam({ name: 'id', type: Number })
+	@ApiResponse({ status: 204, description: 'Billing deleted' })
+	@ApiResponse({ status: 404, description: 'Billing not found' })
+	async remove(@Param('id') id: string) {
+		return this.service.delete(Number(id))
 	}
 }

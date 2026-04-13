@@ -310,7 +310,7 @@ model Billing {
   paid_amount    Int           @default(0)
   payment_method PaymentMethod @default(cash)
   payment_status PaymentStatus @default(pending)
-  due_date       DateTime      @default(now()) @db.Timestamptz()
+  due_date       DateTime?     @db.Timestamptz()
   payment_date   DateTime?
   notes          String?
 

@@ -31,6 +31,9 @@ export class PromotionsService {
 		}
 
 		const originalPrice = await this.repo.getLatestProductPrice(data.product_id)
+		if (originalPrice === 0) {
+			throw new BadRequestException('Product has no active sale price set')
+		}
 		const promotionalPrice = Math.round(originalPrice * (1 - data.discount_percent / 100))
 
 		const now = new Date()

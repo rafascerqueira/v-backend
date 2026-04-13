@@ -3,6 +3,11 @@ export interface BundleItem {
 	bundle_id: number
 	product_id: number
 	quantity: number
+	product: {
+		id: number
+		name: string
+		prices: Array<{ price: number; price_type: string; active: boolean }>
+	}
 }
 
 export interface Bundle {
@@ -11,6 +16,8 @@ export interface Bundle {
 	name: string
 	description: string | null
 	discount_percent: number
+	total_price: number
+	discounted_price: number
 	active: boolean
 	deletedAt: Date | null
 	createdAt: Date

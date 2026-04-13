@@ -1,10 +1,10 @@
 import { Test } from "@nestjs/testing";
-import { OrdersService } from "./orders.service";
+import { BILLING_REPOSITORY } from "@/shared/repositories/billing.repository";
 import { ORDER_REPOSITORY } from "@/shared/repositories/order.repository";
 import { PrismaService } from "@/shared/prisma/prisma.service";
 import { TenantContext } from "@/shared/tenant/tenant.context";
 import { CustomersService } from "../../customers/services/customers.service";
-import { BillingsService } from "../../billings/services/billings.service";
+import { OrdersService } from "./orders.service";
 
 const repositoryMock = {
 	create: jest.fn(),
@@ -13,6 +13,17 @@ const repositoryMock = {
 	findAll: jest.fn(),
 	updateStatus: jest.fn(),
 	delete: jest.fn(),
+};
+
+const billingRepositoryMock = {
+	create: jest.fn().mockResolvedValue({ id: 1 }),
+	findAll: jest.fn(),
+	findByOrderId: jest.fn(),
+	findById: jest.fn(),
+	findUnbilledPerSaleOrders: jest.fn(),
+	update: jest.fn(),
+	delete: jest.fn(),
+	verifyOrderAccess: jest.fn(),
 };
 
 const tenantContextMock = {
@@ -32,11 +43,7 @@ const prismaMock = {
 };
 
 const customersServiceMock = {
-	findOne: jest.fn().mockResolvedValue({ billing_mode: "monthly" }),
-};
-
-const billingsServiceMock = {
-	create: jest.fn().mockResolvedValue({ id: 1 }),
+	findOne: jest.fn().mockResolvedValue({ billing_mode: "monthly", billing_day: 5 }),
 };
 
 describe("OrdersService", () => {
@@ -47,10 +54,10 @@ describe("OrdersService", () => {
 			providers: [
 				OrdersService,
 				{ provide: ORDER_REPOSITORY, useValue: repositoryMock },
+				{ provide: BILLING_REPOSITORY, useValue: billingRepositoryMock },
 				{ provide: TenantContext, useValue: tenantContextMock },
 				{ provide: PrismaService, useValue: prismaMock },
 				{ provide: CustomersService, useValue: customersServiceMock },
-				{ provide: BillingsService, useValue: billingsServiceMock },
 			],
 		}).compile();
 
@@ -68,7 +75,7 @@ describe("OrdersService", () => {
 			],
 		};
 		repositoryMock.create.mockResolvedValueOnce({ id: 1 });
-		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: "monthly" });
+		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: "monthly", billing_day: 5 });
 
 		const res = await service.create(dto as any);
 
@@ -80,28 +87,31 @@ describe("OrdersService", () => {
 		expect(call.items).toHaveLength(2);
 		expect(call.seller_id).toBe("test-seller-id");
 		expect(res).toEqual({ id: 1 });
-		expect(billingsServiceMock.create).not.toHaveBeenCalled();
+		// monthly customer — billing repository should NOT be called (periodic mode)
+		expect(billingRepositoryMock.create).not.toHaveBeenCalled();
 	});
 
 	it("create should auto-create billing for per_sale customer", async () => {
 		const dto = {
 			customer_id: "cuid-ps",
 			order_number: "ORD-100",
-			items: [
-				{ product_id: 1, quantity: 1, unit_price: 5000, discount: 0 },
-			],
+			items: [{ product_id: 1, quantity: 1, unit_price: 5000, discount: 0 }],
 		};
 		repositoryMock.create.mockResolvedValueOnce({ id: 10 });
-		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: "per_sale" });
+		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: "per_sale", billing_day: null });
+		billingRepositoryMock.create.mockResolvedValueOnce({ id: 1 });
 
 		await service.create(dto as any);
 
-		expect(billingsServiceMock.create).toHaveBeenCalledWith(10, expect.objectContaining({
-			billing_number: "COB-100",
-			total_amount: 5000,
-			paid_amount: 0,
-			status: "pending",
-		}));
+		expect(billingRepositoryMock.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				order_id: 10,
+				billing_number: "COB-100",
+				total_amount: 5000,
+				paid_amount: 0,
+				status: "pending",
+			}),
+		);
 	});
 
 	it("addItem should compute total and delegate to repository", async () => {
@@ -124,10 +134,7 @@ describe("OrdersService", () => {
 	});
 
 	it("findById delegates to repository", async () => {
-		repositoryMock.findById.mockResolvedValueOnce({
-			id: 1,
-			seller_id: "test-seller-id",
-		});
+		repositoryMock.findById.mockResolvedValueOnce({ id: 1, seller_id: "test-seller-id" });
 		const res = await service.findById(1);
 		expect(repositoryMock.findById).toHaveBeenCalledWith(1);
 		expect(res).toEqual({ id: 1, seller_id: "test-seller-id" });
@@ -140,11 +147,31 @@ describe("OrdersService", () => {
 		expect(res).toEqual([{ id: 1 }]);
 	});
 
+	it("updateStatus canceled should propagate to billing", async () => {
+		repositoryMock.findById.mockResolvedValueOnce({ id: 3, status: "pending" });
+		repositoryMock.updateStatus.mockResolvedValueOnce({ id: 3, status: "canceled" });
+
+		await service.updateStatus(3, "canceled");
+
+		expect(repositoryMock.updateStatus).toHaveBeenCalledWith(
+			3,
+			"canceled",
+			{ status: "canceled", payment_status: "canceled" },
+		);
+	});
+
+	it("updateStatus delivered should NOT auto-mark billing as paid", async () => {
+		repositoryMock.findById.mockResolvedValueOnce({ id: 4, status: "shipping" });
+		repositoryMock.updateStatus.mockResolvedValueOnce({ id: 4, status: "delivered" });
+
+		await service.updateStatus(4, "delivered");
+
+		expect(repositoryMock.updateStatus).toHaveBeenCalledWith(4, "delivered", undefined);
+	});
+
 	it("delete should throw if order not found", async () => {
 		repositoryMock.findById.mockResolvedValueOnce(null);
-		await expect(service.delete(999)).rejects.toThrow(
-			"Order not found or access denied",
-		);
+		await expect(service.delete(999)).rejects.toThrow("Order not found or access denied");
 		expect(repositoryMock.delete).not.toHaveBeenCalled();
 	});
 

@@ -6,7 +6,9 @@ const serviceMock = {
 	listByOrder: jest.fn(),
 	create: jest.fn(),
 	update: jest.fn(),
+	delete: jest.fn(),
 	findAll: jest.fn(),
+	syncBillings: jest.fn(),
 };
 
 describe("BillingsController", () => {
@@ -48,5 +50,31 @@ describe("BillingsController", () => {
 		const res = await controller.update("9", dto);
 		expect(serviceMock.update).toHaveBeenCalledWith(9, dto);
 		expect(res).toEqual({ id: 9, ...dto });
+	});
+
+	it("sync should call service.syncBillings", async () => {
+		serviceMock.syncBillings.mockResolvedValueOnce({ created: 2, orders: ["COB-001", "COB-002"] });
+		const res = await controller.sync();
+		expect(serviceMock.syncBillings).toHaveBeenCalled();
+		expect(res).toEqual({ created: 2, orders: ["COB-001", "COB-002"] });
+	});
+
+	it("findAll should pass status query param to service", async () => {
+		serviceMock.findAll.mockResolvedValueOnce([{ id: 1, status: "pending" }]);
+		const res = await controller.findAll("pending");
+		expect(serviceMock.findAll).toHaveBeenCalledWith("pending");
+		expect(res).toEqual([{ id: 1, status: "pending" }]);
+	});
+
+	it("findAll should call service.findAll without status when not given", async () => {
+		serviceMock.findAll.mockResolvedValueOnce([]);
+		await controller.findAll(undefined);
+		expect(serviceMock.findAll).toHaveBeenCalledWith(undefined);
+	});
+
+	it("remove should call service.delete with numeric id", async () => {
+		serviceMock.delete.mockResolvedValueOnce(undefined);
+		await controller.remove("15");
+		expect(serviceMock.delete).toHaveBeenCalledWith(15);
 	});
 });

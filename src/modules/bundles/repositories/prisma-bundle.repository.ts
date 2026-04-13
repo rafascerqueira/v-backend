@@ -22,8 +22,42 @@ export class PrismaBundleRepository implements BundleRepository {
 
 	private readonly include = {
 		items: {
-			select: { id: true, bundle_id: true, product_id: true, quantity: true },
+			select: {
+				id: true,
+				bundle_id: true,
+				product_id: true,
+				quantity: true,
+				product: {
+					select: {
+						id: true,
+						name: true,
+						prices: {
+							where: { active: true, price_type: 'sale' },
+							orderBy: { createdAt: 'desc' },
+							take: 1,
+							select: { price: true, price_type: true, active: true },
+						},
+					},
+				},
+			},
 		},
+	} as any
+
+	private computeTotals(
+		items: Array<{ quantity: number; product: { prices: Array<{ price: number }> } }>,
+		discountPercent: number,
+	): { total_price: number; discounted_price: number } {
+		const total_price = items.reduce(
+			(sum, item) => sum + (item.product.prices[0]?.price ?? 0) * item.quantity,
+			0,
+		)
+		const discounted_price = Math.round(total_price * (1 - discountPercent / 100))
+		return { total_price, discounted_price }
+	}
+
+	private toBundle(row: any): Bundle {
+		const { total_price, discounted_price } = this.computeTotals(row.items, row.discount_percent)
+		return { ...row, total_price, discounted_price } as Bundle
 	}
 
 	async findAll(): Promise<Bundle[]> {
@@ -32,7 +66,7 @@ export class PrismaBundleRepository implements BundleRepository {
 			include: this.include,
 			orderBy: { createdAt: 'desc' },
 		})
-		return rows as unknown as Bundle[]
+		return rows.map((r) => this.toBundle(r))
 	}
 
 	async findById(id: number): Promise<Bundle | null> {
@@ -40,7 +74,7 @@ export class PrismaBundleRepository implements BundleRepository {
 			where: { id, deletedAt: null, ...this.getTenantFilter() },
 			include: this.include,
 		})
-		return row ? (row as unknown as Bundle) : null
+		return row ? this.toBundle(row) : null
 	}
 
 	async create(data: CreateBundleData): Promise<Bundle> {
@@ -60,7 +94,7 @@ export class PrismaBundleRepository implements BundleRepository {
 			},
 			include: this.include,
 		})
-		return row as unknown as Bundle
+		return this.toBundle(row)
 	}
 
 	async update(id: number, data: UpdateBundleData): Promise<Bundle> {
@@ -88,7 +122,7 @@ export class PrismaBundleRepository implements BundleRepository {
 			})
 		})
 
-		return row as unknown as Bundle
+		return this.toBundle(row)
 	}
 
 	async delete(id: number): Promise<void> {
