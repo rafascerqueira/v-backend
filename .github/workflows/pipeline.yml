@@ -120,7 +120,7 @@ jobs:
 
           rsync -az \
             -e "ssh -i ~/.ssh/deploy_key" \
-            package.json pnpm-lock.yaml prisma/ \
+            package.json pnpm-lock.yaml prisma/ nginx/ \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/
 
       - name: Activate on VPS
@@ -148,6 +148,10 @@ jobs:
               psql "$DATABASE_URL" -f prisma/migrations/manual/subscription_triggers.sql \
                 2>/dev/null || echo "triggers already exist, skipped"
             fi
+
+            echo "--- updating nginx ---"
+            cp /var/www/vendinhas/backend/nginx/vendinhas.conf /etc/nginx/sites-available/vendinhas.conf
+            nginx -t && systemctl reload nginx
 
             echo "--- reloading PM2 ---"
             pm2 reload ecosystem.config.js --update-env
