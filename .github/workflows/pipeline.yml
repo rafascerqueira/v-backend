@@ -154,8 +154,9 @@ jobs:
 
       - name: Health check
         run: |
+          sleep 10
           for i in 1 2 3 4 5; do
-            if curl -sf https://api.vendinhas.app/health; then
+            if curl -sf https://api.vendinhas.app/health/liveness; then
               echo "Health check passed (attempt $i)"
               exit 0
             fi
