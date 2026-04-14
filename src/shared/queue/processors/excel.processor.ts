@@ -32,7 +32,9 @@ export class ExcelProcessor extends WorkerHost {
 
 	@OnWorkerEvent('failed')
 	async onFailed(job: Job, error: Error): Promise<void> {
-		this.logger.warn(`Failed ${job.name} (id=${job.id}) attempt ${job.attemptsMade}: ${error.message}`)
+		this.logger.warn(
+			`Failed ${job.name} (id=${job.id}) attempt ${job.attemptsMade}: ${error.message}`,
+		)
 		await this.dlqService.handleFailedJob(job, error)
 	}
 }

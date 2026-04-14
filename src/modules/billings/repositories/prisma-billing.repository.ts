@@ -58,7 +58,9 @@ export class PrismaBillingRepository implements BillingRepository {
 			},
 		})
 
-		return rows.map((r) => this.applyOverdue(r as unknown as BillingWithOrder)) as BillingWithOrder[]
+		return rows.map((r) =>
+			this.applyOverdue(r as unknown as BillingWithOrder),
+		) as BillingWithOrder[]
 	}
 
 	async findByOrderId(orderId: number, filter: Record<string, unknown>): Promise<BillingRecord[]> {

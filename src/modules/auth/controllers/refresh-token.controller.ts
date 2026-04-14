@@ -9,14 +9,14 @@ import {
 	UnauthorizedException,
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
-import type { FastifyReply, FastifyRequest } from 'fastify'
 import { Throttle } from '@nestjs/throttler'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
 import { Public } from '../decorators/public.decorator'
-import { TokenBlacklistService } from '../services/token-blacklist.service'
 import { TokenService } from '../services/token.service'
+import { TokenBlacklistService } from '../services/token-blacklist.service'
 
 const refreshTokenSchema = z.object({
 	refreshToken: z.string().optional(),
@@ -34,7 +34,11 @@ export class RefreshTokenController {
 
 	@Post('refresh')
 	@Public()
-	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 10 }, long: { ttl: 3600000, limit: 30 } })
+	@Throttle({
+		short: { ttl: 1000, limit: 1 },
+		medium: { ttl: 60000, limit: 10 },
+		long: { ttl: 3600000, limit: 30 },
+	})
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'Refresh access token' })
 	@ApiResponse({ status: 200, description: 'Tokens refreshed successfully' })

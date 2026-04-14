@@ -120,7 +120,7 @@ export class TwoFactorService {
 	async verifyToken(userId: string, token: string): Promise<boolean> {
 		const user = await this.twoFactorRepository.findAccount2faSecret(userId)
 
-		if (!user || !user.two_factor_enabled || !user.two_factor_secret) {
+		if (!user?.two_factor_enabled || !user.two_factor_secret) {
 			return false
 		}
 
@@ -152,7 +152,7 @@ export class TwoFactorService {
 	async verifyBackupCode(userId: string, code: string): Promise<boolean> {
 		const user = await this.twoFactorRepository.findAccount2faBackup(userId)
 
-		if (!user || !user.two_factor_enabled) {
+		if (!user?.two_factor_enabled) {
 			return false
 		}
 

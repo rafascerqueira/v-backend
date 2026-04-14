@@ -23,7 +23,11 @@ export class BillingsController {
 
 	@Get('billings')
 	@ApiOperation({ summary: 'List all billings' })
-	@ApiQuery({ name: 'status', required: false, enum: ['pending', 'partial', 'paid', 'overdue', 'canceled'] })
+	@ApiQuery({
+		name: 'status',
+		required: false,
+		enum: ['pending', 'partial', 'paid', 'overdue', 'canceled'],
+	})
 	async findAll(@Query('status') status?: string) {
 		return this.service.findAll(status)
 	}

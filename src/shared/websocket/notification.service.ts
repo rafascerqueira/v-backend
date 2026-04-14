@@ -58,10 +58,7 @@ export class NotificationService {
 		return wsNotification
 	}
 
-	private async sendEmailNotification(
-		userId: string,
-		options: CreateNotificationOptions,
-	) {
+	private async sendEmailNotification(userId: string, options: CreateNotificationOptions) {
 		try {
 			const user = await this.prisma.account.findUnique({
 				where: { id: userId },

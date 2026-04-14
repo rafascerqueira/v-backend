@@ -9,8 +9,8 @@ import {
 	WebSocketServer,
 } from '@nestjs/websockets'
 import type { Server, Socket } from 'socket.io'
-import { TokenService } from '@/modules/auth/services/token.service'
 import configuration from '@/config/configuration'
+import { TokenService } from '@/modules/auth/services/token.service'
 
 export interface Notification {
 	id: string
@@ -28,10 +28,7 @@ const config = configuration()
 @WebSocketGateway({
 	cors: {
 		origin: (origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
-			const allowedOrigins = [
-				config.frontendUrl,
-				'http://127.0.0.1:3000',
-			]
+			const allowedOrigins = [config.frontendUrl, 'http://127.0.0.1:3000']
 			const isAllowed =
 				!origin || allowedOrigins.includes(origin) || /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)
 			callback(null, isAllowed)

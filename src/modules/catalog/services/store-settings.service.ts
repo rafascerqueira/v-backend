@@ -20,7 +20,7 @@ export class StoreSettingsService {
 	constructor(
 		@Inject(STORE_SETTINGS_REPOSITORY)
 		private readonly storeSettingsRepository: StoreSettingsRepository,
-		private readonly configService: ConfigService,
+		readonly configService: ConfigService,
 	) {
 		this.frontendUrl = configService.get<string>('frontendUrl', 'http://localhost:3000')
 	}
@@ -42,9 +42,7 @@ export class StoreSettingsService {
 			banner: account.store_banner,
 			phone: account.store_phone,
 			whatsapp: account.store_whatsapp,
-			catalogUrl: account.store_slug
-				? `${this.frontendUrl}/loja/${account.store_slug}`
-				: null,
+			catalogUrl: account.store_slug ? `${this.frontendUrl}/loja/${account.store_slug}` : null,
 		}
 	}
 
@@ -71,9 +69,7 @@ export class StoreSettingsService {
 
 		return {
 			...updated,
-			catalogUrl: updated.store_slug
-				? `${this.frontendUrl}/loja/${updated.store_slug}`
-				: null,
+			catalogUrl: updated.store_slug ? `${this.frontendUrl}/loja/${updated.store_slug}` : null,
 			message: 'Configurações atualizadas com sucesso',
 		}
 	}

@@ -14,7 +14,9 @@ export class ImageProcessor extends WorkerHost {
 	}
 
 	async process(job: Job<ImageJobData>): Promise<void> {
-		this.logger.log(`Processing image job "${job.name}": ${job.data.inputPath} → ${job.data.outputPath}`)
+		this.logger.log(
+			`Processing image job "${job.name}": ${job.data.inputPath} → ${job.data.outputPath}`,
+		)
 
 		switch (job.name) {
 			case IMAGE_JOBS.RESIZE:
@@ -40,7 +42,9 @@ export class ImageProcessor extends WorkerHost {
 
 	@OnWorkerEvent('failed')
 	async onFailed(job: Job, error: Error): Promise<void> {
-		this.logger.warn(`Failed ${job.name} (id=${job.id}) attempt ${job.attemptsMade}: ${error.message}`)
+		this.logger.warn(
+			`Failed ${job.name} (id=${job.id}) attempt ${job.attemptsMade}: ${error.message}`,
+		)
 		await this.dlqService.handleFailedJob(job, error)
 	}
 }

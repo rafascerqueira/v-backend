@@ -43,7 +43,7 @@ export class UploadService {
 	private readonly uploadDir: string
 	private readonly baseUrl: string
 
-	constructor(private readonly configService: ConfigService) {
+	constructor(readonly configService: ConfigService) {
 		this.uploadDir = configService.get<string>('upload.dir') || join(process.cwd(), 'uploads')
 		this.baseUrl = configService.get<string>('appUrl', 'http://localhost:3001')
 		this.ensureUploadDir()
@@ -209,7 +209,7 @@ export class UploadService {
 			const resolved = require('node:path').resolve(fullPath)
 			const resolvedUploadDir = require('node:path').resolve(this.uploadDir)
 
-			if (!resolved.startsWith(resolvedUploadDir + '/')) {
+			if (!resolved.startsWith(`${resolvedUploadDir}/`)) {
 				this.logger.warn(`Path traversal attempt blocked: ${path}`)
 				return false
 			}

@@ -29,7 +29,11 @@ export class LoginController {
 
 	@Post('login')
 	@Public()
-	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 5 }, long: { ttl: 3600000, limit: 20 } })
+	@Throttle({
+		short: { ttl: 1000, limit: 1 },
+		medium: { ttl: 60000, limit: 5 },
+		long: { ttl: 3600000, limit: 20 },
+	})
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'User login' })
 	@ApiResponse({ status: 200, description: 'Login successful, returns JWT tokens' })

@@ -1,15 +1,15 @@
 import { BullModule } from '@nestjs/bullmq'
 import { Global, Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
-import { QUEUE_NAMES } from './queue.constants'
 import { DlqService } from './dlq.service'
-import { QueueProducer } from './queue.producer'
 import { DeadLetterProcessor } from './processors/dead-letter.processor'
 import { EmailProcessor } from './processors/email.processor'
 import { ExcelProcessor } from './processors/excel.processor'
 import { ImageProcessor } from './processors/image.processor'
 import { NotificationProcessor } from './processors/notification.processor'
 import { PdfProcessor } from './processors/pdf.processor'
+import { QUEUE_NAMES } from './queue.constants'
+import { QueueProducer } from './queue.producer'
 
 @Global()
 @Module({

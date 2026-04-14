@@ -1,9 +1,9 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq'
 import { Logger } from '@nestjs/common'
 import type { Job } from 'bullmq'
-import { EMAIL_JOBS, QUEUE_NAMES } from '../queue.constants'
-import { DlqService } from '../dlq.service'
 import { EmailService } from '@/shared/email/email.service'
+import { DlqService } from '../dlq.service'
+import { EMAIL_JOBS, QUEUE_NAMES } from '../queue.constants'
 import type {
 	PasswordResetEmailJobData,
 	SendEmailJobData,
@@ -76,7 +76,9 @@ export class EmailProcessor extends WorkerHost {
 
 	@OnWorkerEvent('failed')
 	async onFailed(job: Job, error: Error): Promise<void> {
-		this.logger.warn(`Failed ${job.name} (id=${job.id}) attempt ${job.attemptsMade}: ${error.message}`)
+		this.logger.warn(
+			`Failed ${job.name} (id=${job.id}) attempt ${job.attemptsMade}: ${error.message}`,
+		)
 		await this.dlqService.handleFailedJob(job, error)
 	}
 }

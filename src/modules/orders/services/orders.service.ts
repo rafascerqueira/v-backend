@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
-import { PrismaService } from '@/shared/prisma/prisma.service'
 import { computeDueDate } from '@/shared/billing/billing-scheduler'
+import { PrismaService } from '@/shared/prisma/prisma.service'
 import {
 	BILLING_REPOSITORY,
 	type BillingRepository,
@@ -116,9 +116,7 @@ export class OrdersService {
 
 		// Only propagate canceled status to billing — delivery does not mean payment
 		const billingUpdate =
-			status === 'canceled'
-				? { status: 'canceled', payment_status: 'canceled' }
-				: undefined
+			status === 'canceled' ? { status: 'canceled', payment_status: 'canceled' } : undefined
 
 		return this.orderRepository.updateStatus(id, status, billingUpdate)
 	}

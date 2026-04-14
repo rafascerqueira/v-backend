@@ -16,7 +16,7 @@ export class TokenService implements OnModuleInit {
 
 	constructor(
 		private readonly jwtService: JwtService,
-		private readonly configService: ConfigService,
+		readonly configService: ConfigService,
 	) {
 		this.accessTokenExpiresIn = this.parseExpiresIn(
 			configService.get<string>('jwt.accessTokenExpiresIn', '1d'),
@@ -118,7 +118,9 @@ export class TokenService implements OnModuleInit {
 
 		// Blacklist the old refresh token to prevent reuse
 		if (blacklistService) {
-			const expiresIn = payload.exp ? payload.exp - Math.floor(Date.now() / 1000) : this.refreshTokenExpiresIn
+			const expiresIn = payload.exp
+				? payload.exp - Math.floor(Date.now() / 1000)
+				: this.refreshTokenExpiresIn
 			if (expiresIn > 0) {
 				await blacklistService.addToBlacklist(refreshToken, expiresIn)
 			}

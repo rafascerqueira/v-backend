@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common'
+import { RedisService } from '@/shared/redis/redis.service'
 import {
 	DASHBOARD_REPOSITORY,
 	type DashboardRepository,
 } from '@/shared/repositories/dashboard.repository'
-import { RedisService } from '@/shared/redis/redis.service'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 
 const CACHE_TTL_SECONDS = 60

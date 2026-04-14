@@ -1,4 +1,17 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common'
+import {
+	Body,
+	Controller,
+	Delete,
+	Get,
+	HttpCode,
+	HttpStatus,
+	Param,
+	Patch,
+	Post,
+	Query,
+	Req,
+	UseGuards,
+} from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
 import type { PlanType } from '@/generated/prisma/client'
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
@@ -132,10 +145,17 @@ export class AdminController {
 	@Post('accounts')
 	@HttpCode(HttpStatus.CREATED)
 	@ApiOperation({ summary: 'Create a new seller account (admin only)' })
-	@ApiBody({ schema: { example: { name: 'Loja Nova', email: 'loja@ex.com', password: 'S3cret!', plan_type: 'free' } } })
+	@ApiBody({
+		schema: {
+			example: { name: 'Loja Nova', email: 'loja@ex.com', password: 'S3cret!', plan_type: 'free' },
+		},
+	})
 	@ApiResponse({ status: 201, description: 'Account created' })
 	@ApiResponse({ status: 409, description: 'Email already in use' })
-	async createAccount(@Body() body: { name: string; email: string; password: string; plan_type?: string }, @Req() req: any) {
+	async createAccount(
+		@Body() body: { name: string; email: string; password: string; plan_type?: string },
+		@Req() req: any,
+	) {
 		return this.service.createAccount({
 			name: body.name,
 			email: body.email,

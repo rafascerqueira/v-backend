@@ -19,7 +19,11 @@ export class DataDeletionController {
 	constructor(private readonly accountService: AccountService) {}
 
 	@Post('data-deletion')
-	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 2 }, long: { ttl: 3600000, limit: 3 } })
+	@Throttle({
+		short: { ttl: 1000, limit: 1 },
+		medium: { ttl: 60000, limit: 2 },
+		long: { ttl: 3600000, limit: 3 },
+	})
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'LGPD — Request account data anonymization' })
 	@ApiBody({
@@ -43,7 +47,8 @@ export class DataDeletionController {
 		}
 
 		return {
-			message: 'Seus dados foram anonimizados conforme a LGPD. Sua conta não poderá mais ser acessada.',
+			message:
+				'Seus dados foram anonimizados conforme a LGPD. Sua conta não poderá mais ser acessada.',
 		}
 	}
 }

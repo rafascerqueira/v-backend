@@ -16,12 +16,7 @@ const METHOD_ACTION_MAP: Record<string, AuditAction> = {
 	DELETE: 'DELETE',
 }
 
-const IGNORED_PATHS = [
-	'/auth/login',
-	'/auth/refresh',
-	'/auth/logout',
-	'/health',
-]
+const IGNORED_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout', '/health']
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {

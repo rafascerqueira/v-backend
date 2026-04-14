@@ -29,7 +29,11 @@ export class TwoFactorController {
 	}
 
 	@Post('verify')
-	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 5 }, long: { ttl: 3600000, limit: 10 } })
+	@Throttle({
+		short: { ttl: 1000, limit: 1 },
+		medium: { ttl: 60000, limit: 5 },
+		long: { ttl: 3600000, limit: 10 },
+	})
 	@ApiOperation({ summary: 'Verify 2FA token' })
 	@ApiBody({ schema: { example: { token: '123456' } } })
 	async verify(@Request() req: any, @Body('token') token: string) {
@@ -58,7 +62,11 @@ export class TwoFactorController {
 	}
 
 	@Post('verify-backup')
-	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 5 }, long: { ttl: 3600000, limit: 10 } })
+	@Throttle({
+		short: { ttl: 1000, limit: 1 },
+		medium: { ttl: 60000, limit: 5 },
+		long: { ttl: 3600000, limit: 10 },
+	})
 	@ApiOperation({ summary: 'Verify a backup code (for recovery)' })
 	@ApiBody({ schema: { example: { code: 'ABCD-1234' } } })
 	async verifyBackupCode(@Request() req: any, @Body('code') code: string) {

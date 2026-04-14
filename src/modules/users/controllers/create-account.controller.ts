@@ -17,7 +17,11 @@ export class CreateAccountController {
 
 	@Post('register')
 	@Public()
-	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 3 }, long: { ttl: 3600000, limit: 10 } })
+	@Throttle({
+		short: { ttl: 1000, limit: 1 },
+		medium: { ttl: 60000, limit: 3 },
+		long: { ttl: 3600000, limit: 10 },
+	})
 	@HttpCode(HttpStatus.CREATED)
 	@ApiOperation({ summary: 'Create user account' })
 	@ApiResponse({ status: 201, description: 'Account created successfully' })

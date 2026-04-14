@@ -100,12 +100,14 @@ export class PrismaProductPriceRepository implements ProductPriceRepository {
 			orderBy: { createdAt: 'asc' },
 		})
 
-		return records.map((record, index) => ({
-			id: record.id,
-			old_price: index === 0 ? 0 : records[index - 1].price,
-			new_price: record.price,
-			change_type: 'manual' as const,
-			changed_at: record.createdAt,
-		})).reverse()
+		return records
+			.map((record, index) => ({
+				id: record.id,
+				old_price: index === 0 ? 0 : records[index - 1].price,
+				new_price: record.price,
+				change_type: 'manual' as const,
+				changed_at: record.createdAt,
+			}))
+			.reverse()
 	}
 }

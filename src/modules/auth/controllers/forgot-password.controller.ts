@@ -13,7 +13,11 @@ export class ForgotPasswordController {
 
 	@Public()
 	@Post('forgot-password')
-	@Throttle({ short: { ttl: 1000, limit: 1 }, medium: { ttl: 60000, limit: 3 }, long: { ttl: 3600000, limit: 5 } })
+	@Throttle({
+		short: { ttl: 1000, limit: 1 },
+		medium: { ttl: 60000, limit: 3 },
+		long: { ttl: 3600000, limit: 5 },
+	})
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'Request password reset' })
 	@ApiBody({ schema: { example: { email: 'user@example.com' } } })

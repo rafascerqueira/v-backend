@@ -6,7 +6,7 @@ import Redis, { type Redis as RedisClient } from 'ioredis'
 export class RedisService implements OnModuleDestroy {
 	private readonly client: RedisClient
 
-	constructor(private readonly configService: ConfigService) {
+	constructor(readonly configService: ConfigService) {
 		this.client = new Redis({
 			host: configService.get<string>('redis.host', 'localhost'),
 			port: configService.get<number>('redis.port', 6379),

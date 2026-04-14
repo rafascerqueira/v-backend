@@ -54,7 +54,11 @@ export class AccountService {
 		const account = await this.accountRepository.findById(id)
 		if (!account) return false
 
-		const isPasswordValid = await this.passwordHasher.verify(password, account.password, account.salt)
+		const isPasswordValid = await this.passwordHasher.verify(
+			password,
+			account.password,
+			account.salt,
+		)
 		if (!isPasswordValid) return false
 
 		await this.accountRepository.anonymize(id)

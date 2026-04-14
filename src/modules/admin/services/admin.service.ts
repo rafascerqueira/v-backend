@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import {
+	BadRequestException,
+	ConflictException,
+	Inject,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common'
 import type { PlanType } from '@/generated/prisma/client'
 import { Prisma } from '@/generated/prisma/client'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
