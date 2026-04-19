@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
+	CatalogActivePromotion,
 	CatalogCustomer,
 	CatalogOrderStatus,
 	CatalogPaymentStatus,
@@ -80,6 +81,20 @@ export class PrismaCatalogRepository implements CatalogRepository {
 			},
 			orderBy: { createdAt: 'desc' },
 		}) as unknown as CatalogPrice[]
+	}
+
+	async findActivePromotions(productIds: number[]): Promise<CatalogActivePromotion[]> {
+		const now = new Date()
+		return this.prisma.promotion.findMany({
+			where: {
+				product_id: { in: productIds },
+				start_date: { lte: now },
+				end_date: { gte: now },
+				status: { not: 'expired' },
+			},
+			select: { product_id: true, promotional_price: true },
+			orderBy: { createdAt: 'desc' },
+		}) as unknown as CatalogActivePromotion[]
 	}
 
 	async findLatestPrice(productId: number): Promise<CatalogPrice | null> {

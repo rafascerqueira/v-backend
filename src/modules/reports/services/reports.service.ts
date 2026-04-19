@@ -4,6 +4,7 @@ import {
 	type ReportsRepository,
 } from '@/shared/repositories/reports.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
+import { parseLocalDate } from '@/shared/utils/date'
 
 type Period = 'week' | 'month' | 'year'
 
@@ -238,9 +239,9 @@ export class ReportsService {
 	async getSalesReport(startDate?: string, endDate?: string) {
 		const tenantFilter = this.getTenantFilter()
 		const start = startDate
-			? new Date(startDate)
+			? parseLocalDate(startDate)
 			: new Date(new Date().setMonth(new Date().getMonth() - 1))
-		const end = endDate ? new Date(endDate) : new Date()
+		const end = endDate ? parseLocalDate(endDate) : new Date()
 
 		const orders = await this.reportsRepository.findOrdersWithItems(tenantFilter, {
 			gte: start,

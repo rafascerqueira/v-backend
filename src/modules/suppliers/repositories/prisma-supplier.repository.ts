@@ -9,6 +9,7 @@ import type {
 	UpdateSupplierData,
 } from '@/shared/repositories/supplier.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
+import { parseLocalDate } from '@/shared/utils/date'
 
 @Injectable()
 export class PrismaSupplierRepository implements SupplierRepository {
@@ -99,7 +100,7 @@ export class PrismaSupplierRepository implements SupplierRepository {
 				supplier_id: supplierId,
 				amount: data.amount,
 				description: data.description,
-				due_date: data.due_date ? new Date(data.due_date) : undefined,
+				due_date: data.due_date ? parseLocalDate(data.due_date) : undefined,
 			},
 		}) as unknown as SupplierDebt
 	}

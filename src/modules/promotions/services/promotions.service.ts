@@ -3,6 +3,7 @@ import {
 	PROMOTION_REPOSITORY,
 	type PromotionRepository,
 } from '@/shared/repositories/promotion.repository'
+import { parseLocalDate } from '@/shared/utils/date'
 import type { CreatePromotionDto } from '../dto/create-promotion.dto'
 
 @Injectable()
@@ -23,8 +24,8 @@ export class PromotionsService {
 	}
 
 	async create(data: CreatePromotionDto & { seller_id: string }) {
-		const startDate = new Date(data.start_date)
-		const endDate = new Date(data.end_date)
+		const startDate = parseLocalDate(data.start_date)
+		const endDate = parseLocalDate(data.end_date)
 
 		if (endDate <= startDate) {
 			throw new BadRequestException('end_date must be after start_date')

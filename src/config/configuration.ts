@@ -40,6 +40,10 @@ export default () => ({
 	stripe: {
 		secretKey: process.env.STRIPE_SECRET_KEY,
 		webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+		priceIds: {
+			pro: process.env.STRIPE_PRICE_PRO,
+			enterprise: process.env.STRIPE_PRICE_ENTERPRISE,
+		},
 	},
 
 	upload: {

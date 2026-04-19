@@ -4,6 +4,7 @@ import type { FastifyReply } from 'fastify'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import { TenantContext } from '@/shared/tenant/tenant.context'
+import { parseLocalDate } from '@/shared/utils/date'
 import { ExportService } from './export.service'
 
 @ApiTags('export')
@@ -31,8 +32,8 @@ export class ExportController {
 		const sellerId = this.tenantContext.requireSellerId()
 
 		const where: any = { seller_id: sellerId }
-		if (startDate) where.createdAt = { gte: new Date(startDate) }
-		if (endDate) where.createdAt = { ...where.createdAt, lte: new Date(endDate) }
+		if (startDate) where.createdAt = { gte: parseLocalDate(startDate) }
+		if (endDate) where.createdAt = { ...where.createdAt, lte: parseLocalDate(endDate) }
 
 		const orders = await this.prisma.order.findMany({
 			where,

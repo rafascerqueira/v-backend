@@ -63,10 +63,19 @@ export class CatalogService {
 
 		const stocks = await this.catalogRepository.findStocks(productIds)
 
+		const promotions = await this.catalogRepository.findActivePromotions(productIds)
+
 		const priceMap = new Map<number, number>()
 		for (const price of prices) {
 			if (!priceMap.has(price.product_id)) {
 				priceMap.set(price.product_id, price.price)
+			}
+		}
+
+		const promotionMap = new Map<number, number>()
+		for (const promo of promotions) {
+			if (!promotionMap.has(promo.product_id)) {
+				promotionMap.set(promo.product_id, promo.promotional_price)
 			}
 		}
 
@@ -86,7 +95,8 @@ export class CatalogService {
 				brand: product.brand,
 				unit: product.unit,
 				images: product.images,
-				price: priceMap.get(product.id) || 0,
+				price: promotionMap.get(product.id) ?? priceMap.get(product.id) ?? 0,
+				originalPrice: promotionMap.has(product.id) ? priceMap.get(product.id) : undefined,
 				availableStock: stockMap.get(product.id) || 0,
 			}))
 	}
@@ -158,14 +168,20 @@ export class CatalogService {
 			throw new BadRequestException('Todos os produtos devem pertencer à mesma loja')
 		}
 
-		// Get prices
+		// Get prices and active promotions
 		const prices = await this.catalogRepository.findActivePrices(productIds)
+		const promotions = await this.catalogRepository.findActivePromotions(productIds)
 
 		const priceMap = new Map<number, number>()
 		for (const price of prices) {
 			if (!priceMap.has(price.product_id)) {
 				priceMap.set(price.product_id, price.price)
 			}
+		}
+
+		for (const promo of promotions) {
+			if (!priceMap.has(promo.product_id)) continue
+			priceMap.set(promo.product_id, promo.promotional_price)
 		}
 
 		// Get seller_id from product early

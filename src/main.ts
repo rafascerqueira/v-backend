@@ -17,7 +17,9 @@ import { GlobalExceptionFilter } from './shared/filters/global-exception.filter'
 import { ZodExceptionFilter } from './shared/filters/zod-exception.filter'
 
 async function bootstrap() {
-	const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter())
+	const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
+		rawBody: true,
+	})
 	const configService = app.get(ConfigService)
 
 	app.enableCors({
@@ -38,7 +40,7 @@ async function bootstrap() {
 		},
 		credentials: true,
 		methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-		allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+		allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'stripe-signature'],
 	})
 
 	await app.register(cookie as any, {

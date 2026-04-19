@@ -34,25 +34,25 @@ export class WebhookController {
 	async handleStripeWebhook(
 		@Req() req: RawBodyRequest<FastifyRequest>,
 		@Headers('stripe-signature') signature: string,
-		@Body() body: any,
 	) {
 		if (!signature) {
 			throw new BadRequestException('Missing Stripe signature header')
 		}
 
 		const rawBody = req.rawBody
-		if (rawBody) {
-			const event = this.stripeService.constructWebhookEvent(rawBody, signature)
-			if (!event) {
-				throw new BadRequestException('Invalid Stripe webhook signature')
-			}
-			body = event
+		if (!rawBody) {
+			throw new InternalServerErrorException('Raw body unavailable')
 		}
 
-		this.logger.log(`Received Stripe webhook: ${body?.type}`)
+		const event = this.stripeService.constructWebhookEvent(rawBody, signature)
+		if (!event) {
+			throw new BadRequestException('Invalid Stripe webhook signature')
+		}
+
+		this.logger.log(`Received Stripe webhook: ${event.type}`)
 
 		try {
-			await this.webhookService.processStripeWebhook(body)
+			await this.webhookService.processStripeWebhook(event)
 			return { received: true }
 		} catch (error) {
 			this.logger.error(`Stripe webhook error: ${error}`)

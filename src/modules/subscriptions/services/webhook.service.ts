@@ -1,26 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
+import Stripe from 'stripe'
 import {
 	WEBHOOK_REPOSITORY,
 	type WebhookRepository,
 } from '@/shared/repositories/webhook.repository'
 import type { PlanType } from '../constants/plan-limits'
 import { SubscriptionService } from './subscription.service'
-
-interface StripeWebhookEvent {
-	id: string
-	type: string
-	data: {
-		object: {
-			id: string
-			customer: string
-			status: string
-			current_period_start: number
-			current_period_end: number
-			cancel_at_period_end: boolean
-			metadata?: { plan_type?: string; account_id?: string }
-		}
-	}
-}
 
 interface PagSeguroWebhookEvent {
 	id: string
@@ -43,8 +28,7 @@ export class WebhookService {
 		private readonly subscriptionService: SubscriptionService,
 	) {}
 
-	async processStripeWebhook(event: StripeWebhookEvent) {
-		// Check if already processed (idempotency)
+	async processStripeWebhook(event: Stripe.Event) {
 		const existing = await this.webhookRepository.findWebhookEvent(event.id)
 
 		if (existing?.processed) {
@@ -52,20 +36,16 @@ export class WebhookService {
 			return { success: true, message: 'Already processed' }
 		}
 
-		// Store webhook event
 		const webhookRecord = await this.webhookRepository.upsertWebhookEvent({
 			event_id: event.id,
 			provider: 'stripe',
 			event_type: event.type,
-			payload: event,
+			payload: event as unknown as Record<string, unknown>,
 		})
 
 		try {
 			await this.handleStripeEvent(event)
-
-			// Mark as processed
 			await this.webhookRepository.markWebhookProcessed(webhookRecord.id)
-
 			return { success: true }
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -74,33 +54,47 @@ export class WebhookService {
 		}
 	}
 
-	private async handleStripeEvent(event: StripeWebhookEvent) {
-		const { type, data } = event
+	private async handleStripeEvent(event: Stripe.Event) {
+		switch (event.type) {
+			case 'checkout.session.completed':
+				await this.handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session)
+				break
 
-		switch (type) {
 			case 'customer.subscription.created':
 			case 'customer.subscription.updated':
-				await this.handleStripeSubscriptionUpdate(data.object)
+				await this.handleSubscriptionUpdate(event.data.object as Stripe.Subscription)
 				break
 
 			case 'customer.subscription.deleted':
-				await this.handleStripeSubscriptionDeleted(data.object)
+				await this.handleSubscriptionDeleted(event.data.object as Stripe.Subscription)
 				break
 
 			case 'invoice.payment_succeeded':
-				this.logger.log(`Payment succeeded for subscription`)
+				await this.handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice)
 				break
 
 			case 'invoice.payment_failed':
-				await this.handleStripePaymentFailed(data.object)
+				await this.handleInvoicePaymentFailed(event.data.object as Stripe.Invoice)
 				break
 
 			default:
-				this.logger.log(`Unhandled Stripe event type: ${type}`)
+				this.logger.log(`Unhandled Stripe event type: ${event.type}`)
 		}
 	}
 
-	private async handleStripeSubscriptionUpdate(subscription: StripeWebhookEvent['data']['object']) {
+	private async handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+		const accountId = session.metadata?.account_id
+		if (!accountId) {
+			this.logger.warn('checkout.session.completed: no account_id in metadata')
+			return
+		}
+		// customer.subscription.created fires right after and creates the full record;
+		// here we just ensure the account plan is upgraded immediately on checkout completion.
+		await this.subscriptionService.updatePlan(accountId, 'pro')
+		this.logger.log(`✅ Plan upgraded on checkout completion for account ${accountId}`)
+	}
+
+	private async handleSubscriptionUpdate(subscription: Stripe.Subscription) {
 		const accountId = subscription.metadata?.account_id
 		if (!accountId) {
 			this.logger.warn('No account_id in subscription metadata')
@@ -108,9 +102,6 @@ export class WebhookService {
 		}
 
 		const planType = (subscription.metadata?.plan_type || 'pro') as PlanType
-
-		// Find or create subscription record
-		const existingSub = await this.webhookRepository.findSubscriptionByProviderId(subscription.id)
 
 		const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing' | 'paused'> = {
 			active: 'active',
@@ -121,11 +112,14 @@ export class WebhookService {
 			paused: 'paused',
 		}
 
+		const existingSub = await this.webhookRepository.findSubscriptionByProviderId(subscription.id)
+
+		const sub = subscription as any
 		if (existingSub) {
 			await this.webhookRepository.updateSubscriptionById(existingSub.id, {
 				status: statusMap[subscription.status] || 'active',
-				current_period_start: new Date(subscription.current_period_start * 1000),
-				current_period_end: new Date(subscription.current_period_end * 1000),
+				current_period_start: new Date(sub.current_period_start * 1000),
+				current_period_end: new Date(sub.current_period_end * 1000),
 				cancel_at_period_end: subscription.cancel_at_period_end,
 			})
 		} else {
@@ -134,21 +128,18 @@ export class WebhookService {
 				planType,
 				paymentProvider: 'stripe',
 				providerSubscriptionId: subscription.id,
-				providerCustomerId: subscription.customer,
-				periodStart: new Date(subscription.current_period_start * 1000),
-				periodEnd: new Date(subscription.current_period_end * 1000),
+				providerCustomerId: subscription.customer as string,
+				periodStart: new Date(sub.current_period_start * 1000),
+				periodEnd: new Date(sub.current_period_end * 1000),
 			})
 		}
 
-		// Update account plan if subscription is active
 		if (subscription.status === 'active' || subscription.status === 'trialing') {
 			await this.subscriptionService.updatePlan(accountId, planType)
 		}
 	}
 
-	private async handleStripeSubscriptionDeleted(
-		subscription: StripeWebhookEvent['data']['object'],
-	) {
+	private async handleSubscriptionDeleted(subscription: Stripe.Subscription) {
 		const accountId = subscription.metadata?.account_id
 		if (!accountId) return
 
@@ -157,12 +148,22 @@ export class WebhookService {
 			canceled_at: new Date(),
 		})
 
-		// Downgrade to free
 		await this.subscriptionService.handleSubscriptionEnded(accountId)
 	}
 
-	private async handleStripePaymentFailed(data: any) {
-		const subscriptionId = data.subscription
+	private async handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
+		const subscriptionId = (invoice as any).subscription as string | null
+		if (!subscriptionId) return
+
+		await this.webhookRepository.updateSubscriptionsByProviderId(subscriptionId, {
+			status: 'active',
+			current_period_start: new Date((invoice as any).period_start * 1000),
+			current_period_end: new Date((invoice as any).period_end * 1000),
+		})
+	}
+
+	private async handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
+		const subscriptionId = (invoice as any).subscription as string | null
 		if (!subscriptionId) return
 
 		await this.webhookRepository.updateSubscriptionsByProviderId(subscriptionId, {
@@ -171,7 +172,6 @@ export class WebhookService {
 	}
 
 	async processPagSeguroWebhook(event: PagSeguroWebhookEvent) {
-		// Check if already processed
 		const existing = await this.webhookRepository.findWebhookEvent(event.id)
 
 		if (existing?.processed) {
@@ -182,14 +182,12 @@ export class WebhookService {
 			event_id: event.id,
 			provider: 'pagseguro',
 			event_type: event.type,
-			payload: event,
+			payload: event as unknown as Record<string, unknown>,
 		})
 
 		try {
 			await this.handlePagSeguroEvent(event)
-
 			await this.webhookRepository.markWebhookProcessed(webhookRecord.id)
-
 			return { success: true }
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -199,25 +197,23 @@ export class WebhookService {
 	}
 
 	private async handlePagSeguroEvent(event: PagSeguroWebhookEvent) {
-		const { type, data } = event
-
-		switch (type) {
+		switch (event.type) {
 			case 'SUBSCRIPTION.ACTIVATED':
 			case 'SUBSCRIPTION.RENEWED':
-				await this.handlePagSeguroSubscriptionActive(data)
+				await this.handlePagSeguroSubscriptionActive(event.data)
 				break
 
 			case 'SUBSCRIPTION.CANCELED':
 			case 'SUBSCRIPTION.EXPIRED':
-				await this.handlePagSeguroSubscriptionEnded(data)
+				await this.handlePagSeguroSubscriptionEnded(event.data)
 				break
 
 			case 'SUBSCRIPTION.PAYMENT_FAILED':
-				await this.handlePagSeguroPaymentFailed(data)
+				await this.handlePagSeguroPaymentFailed(event.data)
 				break
 
 			default:
-				this.logger.log(`Unhandled PagSeguro event type: ${type}`)
+				this.logger.log(`Unhandled PagSeguro event type: ${event.type}`)
 		}
 	}
 

@@ -28,6 +28,11 @@ export interface CatalogPrice {
 	createdAt: Date
 }
 
+export interface CatalogActivePromotion {
+	product_id: number
+	promotional_price: number
+}
+
 export interface CatalogStock {
 	product_id: number
 	quantity: number
@@ -61,6 +66,7 @@ export interface CatalogRepository {
 
 	findActivePrices(productIds: number[]): Promise<CatalogPrice[]>
 	findLatestPrice(productId: number): Promise<CatalogPrice | null>
+	findActivePromotions(productIds: number[]): Promise<CatalogActivePromotion[]>
 
 	findStocks(productIds: number[]): Promise<CatalogStock[]>
 	findStockByProduct(productId: number): Promise<CatalogStock | null>
