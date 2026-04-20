@@ -96,19 +96,24 @@ if [ ! -d "frontend/.git" ]; then
   git clone https://github.com/rafascerqueira/v-frontend.git frontend
 fi
 
-# Generate secrets
-echo "🔐 Gerando secrets seguros..."
-JWT_SECRET=$(openssl rand -hex 32)
-JWT_REFRESH_SECRET=$(openssl rand -hex 32)
-POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')
-
 # Setup backend
 echo "🔧 Configurando backend..."
 cd /var/www/vendinhas/backend
 pnpm install --frozen-lockfile
 
-# Create .env file
-cat > .env << EOF
+# Create .env file (only if missing — never overwrite an existing one)
+if [ -f .env ]; then
+  echo "⏭️  .env já existe — preservando secrets existentes"
+  set -a
+  source .env
+  set +a
+else
+  echo "🔐 Gerando secrets seguros..."
+  JWT_SECRET=$(openssl rand -hex 32)
+  JWT_REFRESH_SECRET=$(openssl rand -hex 32)
+  POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')
+
+  cat > .env << EOF
 # ===========================================
 # SERVIDOR
 # ===========================================
@@ -175,22 +180,26 @@ UPLOAD_MAX_SIZE=5242880
 # STRIPE_PRICE_PRO=price_xxx
 # STRIPE_PRICE_ENTERPRISE=price_xxx
 EOF
+  echo "✅ Arquivo .env criado com secrets gerados automaticamente!"
+fi
 
-echo "✅ Arquivo .env criado com secrets gerados automaticamente!"
+# Generate RSA keys for JWT (only if missing)
+if [ -f keys/private.pem ]; then
+  echo "⏭️  Chaves JWT já existem — preservando"
+else
+  echo "🔑 Gerando chaves RSA para JWT..."
+  mkdir -p keys
+  openssl genrsa -out keys/private.pem 2048
+  openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+  chmod 600 keys/private.pem
+fi
 
-# Generate RSA keys for JWT
-echo "🔑 Gerando chaves RSA para JWT..."
-mkdir -p keys
-openssl genrsa -out keys/private.pem 2048
-openssl rsa -in keys/private.pem -pubout -out keys/public.pem
-chmod 600 keys/private.pem
-
-# Create .env for Docker Compose
+# Create .env for Docker Compose (always — derived from current .env)
 echo "🐳 Criando arquivo de ambiente Docker..."
 cat > .env.docker << EOF
-POSTGRES_USER=vendapp_user
+POSTGRES_USER=${POSTGRES_USER}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-POSTGRES_DB=vendapp_db
+POSTGRES_DB=${POSTGRES_DB}
 EOF
 
 # Start Docker containers (PostgreSQL + Redis)
@@ -226,8 +235,12 @@ echo "🔧 Configurando frontend..."
 cd /var/www/vendinhas/frontend
 pnpm install --frozen-lockfile
 
-# Create .env.local
-echo "NEXT_PUBLIC_API_URL=https://api.vendinhas.app" > .env.local
+# Create .env.local (only if missing)
+if [ -f .env.local ]; then
+  echo "⏭️  frontend/.env.local já existe — preservando"
+else
+  echo "NEXT_PUBLIC_API_URL=https://api.vendinhas.app" > .env.local
+fi
 
 # Build frontend
 echo "🏗️ Compilando frontend..."
