@@ -185,3 +185,109 @@ Configure at: https://github.com/rafascerqueira/v-backend/settings/secrets/actio
 | TXT | @ | `v=spf1 ip4:VPS_IP ~all` |
 | TXT | _dmarc | `v=DMARC1; p=none` |
 | MX | @ | `mail.vendinhas.app` (priority 10) |
+
+## Incidents
+
+### 2026-04-20 — `GET /suppliers` returning HTTP 500 in production
+
+**Symptom**
+```
+GET https://api.vendinhas.app/suppliers → 500
+[GlobalExceptionFilter] Invalid `prisma.supplier.findMany()` invocation:
+  The table `public.suppliers` does not exist in the current database.
+```
+
+**Root cause — three compounding factors**
+
+1. **Stale `search_path` on the DB role.** Someone had manually run
+   `ALTER ROLE vendapp_user SET search_path = vendinhas, public` at some point
+   (not in any repo script, no trace in `.github/`, `scripts/` or
+   `init-db.sql`). This was leftover from an early attempt to use a custom
+   schema, later abandoned in favor of the `public`-only policy (see
+   `Known Constraints` — `@prisma/adapter-pg` 7.x bug).
+2. **A migration stuck mid-flight.** Migration
+   `20260308043600_add_store_fields_and_notifications` was recorded with
+   `started_at` but `finished_at = NULL`. It had failed months earlier with
+   `42701: column "store_banner" of relation "accounts" already exists`
+   because the DDL had been applied manually beforehand. Prisma refused to
+   apply any subsequent migration until this one was resolved.
+3. **All subsequent migrations silently created objects in the wrong schema.**
+   When the stuck migration was eventually resolved and
+   `prisma migrate deploy` ran, the 8 pending migrations created
+   `suppliers`, `supplier_debts`, `promotions`, `bundles`, `bundle_items`,
+   the view `v_seller_stats`, and three enums in schema `vendinhas`
+   (because of the role's `search_path`). The application, which queries
+   unqualified table names, kept resolving them against `public` and hit
+   the "table does not exist" error.
+
+Additional detail: `public.customers.billing_mode` was created referencing
+the enum `vendinhas.BillingMode`, creating a cross-schema dependency that
+prevented a naive `DROP SCHEMA vendinhas CASCADE` (would have dropped the
+column in `public.customers`).
+
+**Resolution**
+
+1. Full `pg_dump` backup at
+   `/var/www/vendinhas/backups/vendapp_db_20260420_010658_pre_migrate_fix.sql.gz`.
+2. Created the one missing index from the stuck migration
+   (`idx_accounts_store_slug`) manually, then
+   `pnpm prisma migrate resolve --applied 20260308043600_add_store_fields_and_notifications`.
+3. `pnpm prisma migrate deploy` — applied the 8 pending migrations (into the
+   wrong schema, as it turned out).
+4. Single atomic transaction to migrate everything back to `public`:
+   - Cloned the three enums (`BillingMode`, `PromotionStatus`,
+     `SupplierDebtStatus`) into `public`.
+   - `ALTER TABLE public.customers ALTER COLUMN billing_mode TYPE public."BillingMode" USING billing_mode::text::public."BillingMode"`.
+   - Recreated the 5 tables + FKs + indexes + the `v_seller_stats` view in
+     `public` (SQL copied verbatim from the migration files — all tables
+     were empty, so no data migration needed).
+   - `DROP SCHEMA vendinhas CASCADE`.
+   - `ALTER ROLE vendapp_user RESET search_path`.
+5. `pm2 reload vendinhas-api --update-env`.
+6. Verified: `GET /suppliers` → `401` (auth required, endpoint working),
+   `GET /health` → `200`.
+
+**Preventive actions applied**
+
+- `search_path` reset on `vendapp_user` (back to the default
+  `"$user", public`).
+- Schema `vendinhas` dropped. Only `public` remains.
+- `POSTGRES_SCHEMA=vendinhas` removed from `/var/www/vendinhas/backend/.env`.
+  It was an orphan variable — not read by `DATABASE_URL` nor by
+  `prisma.config.ts`.
+- Removed leftover untracked files under `backend/` that were a stale
+  manual deploy: `migrations/`, `schema.prisma`, `seed.ts`,
+  `vendinhas.conf`. Deploys happen via `scripts/deploy.sh` triggered by
+  GitHub Actions.
+
+**Open follow-ups (not addressed in this incident)**
+
+- `.env.docker` (versioned) still contains `POSTGRES_SCHEMA=vendinhas`.
+  It's inert today (nothing reads it), but it's a documentation
+  landmine — future readers may assume a custom schema is in use.
+- `.env.docker` contains the Postgres password in plaintext and is
+  pushed to GitHub. That credential should be considered compromised
+  and rotated; `.env.docker` should either be gitignored with a
+  `.env.docker.example` placeholder, or use dummy values safe for
+  public exposure.
+- `scripts/setup-vps.sh` provisions a fresh VPS with a clean database,
+  so this specific failure mode wouldn't reproduce automatically. But
+  if anyone ever re-introduces a `CREATE SCHEMA` + `ALTER ROLE ... SET search_path`
+  pattern, guard against it by asserting the role config on startup.
+
+**Debugging recipes (re-usable)**
+
+Check current state of the DB role and schemas:
+```bash
+docker exec -i vendinhas-postgres psql -U vendapp_user -d vendapp_db -c \
+  "SELECT rolname, rolconfig FROM pg_roles WHERE rolname='vendapp_user';"
+
+docker exec -i vendinhas-postgres psql -U vendapp_user -d vendapp_db -c \
+  "SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema';"
+```
+
+Check for migrations stuck mid-apply:
+```bash
+docker exec -i vendinhas-postgres psql -U vendapp_user -d vendapp_db -c \
+  "SELECT migration_name, finished_at IS NOT NULL AS applied, rolled_back_at FROM _prisma_migrations ORDER BY started_at;"
+```
