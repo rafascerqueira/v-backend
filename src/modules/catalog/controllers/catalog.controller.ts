@@ -2,10 +2,12 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestj
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { Public } from '@/modules/auth/decorators/public.decorator'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
+import { type AuthCustomerDto, authCustomerSchema } from '../dto/auth-customer.dto'
 import {
 	type CreateCatalogOrderDto,
 	createCatalogOrderSchema,
 } from '../dto/create-catalog-order.dto'
+import { type LookupCustomerDto, lookupCustomerSchema } from '../dto/lookup-customer.dto'
 import { CatalogService } from '../services/catalog.service'
 
 @ApiTags('catalog')
@@ -45,31 +47,67 @@ export class CatalogController {
 	}
 
 	@Public()
-	@Get('products')
-	@ApiOperation({ summary: 'List all products available in catalog (public)' })
-	@ApiResponse({ status: 200, description: 'Products listed successfully' })
-	async getProducts() {
-		return this.service.getProducts()
-	}
-
-	@Public()
-	@Get('products/:id')
-	@ApiOperation({ summary: 'Get product details (public)' })
-	@ApiParam({ name: 'id', type: Number })
-	@ApiResponse({ status: 200, description: 'Product found' })
-	@ApiResponse({ status: 404, description: 'Product not found' })
-	async getProduct(@Param('id') id: string) {
-		return this.service.getProductById(Number(id))
-	}
-
-	@Public()
-	@Get('customers/:id')
-	@ApiOperation({ summary: 'Get customer data for personalized catalog link (public)' })
+	@Get('loja/:slug/customers/:id')
+	@ApiOperation({
+		summary: 'Get customer data for personalized catalog link, scoped to a store (public)',
+	})
+	@ApiParam({ name: 'slug', type: String, description: 'Store slug' })
 	@ApiParam({ name: 'id', type: String, description: 'Customer UUID' })
-	@ApiResponse({ status: 200, description: 'Customer found' })
-	@ApiResponse({ status: 404, description: 'Customer not found' })
-	async getCustomer(@Param('id') id: string) {
-		return this.service.getCustomerById(id)
+	@ApiResponse({ status: 200, description: 'Customer found in the given store' })
+	@ApiResponse({ status: 404, description: 'Customer not found in this store' })
+	async getStoreCustomer(@Param('slug') slug: string, @Param('id') id: string) {
+		return this.service.getCustomerInStore(slug, id)
+	}
+
+	@Public()
+	@Post('loja/:slug/customer/lookup')
+	@HttpCode(HttpStatus.OK)
+	@ApiOperation({ summary: 'Look up customer by email or phone in a store (public)' })
+	@ApiParam({ name: 'slug', type: String })
+	@ApiResponse({ status: 200, description: 'Lookup result' })
+	async lookupCustomer(
+		@Param('slug') slug: string,
+		@Body(new ZodValidationPipe(lookupCustomerSchema)) body: LookupCustomerDto,
+	) {
+		return this.service.lookupCustomer(slug, body)
+	}
+
+	@Public()
+	@Post('loja/:slug/customer/auth')
+	@HttpCode(HttpStatus.OK)
+	@ApiOperation({ summary: 'Authenticate existing customer in a store (public)' })
+	@ApiParam({ name: 'slug', type: String })
+	@ApiResponse({ status: 200, description: 'Customer authenticated' })
+	@ApiResponse({ status: 401, description: 'Wrong password' })
+	@ApiResponse({ status: 404, description: 'Customer or store not found' })
+	async authenticateCustomer(
+		@Param('slug') slug: string,
+		@Body(new ZodValidationPipe(authCustomerSchema)) body: AuthCustomerDto,
+	) {
+		return this.service.authenticateCustomer(slug, body)
+	}
+
+	@Public()
+	@Post('loja/:slug/customer/password')
+	@HttpCode(HttpStatus.OK)
+	@ApiOperation({ summary: 'Set password for a customer who has none yet (public)' })
+	@ApiParam({ name: 'slug', type: String })
+	@ApiResponse({ status: 200, description: 'Password set and customer authenticated' })
+	async setCustomerPassword(
+		@Param('slug') slug: string,
+		@Body(new ZodValidationPipe(authCustomerSchema)) body: AuthCustomerDto,
+	) {
+		return this.service.setCustomerPassword(slug, body)
+	}
+
+	@Public()
+	@Get('orders/:orderNumber/track')
+	@ApiOperation({ summary: 'Track order status by order number (public)' })
+	@ApiParam({ name: 'orderNumber', type: String, description: 'Order number (e.g. PED-LK3X4ABC)' })
+	@ApiResponse({ status: 200, description: 'Order tracking info' })
+	@ApiResponse({ status: 404, description: 'Order not found' })
+	async trackOrder(@Param('orderNumber') orderNumber: string) {
+		return this.service.trackOrder(orderNumber)
 	}
 
 	@Public()

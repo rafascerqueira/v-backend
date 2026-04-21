@@ -19,11 +19,16 @@ export const catalogOrderItemSchema = z.object({
 	quantity: z.coerce.number().int().positive().default(1),
 })
 
-export const createCatalogOrderSchema = z.object({
-	customer: catalogCustomerSchema,
-	items: z.array(catalogOrderItemSchema).min(1, 'Adicione pelo menos um item'),
-	notes: z.string().optional(),
-})
+export const createCatalogOrderSchema = z
+	.object({
+		customerId: z.string().optional(),
+		customer: catalogCustomerSchema.optional(),
+		items: z.array(catalogOrderItemSchema).min(1, 'Adicione pelo menos um item'),
+		notes: z.string().optional(),
+	})
+	.refine((d) => d.customerId !== undefined || d.customer !== undefined, {
+		message: 'Forneça customerId ou os dados do cliente',
+	})
 
 export type CatalogCustomerDto = z.infer<typeof catalogCustomerSchema>
 export type CatalogOrderItemDto = z.infer<typeof catalogOrderItemSchema>

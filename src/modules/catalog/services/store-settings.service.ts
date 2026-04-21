@@ -1,5 +1,12 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import {
+	BadRequestException,
+	ConflictException,
+	Inject,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { generateUniqueSlug, RESERVED_SLUGS } from '@/shared/catalog/slug-generator'
 import {
 	STORE_SETTINGS_REPOSITORY,
 	type StoreSettingsRepository,
@@ -32,6 +39,12 @@ export class StoreSettingsService {
 			throw new NotFoundException('Conta não encontrada')
 		}
 
+		const slugSuggestion = await this.generateSlugSuggestion(
+			account.store_name,
+			account.name,
+			sellerId,
+		)
+
 		return {
 			id: account.id,
 			sellerName: account.name,
@@ -43,11 +56,16 @@ export class StoreSettingsService {
 			phone: account.store_phone,
 			whatsapp: account.store_whatsapp,
 			catalogUrl: account.store_slug ? `${this.frontendUrl}/loja/${account.store_slug}` : null,
+			slugSuggestion,
 		}
 	}
 
 	async updateSettings(sellerId: string, data: UpdateStoreSettings) {
 		if (data.store_slug) {
+			if (RESERVED_SLUGS.has(data.store_slug.toLowerCase())) {
+				throw new BadRequestException('Este slug não está disponível')
+			}
+
 			const conflict = await this.storeSettingsRepository.findSlugConflict(
 				data.store_slug,
 				sellerId,
@@ -95,18 +113,21 @@ export class StoreSettingsService {
 			hasSlug: !!account.store_slug,
 			slug: account.store_slug,
 			catalogUrl: account.store_slug ? `${baseUrl}/loja/${account.store_slug}` : null,
-			genericUrl: `${baseUrl}/catalog`,
-			suggestion: account.store_slug ? null : this.generateSlugSuggestion(account.name),
+			suggestion: account.store_slug
+				? null
+				: await this.generateSlugSuggestion(account.store_name, account.name, sellerId),
 		}
 	}
 
-	private generateSlugSuggestion(name: string): string {
-		return name
-			.toLowerCase()
-			.normalize('NFD')
-			.replace(/[\u0300-\u036f]/g, '')
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-+|-+$/g, '')
-			.substring(0, 50)
+	private generateSlugSuggestion(
+		storeName: string | null,
+		personalName: string,
+		excludeId: string,
+	): Promise<string> {
+		return generateUniqueSlug(
+			(slug) => this.storeSettingsRepository.findSlugConflict(slug, excludeId),
+			storeName,
+			personalName,
+		)
 	}
 }

@@ -31,6 +31,13 @@ describe('AccountService', () => {
       }),
       update: jest.fn(),
       delete: jest.fn(),
+      existsByStoreSlug: jest.fn(async (slug: string) => {
+        return accountsStore.some((a) => a.store_slug === slug)
+      }),
+      updateStoreSlug: jest.fn(async (id: string, slug: string) => {
+        const acc = accountsStore.find((a) => a.id === id)
+        if (acc) acc.store_slug = slug
+      }),
     }
   }
 
@@ -91,6 +98,51 @@ describe('AccountService', () => {
       expect(createdAccount?.email).toBe(accountData.email)
       expect(createdAccount?.password).not.toBe(accountData.password)
       expect(createdAccount?.salt).toBeDefined()
+    })
+
+    it('should auto-assign a store slug derived from the name', async () => {
+      await service.create({
+        name: 'Loja da Maria',
+        email: 'maria@example.com',
+        password: 'Securepass1',
+      })
+
+      const created = await accountRepository.findByEmail('maria@example.com')
+
+      expect(accountRepository.updateStoreSlug).toHaveBeenCalled()
+      expect(created?.store_slug).toBe('loja-da-maria')
+    })
+
+    it('should append a numeric suffix when the base slug is already taken', async () => {
+      accountsStore.push({
+        id: 'pre',
+        name: 'Loja da Maria',
+        email: 'other@example.com',
+        store_slug: 'loja-da-maria',
+      })
+
+      await service.create({
+        name: 'Loja da Maria',
+        email: 'maria@example.com',
+        password: 'Securepass1',
+      })
+
+      const created = await accountRepository.findByEmail('maria@example.com')
+
+      expect(created?.store_slug).toBe('loja-da-maria-2')
+    })
+
+    it('should not fail account creation when slug assignment throws', async () => {
+      accountRepository.updateStoreSlug.mockRejectedValueOnce(new Error('db down'))
+
+      const result = await service.create({
+        name: 'Jane',
+        email: 'jane@example.com',
+        password: 'Securepass1',
+      })
+
+      expect(result).toBeTruthy()
+      expect(result.email).toBe('jane@example.com')
     })
   })
 

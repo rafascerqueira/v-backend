@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
+import { generateUniqueSlug } from '@/shared/catalog/slug-generator'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import {
 	ACCOUNT_REPOSITORY,
@@ -13,6 +14,8 @@ type CreateAccountInput = {
 
 @Injectable()
 export class AccountService {
+	private readonly logger = new Logger(AccountService.name)
+
 	constructor(
 		@Inject(ACCOUNT_REPOSITORY)
 		private readonly accountRepository: AccountRepository,
@@ -26,12 +29,30 @@ export class AccountService {
 	async create(data: CreateAccountInput) {
 		const { hash, salt } = await this.passwordHasher.hash(data.password)
 
-		return this.accountRepository.create({
+		const account = await this.accountRepository.create({
 			name: data.name,
 			email: data.email,
 			password: hash,
 			salt,
 		})
+
+		// Assign a public catalog slug so the seller immediately has a shareable
+		// /loja/<slug> URL. Failure here is non-fatal: the seller can still set
+		// the slug later via Settings → Loja.
+		try {
+			const slug = await generateUniqueSlug(
+				(s) => this.accountRepository.existsByStoreSlug(s),
+				null,
+				data.name,
+			)
+			await this.accountRepository.updateStoreSlug(account.id, slug)
+		} catch (error) {
+			this.logger.warn(
+				`Failed to auto-assign store slug for account ${account.id}: ${(error as Error).message}`,
+			)
+		}
+
+		return account
 	}
 
 	async findByEmail(email: string) {

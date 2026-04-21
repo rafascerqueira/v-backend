@@ -110,6 +110,22 @@ export class TokenService implements OnModuleInit {
 		})
 	}
 
+	async signCustomerToken(customerId: string, sellerId: string): Promise<string> {
+		return this.jwtService.signAsync(
+			{ sub: customerId, sellerId, type: 'customer_access' },
+			{ privateKey: this.privateKey, algorithm: 'RS256' as const, expiresIn: 7 * 24 * 3600 },
+		)
+	}
+
+	async verifyCustomerToken(
+		token: string,
+	): Promise<{ sub: string; sellerId: string; type: string }> {
+		return this.jwtService.verifyAsync(token, {
+			publicKey: this.publicKey,
+			algorithms: ['RS256' as const],
+		})
+	}
+
 	async refreshTokens(
 		refreshToken: string,
 		blacklistService?: TokenBlacklistService,

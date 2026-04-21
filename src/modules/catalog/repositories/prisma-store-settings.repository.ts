@@ -76,10 +76,10 @@ export class PrismaStoreSettingsRepository implements StoreSettingsRepository {
 
 	async findSlugAndName(
 		accountId: string,
-	): Promise<{ store_slug: string | null; name: string } | null> {
+	): Promise<{ store_slug: string | null; store_name: string | null; name: string } | null> {
 		return this.prisma.account.findUnique({
 			where: { id: accountId },
-			select: { store_slug: true, name: true },
+			select: { store_slug: true, store_name: true, name: true },
 		})
 	}
 }

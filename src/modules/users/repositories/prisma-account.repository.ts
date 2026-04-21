@@ -31,6 +31,21 @@ export class PrismaAccountRepository implements AccountRepository {
 		return this.prisma.account.delete({ where: { id } })
 	}
 
+	async existsByStoreSlug(slug: string): Promise<boolean> {
+		const found = await this.prisma.account.findFirst({
+			where: { store_slug: slug },
+			select: { id: true },
+		})
+		return !!found
+	}
+
+	async updateStoreSlug(id: string, slug: string): Promise<void> {
+		await this.prisma.account.update({
+			where: { id },
+			data: { store_slug: slug },
+		})
+	}
+
 	async anonymize(id: string): Promise<void> {
 		const anonymousId = randomBytes(8).toString('hex')
 		const anonymousEmail = `deleted-${anonymousId}@anonymized.local`

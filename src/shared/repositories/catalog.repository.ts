@@ -41,6 +41,7 @@ export interface CatalogStock {
 
 export interface CatalogCustomer {
 	id: string
+	seller_id: string
 	name: string
 	email: string
 	phone: string | null
@@ -49,6 +50,32 @@ export interface CatalogCustomer {
 	city: string | null
 	state: string | null
 	zip_code: string | null
+	seller_store_slug?: string | null
+}
+
+export interface CatalogCustomerWithHash extends CatalogCustomer {
+	seller_id: string
+	password_hash: string | null
+}
+
+export interface CatalogOrderTracking {
+	id: number
+	order_number: string
+	status: string
+	payment_status: string
+	total: number
+	subtotal: number
+	discount: number
+	delivery_date: Date | null
+	createdAt: Date
+	updatedAt: Date
+	store: { name: string | null; store_name: string | null } | null
+	items: Array<{
+		product: { id: number; name: string } | null
+		quantity: number
+		unit_price: number
+		total: number
+	}>
 }
 
 export type CatalogOrderStatus = 'pending' | 'confirmed' | 'shipping' | 'delivered' | 'canceled'
@@ -72,6 +99,11 @@ export interface CatalogRepository {
 	findStockByProduct(productId: number): Promise<CatalogStock | null>
 
 	findCustomerById(id: string): Promise<CatalogCustomer | null>
+	findCustomerByEmailOrPhone(
+		emailOrPhone: string,
+		sellerId: string,
+	): Promise<CatalogCustomerWithHash | null>
+	updateCustomerPasswordHash(customerId: string, hash: string): Promise<void>
 	findCustomerByContact(
 		email: string,
 		phone: string | null,
@@ -89,6 +121,8 @@ export interface CatalogRepository {
 		state: string | null
 		zip_code: string | null
 	}): Promise<CatalogCustomer>
+
+	findOrderByNumber(orderNumber: string): Promise<CatalogOrderTracking | null>
 
 	findLastOrderId(): Promise<number | null>
 	createOrderWithItems(data: {

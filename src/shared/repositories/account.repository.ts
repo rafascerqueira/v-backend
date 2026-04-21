@@ -39,4 +39,6 @@ export interface AccountRepository {
 	update(id: string, data: UpdateAccountData): Promise<Account>
 	delete(id: string): Promise<Account>
 	anonymize(id: string): Promise<void>
+	existsByStoreSlug(slug: string): Promise<boolean>
+	updateStoreSlug(id: string, slug: string): Promise<void>
 }

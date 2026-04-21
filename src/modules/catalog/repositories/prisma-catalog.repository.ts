@@ -3,7 +3,9 @@ import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CatalogActivePromotion,
 	CatalogCustomer,
+	CatalogCustomerWithHash,
 	CatalogOrderStatus,
+	CatalogOrderTracking,
 	CatalogPaymentStatus,
 	CatalogPrice,
 	CatalogProduct,
@@ -122,10 +124,11 @@ export class PrismaCatalogRepository implements CatalogRepository {
 	}
 
 	async findCustomerById(id: string): Promise<CatalogCustomer | null> {
-		return this.prisma.customer.findUnique({
+		const result = await this.prisma.customer.findUnique({
 			where: { id },
 			select: {
 				id: true,
+				seller_id: true,
 				name: true,
 				email: true,
 				phone: true,
@@ -134,8 +137,88 @@ export class PrismaCatalogRepository implements CatalogRepository {
 				city: true,
 				state: true,
 				zip_code: true,
+				seller: { select: { store_slug: true } },
 			},
-		}) as unknown as CatalogCustomer | null
+		})
+		if (!result) return null
+		const { seller, ...customer } = result
+		return { ...customer, seller_store_slug: seller.store_slug } as unknown as CatalogCustomer
+	}
+
+	async findCustomerByEmailOrPhone(
+		emailOrPhone: string,
+		sellerId: string,
+	): Promise<CatalogCustomerWithHash | null> {
+		return this.prisma.customer.findFirst({
+			where: {
+				seller_id: sellerId,
+				OR: [{ email: emailOrPhone }, { phone: emailOrPhone }],
+			},
+			select: {
+				id: true,
+				seller_id: true,
+				name: true,
+				email: true,
+				phone: true,
+				document: true,
+				address: true,
+				city: true,
+				state: true,
+				zip_code: true,
+				password_hash: true,
+			},
+		}) as unknown as CatalogCustomerWithHash | null
+	}
+
+	async updateCustomerPasswordHash(customerId: string, hash: string): Promise<void> {
+		await this.prisma.customer.update({
+			where: { id: customerId },
+			data: { password_hash: hash },
+		})
+	}
+
+	async findOrderByNumber(orderNumber: string): Promise<CatalogOrderTracking | null> {
+		const order = await this.prisma.order.findFirst({
+			where: { order_number: orderNumber },
+			select: {
+				id: true,
+				order_number: true,
+				status: true,
+				payment_status: true,
+				total: true,
+				subtotal: true,
+				discount: true,
+				delivery_date: true,
+				createdAt: true,
+				updatedAt: true,
+				seller: {
+					select: { name: true, store_name: true },
+				},
+				Order_item: {
+					select: {
+						product: { select: { id: true, name: true } },
+						quantity: true,
+						unit_price: true,
+						total: true,
+					},
+				},
+			},
+		})
+		if (!order) return null
+		return {
+			id: order.id,
+			order_number: order.order_number,
+			status: order.status,
+			payment_status: order.payment_status,
+			total: order.total,
+			subtotal: order.subtotal,
+			discount: order.discount,
+			delivery_date: order.delivery_date,
+			createdAt: order.createdAt,
+			updatedAt: order.updatedAt,
+			store: order.seller,
+			items: order.Order_item,
+		}
 	}
 
 	async findCustomerByContact(

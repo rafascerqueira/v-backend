@@ -1,13 +1,27 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import {
+	BadRequestException,
+	Inject,
+	Injectable,
+	NotFoundException,
+	UnauthorizedException,
+} from '@nestjs/common'
+import { TokenService } from '@/modules/auth/services/token.service'
+import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import {
 	CATALOG_REPOSITORY,
 	type CatalogRepository,
 } from '@/shared/repositories/catalog.repository'
+import type { AuthCustomerDto } from '../dto/auth-customer.dto'
 import type { CreateCatalogOrderDto } from '../dto/create-catalog-order.dto'
+import type { LookupCustomerDto } from '../dto/lookup-customer.dto'
 
 @Injectable()
 export class CatalogService {
-	constructor(@Inject(CATALOG_REPOSITORY) private readonly catalogRepository: CatalogRepository) {}
+	constructor(
+		@Inject(CATALOG_REPOSITORY) private readonly catalogRepository: CatalogRepository,
+		private readonly tokenService: TokenService,
+		private readonly passwordHasher: PasswordHasherService,
+	) {}
 
 	async getStoreBySlug(slug: string) {
 		const store = await this.catalogRepository.findStoreBySlug(slug)
@@ -35,26 +49,10 @@ export class CatalogService {
 			throw new NotFoundException('Loja não encontrada')
 		}
 
-		return this.getProducts(store.id)
+		return this.listProductsForSeller(store.id)
 	}
 
-	async getStoreProductById(slug: string, productId: number) {
-		const store = await this.catalogRepository.findStoreIdBySlug(slug)
-
-		if (!store) {
-			throw new NotFoundException('Loja não encontrada')
-		}
-
-		const product = await this.catalogRepository.findActiveProductBySeller(productId, store.id)
-
-		if (!product) {
-			throw new NotFoundException('Produto não encontrado')
-		}
-
-		return this.getProductById(productId)
-	}
-
-	async getProducts(sellerId?: string) {
+	private async listProductsForSeller(sellerId: string) {
 		const products = await this.catalogRepository.findActiveProducts(sellerId)
 
 		const productIds = products.map((p) => p.id)
@@ -101,11 +99,33 @@ export class CatalogService {
 			}))
 	}
 
-	async getCustomerById(id: string) {
-		const customer = await this.catalogRepository.findCustomerById(id)
+	async getStoreProductById(slug: string, productId: number) {
+		const store = await this.catalogRepository.findStoreIdBySlug(slug)
 
-		if (!customer) {
-			throw new NotFoundException('Cliente não encontrado')
+		if (!store) {
+			throw new NotFoundException('Loja não encontrada')
+		}
+
+		const product = await this.catalogRepository.findActiveProductBySeller(productId, store.id)
+
+		if (!product) {
+			throw new NotFoundException('Produto não encontrado')
+		}
+
+		return this.getProductById(productId)
+	}
+
+	async getCustomerInStore(slug: string, customerId: string) {
+		const store = await this.catalogRepository.findStoreIdBySlug(slug)
+
+		if (!store) {
+			throw new NotFoundException('Loja não encontrada')
+		}
+
+		const customer = await this.catalogRepository.findCustomerById(customerId)
+
+		if (!customer || customer.seller_id !== store.id) {
+			throw new NotFoundException('Cliente não encontrado nesta loja')
 		}
 
 		// Return only first name for public display (privacy)
@@ -147,7 +167,7 @@ export class CatalogService {
 	}
 
 	async createOrder(dto: CreateCatalogOrderDto) {
-		const { customer, items, notes } = dto
+		const { items, notes } = dto
 
 		if (items.length === 0) {
 			throw new BadRequestException('O pedido deve ter pelo menos um item')
@@ -184,43 +204,75 @@ export class CatalogService {
 			priceMap.set(promo.product_id, promo.promotional_price)
 		}
 
-		// Get seller_id from product early
+		// Get seller_id from products
 		const firstProduct = validProducts[0]
 		const sellerId = firstProduct?.seller_id
 		if (!sellerId) {
 			throw new BadRequestException('Não foi possível identificar o vendedor')
 		}
 
-		// Find or create customer scoped to seller
+		// Resolve customer: by ID (personalized link) or by contact (new/anonymous)
 		let customerId: string
+		let orderAddress: Record<string, string | undefined>
 
-		const existingCustomer = await this.catalogRepository.findCustomerByContact(
-			customer.email,
-			customer.phone,
-			customer.document,
-			sellerId,
-		)
-
-		if (existingCustomer) {
-			customerId = existingCustomer.id
+		if (dto.customerId) {
+			const existing = await this.catalogRepository.findCustomerById(dto.customerId)
+			if (!existing) throw new BadRequestException('Cliente não encontrado')
+			if (existing.seller_id !== sellerId) {
+				throw new BadRequestException('Cliente não pertence a esta loja')
+			}
+			customerId = existing.id
+			const addr = existing.address as Record<string, string> | null
+			orderAddress = {
+				street: addr?.street,
+				number: addr?.number,
+				complement: addr?.complement,
+				neighborhood: addr?.neighborhood,
+				city: existing.city ?? undefined,
+				state: existing.state ?? undefined,
+				zip_code: existing.zip_code ?? undefined,
+			}
 		} else {
-			const newCustomer = await this.catalogRepository.createCustomer({
-				seller_id: sellerId,
-				name: customer.name,
-				email: customer.email,
-				phone: customer.phone,
-				document: customer.document,
-				address: {
-					street: customer.address,
-					number: customer.number,
-					complement: customer.complement || '',
-					neighborhood: customer.neighborhood,
-				},
+			const customer = dto.customer
+			if (!customer) throw new BadRequestException('Forneça customerId ou os dados do cliente')
+
+			const existingCustomer = await this.catalogRepository.findCustomerByContact(
+				customer.email,
+				customer.phone,
+				customer.document,
+				sellerId,
+			)
+
+			if (existingCustomer) {
+				customerId = existingCustomer.id
+			} else {
+				const newCustomer = await this.catalogRepository.createCustomer({
+					seller_id: sellerId,
+					name: customer.name,
+					email: customer.email,
+					phone: customer.phone,
+					document: customer.document,
+					address: {
+						street: customer.address,
+						number: customer.number,
+						complement: customer.complement || '',
+						neighborhood: customer.neighborhood,
+					},
+					city: customer.city,
+					state: customer.state,
+					zip_code: customer.zip_code,
+				})
+				customerId = newCustomer.id
+			}
+			orderAddress = {
+				street: customer.address,
+				number: customer.number,
+				complement: customer.complement,
+				neighborhood: customer.neighborhood,
 				city: customer.city,
 				state: customer.state,
 				zip_code: customer.zip_code,
-			})
-			customerId = newCustomer.id
+			}
 		}
 
 		// Generate order number with timestamp + random suffix to avoid collisions
@@ -255,15 +307,7 @@ export class CatalogService {
 			notes: notes || `Pedido via catálogo online`,
 			metadata: {
 				source: 'catalog',
-				customer_address: {
-					street: customer.address,
-					number: customer.number,
-					complement: customer.complement,
-					neighborhood: customer.neighborhood,
-					city: customer.city,
-					state: customer.state,
-					zip_code: customer.zip_code,
-				},
+				customer_address: orderAddress,
 			},
 			items: orderItems,
 		})
@@ -281,6 +325,123 @@ export class CatalogService {
 				total: item.total,
 			})),
 			message: 'Pedido criado com sucesso! Em breve entraremos em contato.',
+		}
+	}
+
+	async lookupCustomer(slug: string, dto: LookupCustomerDto) {
+		const store = await this.catalogRepository.findStoreIdBySlug(slug)
+		if (!store) throw new NotFoundException('Loja não encontrada')
+
+		const customer = await this.catalogRepository.findCustomerByEmailOrPhone(dto.contact, store.id)
+
+		if (!customer) return { found: false }
+
+		const firstName = customer.name.split(' ')[0]
+		return { found: true, firstName, hasPassword: customer.password_hash !== null }
+	}
+
+	async authenticateCustomer(slug: string, dto: AuthCustomerDto) {
+		const store = await this.catalogRepository.findStoreIdBySlug(slug)
+		if (!store) throw new NotFoundException('Loja não encontrada')
+
+		const customer = await this.catalogRepository.findCustomerByEmailOrPhone(dto.contact, store.id)
+
+		if (!customer) throw new NotFoundException('Cliente não encontrado')
+
+		if (customer.password_hash === null) {
+			throw new BadRequestException(
+				'Cliente sem senha cadastrada. Use o endpoint de definição de senha.',
+			)
+		}
+
+		const valid = await this.passwordHasher.verify(dto.password, customer.password_hash, '')
+		if (!valid) throw new UnauthorizedException('Senha incorreta')
+
+		const token = await this.tokenService.signCustomerToken(customer.id, store.id)
+		const address = customer.address as Record<string, string> | null
+
+		return {
+			token,
+			customer: {
+				id: customer.id,
+				firstName: customer.name.split(' ')[0],
+				name: customer.name,
+				email: customer.email,
+				phone: customer.phone,
+				document: customer.document,
+				address: address?.street ?? '',
+				number: address?.number ?? '',
+				complement: address?.complement ?? '',
+				neighborhood: address?.neighborhood ?? '',
+				city: customer.city,
+				state: customer.state,
+				zip_code: customer.zip_code,
+			},
+		}
+	}
+
+	async setCustomerPassword(slug: string, dto: AuthCustomerDto) {
+		const store = await this.catalogRepository.findStoreIdBySlug(slug)
+		if (!store) throw new NotFoundException('Loja não encontrada')
+
+		const customer = await this.catalogRepository.findCustomerByEmailOrPhone(dto.contact, store.id)
+
+		if (!customer) throw new NotFoundException('Cliente não encontrado')
+		if (customer.password_hash !== null) {
+			throw new BadRequestException('Senha já cadastrada. Use o endpoint de login.')
+		}
+
+		const { hash } = await this.passwordHasher.hash(dto.password)
+		await this.catalogRepository.updateCustomerPasswordHash(customer.id, hash)
+
+		const token = await this.tokenService.signCustomerToken(customer.id, store.id)
+		const address = customer.address as Record<string, string> | null
+
+		return {
+			token,
+			customer: {
+				id: customer.id,
+				firstName: customer.name.split(' ')[0],
+				name: customer.name,
+				email: customer.email,
+				phone: customer.phone,
+				document: customer.document,
+				address: address?.street ?? '',
+				number: address?.number ?? '',
+				complement: address?.complement ?? '',
+				neighborhood: address?.neighborhood ?? '',
+				city: customer.city,
+				state: customer.state,
+				zip_code: customer.zip_code,
+			},
+		}
+	}
+
+	async trackOrder(orderNumber: string) {
+		const order = await this.catalogRepository.findOrderByNumber(orderNumber)
+		if (!order) throw new NotFoundException('Pedido não encontrado')
+
+		const sellerFirstName = order.store?.name?.trim().split(/\s+/)[0]
+		const storeName =
+			order.store?.store_name ?? (sellerFirstName ? `Loja de ${sellerFirstName}` : 'Loja')
+
+		return {
+			order_number: order.order_number,
+			status: order.status,
+			payment_status: order.payment_status,
+			total: order.total,
+			subtotal: order.subtotal,
+			discount: order.discount,
+			delivery_date: order.delivery_date,
+			created_at: order.createdAt,
+			updated_at: order.updatedAt,
+			store_name: storeName,
+			items: order.items.map((item) => ({
+				product: item.product,
+				quantity: item.quantity,
+				unit_price: item.unit_price,
+				total: item.total,
+			})),
 		}
 	}
 }

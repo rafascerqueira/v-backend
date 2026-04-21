@@ -27,5 +27,7 @@ export interface StoreSettingsRepository {
 	updateSettings(accountId: string, data: Record<string, unknown>): Promise<StoreSettingsUpdate>
 	updateLogo(accountId: string, logoUrl: string): Promise<{ store_logo: string | null }>
 	updateBanner(accountId: string, bannerUrl: string): Promise<{ store_banner: string | null }>
-	findSlugAndName(accountId: string): Promise<{ store_slug: string | null; name: string } | null>
+	findSlugAndName(
+		accountId: string,
+	): Promise<{ store_slug: string | null; store_name: string | null; name: string } | null>
 }

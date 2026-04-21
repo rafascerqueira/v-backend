@@ -137,9 +137,10 @@ model Customer {
   city      String   @db.VarChar(100)
   state     String   @db.VarChar(2)
   zip_code     String?     @db.VarChar(10)
-  billing_day  Int?
-  billing_mode BillingMode @default(per_sale)
-  active       Boolean     @default(true)
+  billing_day   Int?
+  billing_mode  BillingMode @default(per_sale)
+  active        Boolean     @default(true)
+  password_hash String?
   createdAt DateTime @default(now()) @db.Timestamptz()
   updatedAt DateTime @updatedAt @db.Timestamptz()
   Order     Order[]
