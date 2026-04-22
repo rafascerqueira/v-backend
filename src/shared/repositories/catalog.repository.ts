@@ -105,7 +105,7 @@ export interface CatalogRepository {
 	): Promise<CatalogCustomerWithHash | null>
 	updateCustomerPasswordHash(customerId: string, hash: string): Promise<void>
 	findCustomerByContact(
-		email: string,
+		email: string | null,
 		phone: string | null,
 		document: string | null,
 		sellerId?: string,
@@ -113,7 +113,7 @@ export interface CatalogRepository {
 	createCustomer(data: {
 		seller_id: string
 		name: string
-		email: string
+		email: string | null
 		phone: string | null
 		document: string | null
 		address: unknown

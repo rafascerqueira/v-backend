@@ -9,6 +9,7 @@ import { EmailVerificationController } from './controllers/email-verification.co
 import { ForgotPasswordController } from './controllers/forgot-password.controller'
 import { LogoutController } from './controllers/logout.controller'
 import { MeController } from './controllers/me.controller'
+import { OAuthController } from './controllers/oauth.controller'
 import { ProfileController } from './controllers/profile.controller'
 import { RefreshTokenController } from './controllers/refresh-token.controller'
 import { ResetPasswordController } from './controllers/reset-password.controller'
@@ -18,6 +19,7 @@ import { PrismaEmailVerificationRepository } from './repositories/prisma-email-v
 import { PrismaPasswordResetRepository } from './repositories/prisma-password-reset.repository'
 import { PrismaTwoFactorRepository } from './repositories/prisma-two-factor.repository'
 import { EmailVerificationService } from './services/email-verification.service'
+import { OAuthService } from './services/oauth.service'
 import { PasswordResetService } from './services/password-reset.service'
 import { TokenService } from './services/token.service'
 import { TokenBlacklistService } from './services/token-blacklist.service'
@@ -35,6 +37,7 @@ import { TwoFactorService } from './services/two-factor.service'
 		RefreshTokenController,
 		LogoutController,
 		MeController,
+		OAuthController,
 		ProfileController,
 		ForgotPasswordController,
 		ResetPasswordController,
@@ -46,6 +49,7 @@ import { TwoFactorService } from './services/two-factor.service'
 		TokenService,
 		TokenBlacklistService,
 		JwtAuthGuard,
+		OAuthService,
 		PasswordResetService,
 		TwoFactorService,
 		EmailVerificationService,

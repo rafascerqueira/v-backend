@@ -52,4 +52,18 @@ export default () => ({
 
 	frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
 	appUrl: process.env.APP_URL || 'http://localhost:3001',
+
+	oauth: {
+		google: {
+			clientId: process.env.GOOGLE_CLIENT_ID,
+			clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+			callbackUrl: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback',
+		},
+		facebook: {
+			clientId: process.env.FACEBOOK_CLIENT_ID,
+			clientSecret: process.env.FACEBOOK_CLIENT_SECRET,
+			callbackUrl:
+				process.env.FACEBOOK_CALLBACK_URL || 'http://localhost:3001/auth/facebook/callback',
+		},
+	},
 })

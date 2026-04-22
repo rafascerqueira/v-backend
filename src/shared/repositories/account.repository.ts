@@ -4,8 +4,10 @@ export interface Account {
 	id: string
 	name: string
 	email: string
-	password: string
-	salt: string
+	password: string | null
+	salt: string | null
+	google_id: string | null
+	facebook_id: string | null
 	role: AccountRole
 	plan_type: PlanType
 	two_factor_enabled: boolean
@@ -22,6 +24,13 @@ export interface CreateAccountData {
 	salt: string
 }
 
+export interface CreateOAuthAccountData {
+	name: string
+	email: string
+	googleId?: string
+	facebookId?: string
+}
+
 export const ACCOUNT_REPOSITORY = Symbol('ACCOUNT_REPOSITORY')
 
 export interface UpdateAccountData {
@@ -34,8 +43,13 @@ export interface UpdateAccountData {
 
 export interface AccountRepository {
 	create(data: CreateAccountData): Promise<Account>
+	createOAuthAccount(data: CreateOAuthAccountData): Promise<Account>
 	findById(id: string): Promise<Account | null>
 	findByEmail(email: string): Promise<Account | null>
+	findByGoogleId(googleId: string): Promise<Account | null>
+	findByFacebookId(facebookId: string): Promise<Account | null>
+	linkGoogleId(id: string, googleId: string): Promise<void>
+	linkFacebookId(id: string, facebookId: string): Promise<void>
 	update(id: string, data: UpdateAccountData): Promise<Account>
 	delete(id: string): Promise<Account>
 	anonymize(id: string): Promise<void>

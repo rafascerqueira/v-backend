@@ -4,6 +4,7 @@ import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import {
 	ACCOUNT_REPOSITORY,
 	type AccountRepository,
+	type CreateOAuthAccountData,
 } from '@/shared/repositories/account.repository'
 
 type CreateAccountInput = {
@@ -22,7 +23,12 @@ export class AccountService {
 		private readonly passwordHasher: PasswordHasherService,
 	) {}
 
-	async verifyPassword(password: string, storedHash: string, storedSalt: string): Promise<boolean> {
+	async verifyPassword(
+		password: string,
+		storedHash: string | null,
+		storedSalt: string | null,
+	): Promise<boolean> {
+		if (!storedHash || !storedSalt) return false
 		return this.passwordHasher.verify(password, storedHash, storedSalt)
 	}
 
@@ -36,9 +42,6 @@ export class AccountService {
 			salt,
 		})
 
-		// Assign a public catalog slug so the seller immediately has a shareable
-		// /loja/<slug> URL. Failure here is non-fatal: the seller can still set
-		// the slug later via Settings → Loja.
 		try {
 			const slug = await generateUniqueSlug(
 				(s) => this.accountRepository.existsByStoreSlug(s),
@@ -71,9 +74,49 @@ export class AccountService {
 		return this.accountRepository.update(id, { last_login_at: new Date() })
 	}
 
+	async findOrCreateOAuthAccount(data: CreateOAuthAccountData) {
+		const providerField = data.googleId ? 'googleId' : 'facebookId'
+		const providerId = data.googleId ?? data.facebookId
+
+		if (providerId) {
+			const byProvider =
+				providerField === 'googleId'
+					? await this.accountRepository.findByGoogleId(providerId)
+					: await this.accountRepository.findByFacebookId(providerId)
+
+			if (byProvider) return byProvider
+		}
+
+		const byEmail = await this.accountRepository.findByEmail(data.email)
+		if (byEmail) {
+			if (data.googleId) await this.accountRepository.linkGoogleId(byEmail.id, data.googleId)
+			if (data.facebookId) await this.accountRepository.linkFacebookId(byEmail.id, data.facebookId)
+			return byEmail
+		}
+
+		const account = await this.accountRepository.createOAuthAccount(data)
+
+		try {
+			const slug = await generateUniqueSlug(
+				(s) => this.accountRepository.existsByStoreSlug(s),
+				null,
+				data.name,
+			)
+			await this.accountRepository.updateStoreSlug(account.id, slug)
+		} catch (error) {
+			this.logger.warn(
+				`Failed to auto-assign store slug for OAuth account ${account.id}: ${(error as Error).message}`,
+			)
+		}
+
+		return account
+	}
+
 	async anonymizeAccount(id: string, password: string): Promise<boolean> {
 		const account = await this.accountRepository.findById(id)
 		if (!account) return false
+
+		if (!account.password || !account.salt) return false
 
 		const isPasswordValid = await this.passwordHasher.verify(
 			password,

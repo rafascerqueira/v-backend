@@ -5,6 +5,7 @@ import type {
 	Account,
 	AccountRepository,
 	CreateAccountData,
+	CreateOAuthAccountData,
 } from '@/shared/repositories/account.repository'
 
 @Injectable()
@@ -43,6 +44,45 @@ export class PrismaAccountRepository implements AccountRepository {
 		await this.prisma.account.update({
 			where: { id },
 			data: { store_slug: slug },
+		})
+	}
+
+	async createOAuthAccount(data: CreateOAuthAccountData): Promise<Account> {
+		return this.prisma.account.create({
+			data: {
+				name: data.name,
+				email: data.email,
+				google_id: data.googleId ?? null,
+				facebook_id: data.facebookId ?? null,
+				email_verified: true,
+				email_verified_at: new Date(),
+			},
+		}) as unknown as Account
+	}
+
+	async findByGoogleId(googleId: string): Promise<Account | null> {
+		return this.prisma.account.findUnique({
+			where: { google_id: googleId },
+		}) as unknown as Account | null
+	}
+
+	async findByFacebookId(facebookId: string): Promise<Account | null> {
+		return this.prisma.account.findUnique({
+			where: { facebook_id: facebookId },
+		}) as unknown as Account | null
+	}
+
+	async linkGoogleId(id: string, googleId: string): Promise<void> {
+		await this.prisma.account.update({
+			where: { id },
+			data: { google_id: googleId },
+		})
+	}
+
+	async linkFacebookId(id: string, facebookId: string): Promise<void> {
+		await this.prisma.account.update({
+			where: { id },
+			data: { facebook_id: facebookId },
 		})
 	}
 

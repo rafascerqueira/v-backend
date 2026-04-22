@@ -222,15 +222,21 @@ export class PrismaCatalogRepository implements CatalogRepository {
 	}
 
 	async findCustomerByContact(
-		email: string,
+		email: string | null,
 		phone: string | null,
 		document: string | null,
 		sellerId?: string,
 	): Promise<CatalogCustomer | null> {
+		const conditions = [
+			...(email ? [{ email }] : []),
+			...(phone ? [{ phone }] : []),
+			...(document ? [{ document }] : []),
+		]
+		if (conditions.length === 0) return null
 		return this.prisma.customer.findFirst({
 			where: {
 				...(sellerId ? { seller_id: sellerId } : {}),
-				OR: [{ email }, ...(phone ? [{ phone }] : []), ...(document ? [{ document }] : [])],
+				OR: conditions,
 			},
 		}) as unknown as CatalogCustomer | null
 	}

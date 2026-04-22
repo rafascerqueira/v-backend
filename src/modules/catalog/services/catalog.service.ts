@@ -128,14 +128,23 @@ export class CatalogService {
 			throw new NotFoundException('Cliente não encontrado nesta loja')
 		}
 
-		// Return only first name for public display (privacy)
 		const firstName = customer.name.split(' ')[0]
+		const addr = customer.address as Record<string, string> | null
 
 		return {
 			id: customer.id,
 			firstName,
+			name: customer.name,
+			phone: customer.phone,
+			email: customer.email,
+			document: customer.document,
+			address: addr?.street ?? null,
+			number: addr?.number ?? null,
+			complement: addr?.complement ?? null,
+			neighborhood: addr?.neighborhood ?? null,
 			city: customer.city,
 			state: customer.state,
+			zip_code: customer.zip_code,
 		}
 	}
 
@@ -213,7 +222,7 @@ export class CatalogService {
 
 		// Resolve customer: by ID (personalized link) or by contact (new/anonymous)
 		let customerId: string
-		let orderAddress: Record<string, string | undefined>
+		let orderAddress: Record<string, string | null | undefined>
 
 		if (dto.customerId) {
 			const existing = await this.catalogRepository.findCustomerById(dto.customerId)
@@ -228,18 +237,18 @@ export class CatalogService {
 				number: addr?.number,
 				complement: addr?.complement,
 				neighborhood: addr?.neighborhood,
-				city: existing.city ?? undefined,
-				state: existing.state ?? undefined,
-				zip_code: existing.zip_code ?? undefined,
+				city: existing.city ?? null,
+				state: existing.state ?? null,
+				zip_code: existing.zip_code ?? null,
 			}
 		} else {
 			const customer = dto.customer
 			if (!customer) throw new BadRequestException('Forneça customerId ou os dados do cliente')
 
 			const existingCustomer = await this.catalogRepository.findCustomerByContact(
-				customer.email,
+				customer.email ?? null,
 				customer.phone,
-				customer.document,
+				customer.document ?? null,
 				sellerId,
 			)
 
@@ -249,18 +258,18 @@ export class CatalogService {
 				const newCustomer = await this.catalogRepository.createCustomer({
 					seller_id: sellerId,
 					name: customer.name,
-					email: customer.email,
+					email: customer.email ?? null,
 					phone: customer.phone,
-					document: customer.document,
+					document: customer.document ?? null,
 					address: {
-						street: customer.address,
-						number: customer.number,
-						complement: customer.complement || '',
-						neighborhood: customer.neighborhood,
+						street: customer.address ?? '',
+						number: customer.number ?? '',
+						complement: customer.complement ?? '',
+						neighborhood: customer.neighborhood ?? '',
 					},
-					city: customer.city,
-					state: customer.state,
-					zip_code: customer.zip_code,
+					city: customer.city ?? null,
+					state: customer.state ?? null,
+					zip_code: customer.zip_code ?? null,
 				})
 				customerId = newCustomer.id
 			}

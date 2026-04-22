@@ -56,8 +56,10 @@ model Account {
   id                 String      @id @default(cuid())
   name               String      @db.VarChar(100)
   email              String      @unique @db.VarChar(100)
-  password           String
-  salt               String
+  password           String?
+  salt               String?
+  google_id          String?     @unique @db.VarChar(255)
+  facebook_id        String?     @unique @db.VarChar(255)
   role               AccountRole @default(seller)
   plan_type          PlanType    @default(free)
   email_verified     Boolean     @default(false)

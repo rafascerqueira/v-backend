@@ -24,13 +24,17 @@ export class PrismaStoreStockRepository implements StoreStockRepository {
 
 	async findAll(filter: Record<string, unknown>): Promise<StoreStockWithProduct[]> {
 		const stocks = await this.prisma.store_stock.findMany({
-			where: { ...this.getTenantFilter(), ...filter },
+			where: {
+				...this.getTenantFilter(),
+				...filter,
+				product: { deletedAt: null },
+			},
 			orderBy: { product_id: 'asc' },
 		})
 
 		const productIds = stocks.map((s) => s.product_id)
 		const products = await this.prisma.product.findMany({
-			where: { id: { in: productIds } },
+			where: { id: { in: productIds }, deletedAt: null },
 			select: { id: true, name: true, sku: true, category: true },
 		})
 
