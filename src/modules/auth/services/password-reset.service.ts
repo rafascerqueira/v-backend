@@ -3,10 +3,13 @@ import { Inject, Injectable } from '@nestjs/common'
 import { AccountService } from '@/modules/users/services/account.service'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import { QueueProducer } from '@/shared/queue/queue.producer'
+import { RedisService } from '@/shared/redis/redis.service'
 import {
 	PASSWORD_RESET_REPOSITORY,
 	type PasswordResetRepository,
 } from '@/shared/repositories/password-reset.repository'
+
+const COOLDOWN_TTL_SECONDS = 120
 
 @Injectable()
 export class PasswordResetService {
@@ -16,6 +19,7 @@ export class PasswordResetService {
 		private readonly accountService: AccountService,
 		private readonly queueProducer: QueueProducer,
 		private readonly passwordHasher: PasswordHasherService,
+		private readonly redis: RedisService,
 	) {}
 
 	private generateToken(): string {
@@ -26,7 +30,16 @@ export class PasswordResetService {
 		return createHash('sha256').update(token).digest('hex')
 	}
 
-	async createResetToken(email: string): Promise<{ success: boolean; token?: string }> {
+	private cooldownKey(email: string): string {
+		const hashed = createHash('sha256').update(email.toLowerCase()).digest('hex')
+		return `pwdreset:cd:${hashed}`
+	}
+
+	async createResetToken(email: string): Promise<{ success: boolean }> {
+		if (await this.redis.exists(this.cooldownKey(email))) {
+			return { success: true }
+		}
+
 		const account = await this.accountService.findByEmail(email)
 
 		if (!account) {
@@ -45,6 +58,7 @@ export class PasswordResetService {
 			expires_at: expiresAt,
 		})
 
+		await this.redis.setWithExpiry(this.cooldownKey(email), '1', COOLDOWN_TTL_SECONDS)
 		await this.queueProducer.sendPasswordResetEmail({ to: email, name: account.name, token })
 
 		return { success: true }

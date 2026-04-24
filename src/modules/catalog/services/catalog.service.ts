@@ -136,7 +136,6 @@ export class CatalogService {
 			firstName,
 			name: customer.name,
 			phone: customer.phone,
-			email: customer.email,
 			document: customer.document,
 			address: addr?.street ?? null,
 			number: addr?.number ?? null,

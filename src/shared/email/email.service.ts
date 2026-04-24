@@ -33,64 +33,40 @@ export class EmailService {
 			return
 		}
 
-		// Configuração base do transporter
-		const transportConfig: {
-			host: string
-			port: number
-			secure: boolean
-			auth?: { user: string; pass: string }
-			tls?: { rejectUnauthorized: boolean }
-		} = {
+		const isLocalhost = host === 'localhost' || host === '127.0.0.1'
+
+		this.transporter = createTransport({
 			host,
 			port,
 			secure: port === 465,
-		}
-
-		// Adicionar autenticação apenas se user/pass estiverem configurados
-		// (Postfix local não precisa de autenticação)
-		if (user && pass) {
-			transportConfig.auth = { user, pass }
-		}
-
-		// Para localhost/Postfix, não verificar certificado TLS
-		if (host === 'localhost' || host === '127.0.0.1') {
-			transportConfig.tls = { rejectUnauthorized: false }
-		}
-
-		this.transporter = createTransport(transportConfig)
+			requireTLS: !isLocalhost && port !== 465,
+			...(user && pass ? { auth: { user, pass } } : {}),
+			...(isLocalhost ? { tls: { rejectUnauthorized: false } } : {}),
+		})
 
 		this.logger.log(
 			`📧 SMTP configured: ${host}:${port}${user ? ' (authenticated)' : ' (no auth)'}`,
 		)
 	}
 
-	async sendEmail(options: SendEmailOptions): Promise<boolean> {
-		const from = this.smtpFrom
-
+	async sendEmail(options: SendEmailOptions): Promise<void> {
 		if (!this.transporter) {
-			this.logger.log(`📧 [DEV] Email to ${options.to}:`)
-			this.logger.log(`   Subject: ${options.subject}`)
-			this.logger.log(`   Content: ${options.text || options.html.substring(0, 200)}...`)
-			return true
+			this.logger.log(`📧 [DEV] Email to ${options.to}: ${options.subject}`)
+			this.logger.log(`   ${options.text ?? options.html.substring(0, 200)}`)
+			return
 		}
 
-		try {
-			await this.transporter.sendMail({
-				from: `Vendinhas <${from}>`,
-				to: options.to,
-				subject: options.subject,
-				html: options.html,
-				text: options.text,
-			})
-			this.logger.log(`📧 Email sent to ${options.to}: ${options.subject}`)
-			return true
-		} catch (error) {
-			this.logger.error(`📧 Failed to send email to ${options.to}:`, error)
-			return false
-		}
+		await this.transporter.sendMail({
+			from: `Vendinhas <${this.smtpFrom}>`,
+			to: options.to,
+			subject: options.subject,
+			html: options.html,
+			text: options.text,
+		})
+		this.logger.log(`📧 Email sent to ${options.to}: ${options.subject}`)
 	}
 
-	async sendPasswordResetEmail(to: string, token: string, name: string): Promise<boolean> {
+	async sendPasswordResetEmail(to: string, token: string, name: string): Promise<void> {
 		const resetUrl = `${this.frontendUrl}/reset-password?token=${token}`
 
 		return this.sendEmail({
@@ -138,7 +114,7 @@ export class EmailService {
 		})
 	}
 
-	async sendEmailVerification(to: string, token: string, name: string): Promise<boolean> {
+	async sendEmailVerification(to: string, token: string, name: string): Promise<void> {
 		const verifyUrl = `${this.frontendUrl}/verify-email?token=${token}`
 
 		return this.sendEmail({
@@ -184,7 +160,7 @@ export class EmailService {
 		})
 	}
 
-	async sendWelcomeEmail(to: string, name: string): Promise<boolean> {
+	async sendWelcomeEmail(to: string, name: string): Promise<void> {
 		const loginUrl = `${this.frontendUrl}/login`
 
 		return this.sendEmail({

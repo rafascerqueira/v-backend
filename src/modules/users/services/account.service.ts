@@ -28,8 +28,8 @@ export class AccountService {
 		storedHash: string | null,
 		storedSalt: string | null,
 	): Promise<boolean> {
-		if (!storedHash || !storedSalt) return false
-		return this.passwordHasher.verify(password, storedHash, storedSalt)
+		if (!storedHash) return false
+		return this.passwordHasher.verify(password, storedHash, storedSalt ?? '')
 	}
 
 	async create(data: CreateAccountInput) {
