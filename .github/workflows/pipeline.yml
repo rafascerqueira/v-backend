@@ -2,9 +2,9 @@ name: Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
   workflow_dispatch:
 
 concurrency:
@@ -25,21 +25,17 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: postgres
-        ports: ["5432:5432"]
+        ports: [ "5432:5432" ]
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s
           --health-retries 5
 
       redis:
         image: redis:7
-        ports: ["6379:6379"]
+        ports: [ "6379:6379" ]
         options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout
+          5s --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -118,9 +114,24 @@ jobs:
             dist/ \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/dist/
 
+          # Mirror prisma/migrations/ exactly so removed or added migration dirs
+          # always match the repo. Exclude manual/ — it holds VPS-only SQL
+          # (e.g. subscription_triggers.sql) that must not be wiped.
+          rsync -az --delete --exclude=manual/ \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            prisma/migrations/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/prisma/migrations/
+
+          # Sync prisma schema and seed additively (migrations handled above)
+          rsync -az --exclude=migrations \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            prisma/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/prisma/
+
+          # Sync remaining project files additively (preserves .env, keys/, uploads/, etc.)
           rsync -az \
             -e "ssh -i ~/.ssh/deploy_key" \
-            package.json pnpm-lock.yaml ecosystem.config.js prisma/ nginx/ \
+            package.json pnpm-lock.yaml ecosystem.config.js nginx/ \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/
 
       - name: Activate on VPS
@@ -143,6 +154,16 @@ jobs:
 
             echo "--- running migrations ---"
             pnpm prisma migrate deploy
+
+            echo "--- verifying migration drift ---"
+            DIR_COUNT=$(find prisma/migrations -mindepth 1 -maxdepth 1 -type d ! -name manual | wc -l)
+            APPLIED_COUNT=$(psql "$DATABASE_URL" -tAc "SELECT COUNT(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL")
+            if [ "$DIR_COUNT" != "$APPLIED_COUNT" ]; then
+              echo "ERROR: migration drift detected — directories=$DIR_COUNT applied=$APPLIED_COUNT"
+              echo "Aborting deploy before nginx/PM2 reload to avoid serving against a stale schema."
+              exit 1
+            fi
+            echo "OK: $DIR_COUNT migrations on disk, $APPLIED_COUNT applied."
 
             if [ -f "prisma/migrations/manual/subscription_triggers.sql" ]; then
               psql "$DATABASE_URL" -f prisma/migrations/manual/subscription_triggers.sql \
