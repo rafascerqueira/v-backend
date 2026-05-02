@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger } from '@nestjs/common'
+import {
+	Inject,
+	Injectable,
+	Logger,
+	NotFoundException,
+	UnauthorizedException,
+} from '@nestjs/common'
 import { generateUniqueSlug } from '@/shared/catalog/slug-generator'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import {
@@ -68,6 +74,17 @@ export class AccountService {
 
 	async updateProfile(id: string, data: { name?: string }) {
 		return this.accountRepository.update(id, data)
+	}
+
+	async changePassword(id: string, currentPassword: string, newPassword: string): Promise<void> {
+		const account = await this.accountRepository.findById(id)
+		if (!account) throw new NotFoundException('User not found')
+
+		const isValid = await this.verifyPassword(currentPassword, account.password, account.salt)
+		if (!isValid) throw new UnauthorizedException('Senha atual incorreta')
+
+		const { hash, salt } = await this.passwordHasher.hash(newPassword)
+		await this.accountRepository.update(id, { password: hash, salt })
 	}
 
 	async updateLastLogin(id: string) {

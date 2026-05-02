@@ -79,6 +79,21 @@ export class AdminController {
 		return this.service.getAccountUsage(id)
 	}
 
+	@Patch('accounts/:id')
+	@ApiOperation({ summary: 'Update account fields (admin only)' })
+	@ApiParam({ name: 'id', type: String })
+	@ApiBody({
+		schema: {
+			example: { name: 'New Name', email: 'new@email.com', role: 'seller', plan_type: 'pro' },
+		},
+	})
+	@ApiResponse({ status: 200, description: 'Account updated' })
+	@ApiResponse({ status: 404, description: 'Account not found' })
+	async updateAccount(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+		const { name, email, role, plan_type } = body
+		return this.service.updateAccount(id, { name, email, role, plan_type }, req.user.sub)
+	}
+
 	@Patch('accounts/:id/plan')
 	@ApiOperation({ summary: 'Update account plan (admin only)' })
 	@ApiParam({ name: 'id', type: String })

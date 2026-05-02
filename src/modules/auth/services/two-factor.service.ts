@@ -117,6 +117,17 @@ export class TwoFactorService {
 		return { message: '2FA disabled successfully' }
 	}
 
+	async disableTwoFactorWithoutCode(userId: string) {
+		const user = await this.twoFactorRepository.findAccount2faSecret(userId)
+
+		if (!user) throw new BadRequestException('User not found')
+		if (!user.two_factor_enabled) throw new BadRequestException('2FA is not enabled')
+
+		await this.twoFactorRepository.disableTwoFactor(userId)
+
+		return { message: '2FA disabled successfully' }
+	}
+
 	async verifyToken(userId: string, token: string): Promise<boolean> {
 		const user = await this.twoFactorRepository.findAccount2faSecret(userId)
 

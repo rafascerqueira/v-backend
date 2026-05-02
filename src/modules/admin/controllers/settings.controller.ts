@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
@@ -14,10 +14,49 @@ export class SettingsController {
 	constructor(private readonly settingsService: SettingsService) {}
 
 	@Get()
-	@ApiOperation({ summary: 'Get all system settings' })
-	@ApiResponse({ status: 200, description: 'List of all settings' })
+	@ApiOperation({ summary: 'Get all system settings as flat key-value map' })
+	@ApiResponse({ status: 200, description: 'All settings as a flat object' })
 	async getAll() {
-		return this.settingsService.getAll()
+		const settings = await this.settingsService.getAll()
+		return Object.fromEntries(
+			settings.map((s) => {
+				if (s.type === 'date' && s.parsed instanceof Date) {
+					return [s.key, s.parsed.toISOString().split('T')[0]]
+				}
+				return [s.key, s.parsed]
+			}),
+		)
+	}
+
+	@Patch()
+	@ApiOperation({ summary: 'Bulk update system settings' })
+	@ApiBody({
+		schema: {
+			example: {
+				free_trial_end_date: '2026-12-31',
+				free_plan_products_limit: 50,
+				free_plan_customers_limit: 100,
+				free_plan_sales_limit: 30,
+			},
+		},
+	})
+	@ApiResponse({ status: 200, description: 'Settings updated' })
+	async updateAll(@Body() body: Record<string, unknown>) {
+		const typeMap: Record<string, 'string' | 'number' | 'boolean' | 'date' | 'json'> = {
+			free_trial_end_date: 'date',
+			free_plan_products_limit: 'number',
+			free_plan_customers_limit: 'number',
+			free_plan_sales_limit: 'number',
+		}
+
+		await Promise.all(
+			Object.entries(body).map(([key, value]) => {
+				const type = typeMap[key] ?? 'string'
+				return this.settingsService.set(key, value, type)
+			}),
+		)
+
+		return this.getAll()
 	}
 
 	@Get('free-period')

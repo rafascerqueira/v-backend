@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
+import { SettingsService } from '@/modules/admin/services/settings.service'
 import {
 	PLAN_LIMITS_REPOSITORY,
 	type PlanLimitsRepository,
@@ -51,10 +52,30 @@ export class PlanLimitsService {
 	constructor(
 		@Inject(PLAN_LIMITS_REPOSITORY)
 		private readonly planLimitsRepository: PlanLimitsRepository,
+		private readonly settingsService: SettingsService,
 	) {}
 
 	getLimits(planType: string): PlanLimits {
 		return PLAN_LIMITS[planType] || PLAN_LIMITS.free
+	}
+
+	private async getFreeLimitsWithOverrides(): Promise<{
+		maxProducts: number
+		maxCustomers: number
+		maxOrdersPerMonth: number
+	}> {
+		const [products, customers, orders] = await Promise.all([
+			this.settingsService.get('free_plan_products_limit'),
+			this.settingsService.get('free_plan_customers_limit'),
+			this.settingsService.get('free_plan_sales_limit'),
+		])
+		return {
+			maxProducts: products ? (products.parsed as number) : CANONICAL_LIMITS.free.maxProducts,
+			maxCustomers: customers ? (customers.parsed as number) : CANONICAL_LIMITS.free.maxCustomers,
+			maxOrdersPerMonth: orders
+				? (orders.parsed as number)
+				: CANONICAL_LIMITS.free.maxOrdersPerMonth,
+		}
 	}
 
 	async getUsageStats(sellerId: string): Promise<UsageStats> {
@@ -78,18 +99,23 @@ export class PlanLimitsService {
 			return { allowed: true, current: 0, limit: -1 }
 		}
 
+		const maxProducts =
+			planType === 'free'
+				? (await this.getFreeLimitsWithOverrides()).maxProducts
+				: limits.maxProducts
+
 		const count = await this.planLimitsRepository.countProducts(sellerId)
 
-		if (count >= limits.maxProducts) {
+		if (count >= maxProducts) {
 			return {
 				allowed: false,
-				message: `Limite de produtos atingido (${limits.maxProducts}). Faça upgrade para o plano Pro.`,
+				message: `Limite de produtos atingido (${maxProducts}). Faça upgrade para o plano Pro.`,
 				current: count,
-				limit: limits.maxProducts,
+				limit: maxProducts,
 			}
 		}
 
-		return { allowed: true, current: count, limit: limits.maxProducts }
+		return { allowed: true, current: count, limit: maxProducts }
 	}
 
 	async canCreateCustomer(sellerId: string, planType: string): Promise<LimitCheckResult> {
@@ -99,18 +125,23 @@ export class PlanLimitsService {
 			return { allowed: true, current: 0, limit: -1 }
 		}
 
+		const maxCustomers =
+			planType === 'free'
+				? (await this.getFreeLimitsWithOverrides()).maxCustomers
+				: limits.maxCustomers
+
 		const count = await this.planLimitsRepository.countCustomers(sellerId)
 
-		if (count >= limits.maxCustomers) {
+		if (count >= maxCustomers) {
 			return {
 				allowed: false,
-				message: `Limite de clientes atingido (${limits.maxCustomers}). Faça upgrade para o plano Pro.`,
+				message: `Limite de clientes atingido (${maxCustomers}). Faça upgrade para o plano Pro.`,
 				current: count,
-				limit: limits.maxCustomers,
+				limit: maxCustomers,
 			}
 		}
 
-		return { allowed: true, current: count, limit: limits.maxCustomers }
+		return { allowed: true, current: count, limit: maxCustomers }
 	}
 
 	async canCreateOrder(sellerId: string, planType: string): Promise<LimitCheckResult> {
@@ -120,22 +151,27 @@ export class PlanLimitsService {
 			return { allowed: true, current: 0, limit: -1 }
 		}
 
+		const maxOrdersPerMonth =
+			planType === 'free'
+				? (await this.getFreeLimitsWithOverrides()).maxOrdersPerMonth
+				: limits.maxOrdersPerMonth
+
 		const startOfMonth = new Date()
 		startOfMonth.setDate(1)
 		startOfMonth.setHours(0, 0, 0, 0)
 
 		const count = await this.planLimitsRepository.countOrdersThisMonth(sellerId, startOfMonth)
 
-		if (count >= limits.maxOrdersPerMonth) {
+		if (count >= maxOrdersPerMonth) {
 			return {
 				allowed: false,
-				message: `Limite de vendas do mês atingido (${limits.maxOrdersPerMonth}). Faça upgrade para o plano Pro.`,
+				message: `Limite de vendas do mês atingido (${maxOrdersPerMonth}). Faça upgrade para o plano Pro.`,
 				current: count,
-				limit: limits.maxOrdersPerMonth,
+				limit: maxOrdersPerMonth,
 			}
 		}
 
-		return { allowed: true, current: count, limit: limits.maxOrdersPerMonth }
+		return { allowed: true, current: count, limit: maxOrdersPerMonth }
 	}
 
 	async getUsageSummary(sellerId: string, planType: string) {

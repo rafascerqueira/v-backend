@@ -14,18 +14,23 @@ export class TwoFactorController {
 		return this.twoFactorService.generateSecret(req.user.sub)
 	}
 
+	@Post('setup')
+	@ApiOperation({ summary: 'Generate 2FA secret and QR code (alias for generate)' })
+	async setup(@Request() req: any) {
+		return this.twoFactorService.generateSecret(req.user.sub)
+	}
+
 	@Post('enable')
 	@ApiOperation({ summary: 'Enable 2FA with verification code' })
-	@ApiBody({ schema: { example: { token: '123456' } } })
-	async enable(@Request() req: any, @Body('token') token: string) {
-		return this.twoFactorService.enableTwoFactor(req.user.sub, token)
+	@ApiBody({ schema: { example: { code: '123456' } } })
+	async enable(@Request() req: any, @Body('code') code: string) {
+		return this.twoFactorService.enableTwoFactor(req.user.sub, code)
 	}
 
 	@Post('disable')
-	@ApiOperation({ summary: 'Disable 2FA with verification code' })
-	@ApiBody({ schema: { example: { token: '123456' } } })
-	async disable(@Request() req: any, @Body('token') token: string) {
-		return this.twoFactorService.disableTwoFactor(req.user.sub, token)
+	@ApiOperation({ summary: 'Disable 2FA' })
+	async disable(@Request() req: any) {
+		return this.twoFactorService.disableTwoFactorWithoutCode(req.user.sub)
 	}
 
 	@Post('verify')
@@ -34,10 +39,10 @@ export class TwoFactorController {
 		medium: { ttl: 60000, limit: 5 },
 		long: { ttl: 3600000, limit: 10 },
 	})
-	@ApiOperation({ summary: 'Verify 2FA token' })
-	@ApiBody({ schema: { example: { token: '123456' } } })
-	async verify(@Request() req: any, @Body('token') token: string) {
-		const isValid = await this.twoFactorService.verifyToken(req.user.sub, token)
+	@ApiOperation({ summary: 'Verify 2FA code' })
+	@ApiBody({ schema: { example: { code: '123456' } } })
+	async verify(@Request() req: any, @Body('code') code: string) {
+		const isValid = await this.twoFactorService.verifyToken(req.user.sub, code)
 		return { valid: isValid }
 	}
 

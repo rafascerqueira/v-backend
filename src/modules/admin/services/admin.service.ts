@@ -105,6 +105,42 @@ export class AdminService {
 		return account
 	}
 
+	async updateAccount(
+		accountId: string,
+		data: { name?: string; email?: string; role?: string; plan_type?: string },
+		adminId: string,
+	) {
+		const account = await this.adminRepository.findAccountBasicInfo(accountId, {
+			id: true,
+			name: true,
+			email: true,
+			role: true,
+			plan_type: true,
+		})
+
+		if (!account) throw new NotFoundException('Conta não encontrada')
+
+		const updated = await this.adminRepository.updateAccount(accountId, data, {
+			id: true,
+			name: true,
+			email: true,
+			role: true,
+			plan_type: true,
+		})
+
+		await this.adminRepository.createAuditLog({
+			action: 'ADMIN_UPDATE_ACCOUNT',
+			entity: 'Account',
+			entity_id: accountId,
+			user_id: adminId,
+			old_value: account,
+			new_value: data,
+			metadata: { updated_by: 'admin' },
+		})
+
+		return updated
+	}
+
 	async updateAccountPlan(accountId: string, newPlan: PlanType, adminId: string) {
 		const account = await this.adminRepository.findAccountBasicInfo(accountId, {
 			id: true,
@@ -397,6 +433,7 @@ export class AdminService {
 		return {
 			status: 'healthy',
 			database: dbOk ? 'connected' : 'disconnected',
+			environment: process.env.NODE_ENV ?? 'development',
 			timestamp: new Date().toISOString(),
 		}
 	}

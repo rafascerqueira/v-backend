@@ -1,3 +1,10 @@
+/**
+ * AccountService unit tests
+ * Covers: changePassword, updateProfile, verifyPassword, create, findByEmail, findById
+ * Verifies: not-found errors, unauthorized on wrong password, hashing and update on success
+ */
+
+import { NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { Test, type TestingModule } from '@nestjs/testing'
 import { AccountService } from './account.service'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
@@ -78,6 +85,11 @@ describe('AccountService', () => {
       const isValid = await service.verifyPassword(wrongPassword, hash, salt)
 
       expect(isValid).toBe(false)
+    })
+
+    it('should return false when storedHash is null', async () => {
+      const result = await service.verifyPassword('anyPass', null, null)
+      expect(result).toBe(false)
     })
   })
 
@@ -185,6 +197,58 @@ describe('AccountService', () => {
 
       expect(result).toBeTruthy()
       expect(result?.id).toBe(created.id)
+    })
+  })
+
+  describe('changePassword', () => {
+    it('should hash new password and call update when current password is valid', async () => {
+      const account = {
+        id: 'user-uuid-1',
+        name: 'Test User',
+        email: 'test@example.com',
+        password: 'hashed-password',
+        salt: 'stored-salt',
+      }
+      accountsStore.push(account)
+
+      const originalHash = account.password
+      const { hash: realHash } = await passwordHasher.hash('currentPass')
+      accountsStore[0].password = realHash
+      accountsStore[0].salt = ''
+
+      accountRepository.update.mockResolvedValueOnce({ ...account, password: 'new-hash', salt: '' })
+
+      await service.changePassword('user-uuid-1', 'currentPass', 'newPass123')
+
+      expect(accountRepository.update).toHaveBeenCalledWith(
+        'user-uuid-1',
+        expect.objectContaining({ password: expect.any(String), salt: expect.any(String) }),
+      )
+
+      accountsStore[0].password = originalHash
+    })
+
+    it('should throw NotFoundException when account does not exist', async () => {
+      await expect(
+        service.changePassword('nonexistent-id', 'currentPass', 'newPass123'),
+      ).rejects.toThrow(NotFoundException)
+    })
+
+    it('should throw UnauthorizedException when current password is wrong', async () => {
+      const { hash: realHash } = await passwordHasher.hash('correctPass')
+      accountsStore.push({
+        id: 'user-uuid-2',
+        name: 'Another User',
+        email: 'another@example.com',
+        password: realHash,
+        salt: '',
+      })
+
+      await expect(
+        service.changePassword('user-uuid-2', 'wrongPass', 'newPass123'),
+      ).rejects.toThrow(UnauthorizedException)
+
+      expect(accountRepository.update).not.toHaveBeenCalled()
     })
   })
 })
