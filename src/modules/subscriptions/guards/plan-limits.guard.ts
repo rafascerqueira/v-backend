@@ -37,6 +37,11 @@ export class PlanLimitsGuard implements CanActivate {
 			return true
 		}
 
+		// Admins bypass plan limits entirely.
+		if (user.role === 'admin') {
+			return true
+		}
+
 		const sellerId = user.sub
 		const planType = user.plan_type || 'free'
 

@@ -5,7 +5,6 @@ import { SUBSCRIPTION_REPOSITORY } from '@/shared/repositories/subscription.repo
 import { WEBHOOK_REPOSITORY } from '@/shared/repositories/webhook.repository'
 import { SubscriptionController } from './controllers/subscription.controller'
 import { WebhookController } from './controllers/webhook.controller'
-import { PlanGuard } from './guards/plan.guard'
 import { PlanLimitsGuard } from './guards/plan-limits.guard'
 import { PrismaPlanLimitsRepository } from './repositories/prisma-plan-limits.repository'
 import { PrismaSubscriptionRepository } from './repositories/prisma-subscription.repository'
@@ -21,7 +20,6 @@ import { WebhookService } from './services/webhook.service'
 	controllers: [SubscriptionController, WebhookController],
 	providers: [
 		SubscriptionService,
-		PlanGuard,
 		PlanLimitsGuard,
 		PlanLimitsService,
 		WebhookService,
@@ -39,6 +37,6 @@ import { WebhookService } from './services/webhook.service'
 			useClass: PrismaWebhookRepository,
 		},
 	],
-	exports: [SubscriptionService, PlanGuard, PlanLimitsGuard, PlanLimitsService, StripeService],
+	exports: [SubscriptionService, PlanLimitsGuard, PlanLimitsService, StripeService],
 })
 export class SubscriptionsModule {}

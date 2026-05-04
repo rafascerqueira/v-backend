@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { AccountRole } from '@/generated/prisma/client'
+import type { AccountRole, PlanType } from '@/generated/prisma/client'
 
 export const authResponseSchema = z.object({
 	accessToken: z.string(),
@@ -13,6 +13,7 @@ export interface TokenPayload {
 	sub: string
 	email: string
 	role: AccountRole
+	plan_type: PlanType
 	iat?: number
 	exp?: number
 }

@@ -10,14 +10,26 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { PLAN_LIMITS, PLAN_NAMES, PLAN_PRICES } from '../constants/plan-limits'
+import { type LimitCheckResult, PlanLimitsService } from '../services/plan-limits.service'
 import { StripeService } from '../services/stripe.service'
 import { SubscriptionService } from '../services/subscription.service'
+
+function toCheckLimitResponse(result: LimitCheckResult) {
+	const remaining = result.limit === -1 ? -1 : Math.max(0, result.limit - result.current)
+	return {
+		allowed: result.allowed,
+		current: result.current,
+		limit: result.limit,
+		remaining,
+	}
+}
 
 @ApiTags('subscriptions')
 @Controller('subscriptions')
 export class SubscriptionController {
 	constructor(
 		private readonly service: SubscriptionService,
+		private readonly planLimitsService: PlanLimitsService,
 		private readonly stripeService: StripeService,
 		private readonly configService: ConfigService,
 	) {}
@@ -68,19 +80,31 @@ export class SubscriptionController {
 	@Get('check-limit/products')
 	@ApiOperation({ summary: 'Check products limit' })
 	async checkProductsLimit(@Req() req: any) {
-		return this.service.checkLimit(req.user.sub, 'products')
+		const result = await this.planLimitsService.canCreateProduct(
+			req.user.sub,
+			req.user.plan_type ?? 'free',
+		)
+		return toCheckLimitResponse(result)
 	}
 
 	@Get('check-limit/orders')
 	@ApiOperation({ summary: 'Check orders limit' })
 	async checkOrdersLimit(@Req() req: any) {
-		return this.service.checkLimit(req.user.sub, 'orders')
+		const result = await this.planLimitsService.canCreateOrder(
+			req.user.sub,
+			req.user.plan_type ?? 'free',
+		)
+		return toCheckLimitResponse(result)
 	}
 
 	@Get('check-limit/customers')
 	@ApiOperation({ summary: 'Check customers limit' })
 	async checkCustomersLimit(@Req() req: any) {
-		return this.service.checkLimit(req.user.sub, 'customers')
+		const result = await this.planLimitsService.canCreateCustomer(
+			req.user.sub,
+			req.user.plan_type ?? 'free',
+		)
+		return toCheckLimitResponse(result)
 	}
 
 	@Post('checkout')

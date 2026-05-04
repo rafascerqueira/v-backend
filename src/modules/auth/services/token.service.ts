@@ -74,6 +74,7 @@ export class TokenService implements OnModuleInit {
 					sub: payload.sub,
 					email: payload.email,
 					role: payload.role,
+					plan_type: payload.plan_type,
 					type: 'access',
 				},
 				{ ...signOptions, expiresIn: this.accessTokenExpiresIn },
@@ -83,6 +84,7 @@ export class TokenService implements OnModuleInit {
 					sub: payload.sub,
 					email: payload.email,
 					role: payload.role,
+					plan_type: payload.plan_type,
 					type: 'refresh',
 				},
 				{ ...refreshSignOptions, expiresIn: this.refreshTokenExpiresIn },
@@ -146,6 +148,9 @@ export class TokenService implements OnModuleInit {
 			sub: payload.sub,
 			email: payload.email,
 			role: payload.role,
+			// Legacy tokens issued before plan_type was added default to 'free'
+			// to keep refresh working during the rollout window.
+			plan_type: payload.plan_type ?? 'free',
 		})
 	}
 }

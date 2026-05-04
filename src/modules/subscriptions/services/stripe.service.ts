@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Stripe from 'stripe'
+import { SettingsService } from '@/modules/admin/services/settings.service'
 import {
 	SUBSCRIPTION_REPOSITORY,
 	type SubscriptionRepository,
@@ -16,6 +17,7 @@ export class StripeService {
 		@Inject(SUBSCRIPTION_REPOSITORY)
 		private readonly subscriptionRepository: SubscriptionRepository,
 		private readonly configService: ConfigService,
+		private readonly settingsService: SettingsService,
 	) {
 		this.webhookSecret = configService.get<string>('stripe.webhookSecret')
 		this.initializeStripe()
@@ -70,6 +72,11 @@ export class StripeService {
 
 			if (!account) return null
 
+			const promo = await this.settingsService.getPromotionalPeriod()
+			const couponId = promo.isActive
+				? await this.ensurePromotionalCoupon(promo.discountPercent)
+				: null
+
 			const session = await this.stripe.checkout.sessions.create({
 				mode: 'subscription',
 				payment_method_types: ['card'],
@@ -81,11 +88,41 @@ export class StripeService {
 				subscription_data: {
 					metadata: { account_id: accountId },
 				},
+				...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
 			})
 
 			return { url: session.url, sessionId: session.id }
 		} catch (error) {
 			this.logger.error('Failed to create checkout session', error)
+			return null
+		}
+	}
+
+	private async ensurePromotionalCoupon(discountPercent: number): Promise<string | null> {
+		if (!this.stripe) return null
+		const couponId = `promo_${Math.round(discountPercent)}_off`
+
+		try {
+			await this.stripe.coupons.retrieve(couponId)
+			return couponId
+		} catch (err) {
+			const stripeErr = err as Stripe.errors.StripeError
+			if (stripeErr?.code !== 'resource_missing') {
+				this.logger.error('Failed to retrieve coupon', err)
+				return null
+			}
+		}
+
+		try {
+			await this.stripe.coupons.create({
+				id: couponId,
+				percent_off: discountPercent,
+				duration: 'once',
+				name: `${discountPercent}% off (promotional period)`,
+			})
+			return couponId
+		} catch (err) {
+			this.logger.error('Failed to create promotional coupon', err)
 			return null
 		}
 	}

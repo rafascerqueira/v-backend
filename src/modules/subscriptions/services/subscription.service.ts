@@ -1,15 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common'
+import { SettingsService } from '@/modules/admin/services/settings.service'
 import {
 	SUBSCRIPTION_REPOSITORY,
 	type SubscriptionRepository,
 } from '@/shared/repositories/subscription.repository'
-import { PLAN_LIMITS, type PlanFeatures, type PlanType } from '../constants/plan-limits'
+import { PLAN_LIMITS, type PlanType } from '../constants/plan-limits'
 
 @Injectable()
 export class SubscriptionService {
 	constructor(
 		@Inject(SUBSCRIPTION_REPOSITORY)
 		private readonly subscriptionRepository: SubscriptionRepository,
+		private readonly settingsService: SettingsService,
 	) {}
 
 	async getAccountPlan(accountId: string): Promise<PlanType> {
@@ -67,61 +69,24 @@ export class SubscriptionService {
 		})
 	}
 
-	async checkLimit(
-		accountId: string,
-		limitType: 'products' | 'orders' | 'customers',
-	): Promise<{
-		allowed: boolean
-		current: number
-		limit: number
-		remaining: number
-	}> {
-		const plan = await this.getAccountPlan(accountId)
-		const limits = PLAN_LIMITS[plan]
-		const usage = await this.getCurrentUsage(accountId)
-
-		let current: number
-		let limit: number
-
-		switch (limitType) {
-			case 'products':
-				current = usage.products_count
-				limit = limits.maxProducts
-				break
-			case 'orders':
-				current = usage.orders_count
-				limit = limits.maxOrdersPerMonth
-				break
-			case 'customers':
-				current = usage.customers_count
-				limit = limits.maxCustomers
-				break
-		}
-
-		// -1 means unlimited
-		if (limit === -1) {
-			return { allowed: true, current, limit: -1, remaining: -1 }
-		}
-
-		const remaining = Math.max(0, limit - current)
-		const allowed = current < limit
-
-		return { allowed, current, limit, remaining }
-	}
-
-	async hasFeature(accountId: string, feature: PlanFeatures): Promise<boolean> {
-		const plan = await this.getAccountPlan(accountId)
-		return PLAN_LIMITS[plan].features[feature]
-	}
-
 	async getSubscriptionInfo(accountId: string) {
-		const [plan, subscription, usage] = await Promise.all([
+		const [plan, subscription, usage, unlimitedWindow] = await Promise.all([
 			this.getAccountPlan(accountId),
 			this.getActiveSubscription(accountId),
 			this.getCurrentUsage(accountId),
+			this.settingsService.getUnlimitedPeriodWindow(),
 		])
 
 		const limits = PLAN_LIMITS[plan]
+		const unlimitedActiveForFree = plan === 'free' && unlimitedWindow.isActive
+
+		const effectiveLimits = unlimitedActiveForFree
+			? { products: -1, orders: -1, customers: -1 }
+			: {
+					products: limits.maxProducts,
+					orders: limits.maxOrdersPerMonth,
+					customers: limits.maxCustomers,
+				}
 
 		return {
 			plan,
@@ -129,32 +94,39 @@ export class SubscriptionService {
 			usage: {
 				products: {
 					current: usage.products_count,
-					limit: limits.maxProducts,
+					limit: effectiveLimits.products,
 					percentage:
-						limits.maxProducts === -1
+						effectiveLimits.products === -1
 							? 0
-							: Math.round((usage.products_count / limits.maxProducts) * 100),
+							: Math.round((usage.products_count / effectiveLimits.products) * 100),
 				},
 				orders: {
 					current: usage.orders_count,
-					limit: limits.maxOrdersPerMonth,
+					limit: effectiveLimits.orders,
 					percentage:
-						limits.maxOrdersPerMonth === -1
+						effectiveLimits.orders === -1
 							? 0
-							: Math.round((usage.orders_count / limits.maxOrdersPerMonth) * 100),
+							: Math.round((usage.orders_count / effectiveLimits.orders) * 100),
 				},
 				customers: {
 					current: usage.customers_count,
-					limit: limits.maxCustomers,
+					limit: effectiveLimits.customers,
 					percentage:
-						limits.maxCustomers === -1
+						effectiveLimits.customers === -1
 							? 0
-							: Math.round((usage.customers_count / limits.maxCustomers) * 100),
+							: Math.round((usage.customers_count / effectiveLimits.customers) * 100),
 				},
 			},
 			features: limits.features,
 			periodStart: usage.period_start,
 			periodEnd: usage.period_end,
+			activeWindow: unlimitedActiveForFree
+				? {
+						type: 'unlimited_period' as const,
+						startDate: unlimitedWindow.startDate,
+						endDate: unlimitedWindow.endDate,
+					}
+				: null,
 		}
 	}
 

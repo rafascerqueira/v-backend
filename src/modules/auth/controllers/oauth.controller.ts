@@ -39,6 +39,7 @@ export class OAuthController {
 				sub: account.id,
 				email: account.email,
 				role: account.role,
+				plan_type: account.plan_type,
 			})
 
 			reply.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {
@@ -77,6 +78,7 @@ export class OAuthController {
 				sub: account.id,
 				email: account.email,
 				role: account.role,
+				plan_type: account.plan_type,
 			})
 
 			reply.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {

@@ -93,6 +93,7 @@ export class LoginController {
 			sub: account.id,
 			email: account.email,
 			role: account.role,
+			plan_type: account.plan_type,
 		})
 
 		response.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {
