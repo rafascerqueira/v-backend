@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { AccountService } from '@/modules/users/services/account.service'
@@ -35,7 +36,19 @@ export class OAuthService {
 		private readonly accountService: AccountService,
 	) {}
 
-	getGoogleAuthUrl(): string {
+	generateState(): string {
+		return randomBytes(32).toString('hex')
+	}
+
+	verifyState(expected: string | undefined, received: string | undefined): boolean {
+		if (!expected || !received) return false
+		const expectedBuf = Buffer.from(expected)
+		const receivedBuf = Buffer.from(received)
+		if (expectedBuf.length !== receivedBuf.length) return false
+		return timingSafeEqual(expectedBuf, receivedBuf)
+	}
+
+	getGoogleAuthUrl(state: string): string {
 		const clientId = this.configService.get<string>('oauth.google.clientId')
 		const callbackUrl = this.configService.get<string>('oauth.google.callbackUrl')
 
@@ -49,12 +62,13 @@ export class OAuthService {
 			response_type: 'code',
 			scope: 'openid email profile',
 			access_type: 'online',
+			state,
 		})
 
 		return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
 	}
 
-	getFacebookAuthUrl(): string {
+	getFacebookAuthUrl(state: string): string {
 		const clientId = this.configService.get<string>('oauth.facebook.clientId')
 		const callbackUrl = this.configService.get<string>('oauth.facebook.callbackUrl')
 
@@ -67,6 +81,7 @@ export class OAuthService {
 			redirect_uri: callbackUrl,
 			response_type: 'code',
 			scope: 'email,public_profile',
+			state,
 		})
 
 		return `https://www.facebook.com/v20.0/dialog/oauth?${params.toString()}`

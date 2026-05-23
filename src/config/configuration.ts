@@ -27,6 +27,7 @@ export default () => ({
 
 	cookie: {
 		secret: process.env.COOKIE_SECRET || process.env.JWT_SECRET,
+		domain: process.env.COOKIE_DOMAIN || undefined,
 	},
 
 	smtp: {
