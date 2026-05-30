@@ -23,6 +23,17 @@ export interface AdminStats {
 	activeProducts: number
 }
 
+export interface AccountActiveGrant {
+	id: string
+	account_id: string
+	type: string
+	status: string
+	effective_from: Date
+	effective_until: Date | null
+	metadata: unknown
+	reason: string
+}
+
 export interface AccountListItem {
 	id: string
 	name: string
@@ -34,6 +45,8 @@ export interface AccountListItem {
 	createdAt: Date
 	updatedAt: Date
 	_count: { products: number; customers: number; orders: number }
+	// Active plan_grant exception (if any) — included so the listing avoids an N+1.
+	activeGrant?: AccountActiveGrant | null
 }
 
 export interface AccountDetail extends AccountListItem {

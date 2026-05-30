@@ -17,18 +17,28 @@ import { GlobalExceptionFilter } from './shared/filters/global-exception.filter'
 import { ZodExceptionFilter } from './shared/filters/zod-exception.filter'
 
 async function bootstrap() {
-	const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
-		rawBody: true,
-	})
+	const app = await NestFactory.create<NestFastifyApplication>(
+		AppModule,
+		// trustProxy: the API runs behind nginx in production, so the real client IP comes
+		// from X-Forwarded-For. Without this, rate limiting keys every request to the proxy IP.
+		new FastifyAdapter({ trustProxy: true }),
+		{
+			rawBody: true,
+		},
+	)
 	const configService = app.get(ConfigService)
+	const isProduction = configService.get<boolean>('isProduction', false)
 
 	app.enableCors({
 		origin: (origin, callback) => {
-			const allowedOrigins = [
+			// In production only the configured frontend origin is allowed. Loopback origins
+			// (any 127.0.0.1 port) are accepted only outside production for local development.
+			const allowedOrigins: Array<string | RegExp> = [
 				configService.get<string>('cors.origin', 'http://localhost:3000'),
-				'http://127.0.0.1:3000',
-				/^http:\/\/127\.0\.0\.1:\d+$/,
 			]
+			if (!isProduction) {
+				allowedOrigins.push('http://127.0.0.1:3000', /^http:\/\/127\.0\.0\.1:\d+$/)
+			}
 			if (
 				!origin ||
 				allowedOrigins.some((o) => (o instanceof RegExp ? o.test(origin) : o === origin))
@@ -57,11 +67,19 @@ async function bootstrap() {
 		root: configService.get<string>('upload.dir') || join(process.cwd(), 'uploads'),
 		prefix: '/uploads/',
 		decorateReply: false,
+		// Defense-in-depth: stop browsers from MIME-sniffing uploaded files into an
+		// executable type (e.g. treating a file as HTML/SVG).
+		setHeaders: (res: any) => {
+			res.setHeader('X-Content-Type-Options', 'nosniff')
+		},
 	})
 
 	app.useGlobalFilters(new GlobalExceptionFilter(), new ZodExceptionFilter())
 
-	setupSwagger(app)
+	// Don't expose the API docs / full endpoint surface in production.
+	if (!isProduction) {
+		setupSwagger(app)
+	}
 
 	const port = configService.get<number>('port', 3001)
 	await app.listen(port, '0.0.0.0')

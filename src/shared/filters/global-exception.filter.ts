@@ -33,11 +33,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 				message = exceptionResponse
 			}
 		} else if (exception instanceof Error) {
-			message = exception.message
-			error = exception.name
-
-			// Log unexpected errors
+			// Log the real error server-side, but don't leak internals to clients in production.
 			this.logger.error(`Unexpected error: ${exception.message}`, exception.stack)
+
+			if (process.env.NODE_ENV === 'production') {
+				message = 'Internal server error'
+				error = 'Internal Server Error'
+			} else {
+				message = exception.message
+				error = exception.name
+			}
 		}
 
 		// Prisma errors handling

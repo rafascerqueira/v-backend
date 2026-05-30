@@ -108,6 +108,22 @@ export class PrismaAdminRepository implements AdminRepository {
 							orders: true,
 						},
 					},
+					// Inline the active plan_grant so the listing is a single query (no N+1).
+					exceptions: {
+						where: { type: 'plan_grant' as any, status: 'active' as any },
+						orderBy: { createdAt: 'desc' },
+						take: 1,
+						select: {
+							id: true,
+							account_id: true,
+							type: true,
+							status: true,
+							effective_from: true,
+							effective_until: true,
+							metadata: true,
+							reason: true,
+						},
+					},
 				},
 				orderBy: { createdAt: 'desc' },
 				skip,
@@ -116,7 +132,14 @@ export class PrismaAdminRepository implements AdminRepository {
 			this.prisma.account.count({ where }),
 		])
 
-		return { data: accounts as unknown as AccountListItem[], total }
+		const data = accounts.map((account) => {
+			const { exceptions, ...rest } = account as typeof account & {
+				exceptions: AccountListItem['activeGrant'][]
+			}
+			return { ...rest, activeGrant: exceptions[0] ?? null }
+		})
+
+		return { data: data as unknown as AccountListItem[], total }
 	}
 
 	async findAccountById(accountId: string): Promise<AccountDetail | null> {

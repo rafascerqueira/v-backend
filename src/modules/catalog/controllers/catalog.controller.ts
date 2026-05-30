@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { Public } from '@/modules/auth/decorators/public.decorator'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { type AuthCustomerDto, authCustomerSchema } from '../dto/auth-customer.dto'
@@ -8,7 +9,22 @@ import {
 	createCatalogOrderSchema,
 } from '../dto/create-catalog-order.dto'
 import { type LookupCustomerDto, lookupCustomerSchema } from '../dto/lookup-customer.dto'
+import {
+	type RedeemInviteDto,
+	type RequestCustomerOtpDto,
+	redeemInviteSchema,
+	requestCustomerOtpSchema,
+	type SetCustomerPasswordDto,
+	setCustomerPasswordSchema,
+} from '../dto/set-customer-password.dto'
 import { CatalogService } from '../services/catalog.service'
+
+/** Tight per-IP limits for the unauthenticated customer identity endpoints. */
+const CUSTOMER_AUTH_THROTTLE = {
+	short: { ttl: 1000, limit: 1 },
+	medium: { ttl: 60000, limit: 5 },
+	long: { ttl: 3600000, limit: 20 },
+}
 
 @ApiTags('catalog')
 @Controller('catalog')
@@ -60,6 +76,7 @@ export class CatalogController {
 	}
 
 	@Public()
+	@Throttle(CUSTOMER_AUTH_THROTTLE)
 	@Post('loja/:slug/customer/lookup')
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'Look up customer by email or phone in a store (public)' })
@@ -73,6 +90,7 @@ export class CatalogController {
 	}
 
 	@Public()
+	@Throttle(CUSTOMER_AUTH_THROTTLE)
 	@Post('loja/:slug/customer/auth')
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'Authenticate existing customer in a store (public)' })
@@ -88,16 +106,51 @@ export class CatalogController {
 	}
 
 	@Public()
+	@Throttle(CUSTOMER_AUTH_THROTTLE)
+	@Post('loja/:slug/customer/password/request')
+	@HttpCode(HttpStatus.OK)
+	@ApiOperation({
+		summary: 'Request an email verification code to set a password (public)',
+	})
+	@ApiParam({ name: 'slug', type: String })
+	@ApiResponse({ status: 200, description: 'Verification code sent if the contact is eligible' })
+	async requestCustomerPasswordOtp(
+		@Param('slug') slug: string,
+		@Body(new ZodValidationPipe(requestCustomerOtpSchema)) body: RequestCustomerOtpDto,
+	) {
+		return this.service.requestPasswordOtp(slug, body)
+	}
+
+	@Public()
+	@Throttle(CUSTOMER_AUTH_THROTTLE)
 	@Post('loja/:slug/customer/password')
 	@HttpCode(HttpStatus.OK)
-	@ApiOperation({ summary: 'Set password for a customer who has none yet (public)' })
+	@ApiOperation({
+		summary: 'Set password for a customer who has none yet (public, requires emailed OTP)',
+	})
 	@ApiParam({ name: 'slug', type: String })
 	@ApiResponse({ status: 200, description: 'Password set and customer authenticated' })
 	async setCustomerPassword(
 		@Param('slug') slug: string,
-		@Body(new ZodValidationPipe(authCustomerSchema)) body: AuthCustomerDto,
+		@Body(new ZodValidationPipe(setCustomerPasswordSchema)) body: SetCustomerPasswordDto,
 	) {
 		return this.service.setCustomerPassword(slug, body)
+	}
+
+	@Public()
+	@Throttle(CUSTOMER_AUTH_THROTTLE)
+	@Post('loja/:slug/customer/password/invite')
+	@HttpCode(HttpStatus.OK)
+	@ApiOperation({
+		summary: 'Set or reset password using a seller-issued invite token (public)',
+	})
+	@ApiParam({ name: 'slug', type: String })
+	@ApiResponse({ status: 200, description: 'Password set and customer authenticated' })
+	async redeemPasswordInvite(
+		@Param('slug') slug: string,
+		@Body(new ZodValidationPipe(redeemInviteSchema)) body: RedeemInviteDto,
+	) {
+		return this.service.redeemPasswordInvite(slug, body)
 	}
 
 	@Public()

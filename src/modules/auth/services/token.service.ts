@@ -99,17 +99,26 @@ export class TokenService implements OnModuleInit {
 	}
 
 	async verifyAccessToken(token: string): Promise<TokenPayload> {
-		return this.jwtService.verifyAsync<TokenPayload>(token, {
+		const payload = await this.jwtService.verifyAsync<TokenPayload>(token, {
 			publicKey: this.publicKey,
 			algorithms: ['RS256' as const],
 		})
+		// Reject refresh/customer tokens presented as an access token (token-type confusion).
+		if (payload.type !== 'access') {
+			throw new Error('Invalid token type')
+		}
+		return payload
 	}
 
 	async verifyRefreshToken(token: string): Promise<TokenPayload> {
-		return this.jwtService.verifyAsync<TokenPayload>(token, {
+		const payload = await this.jwtService.verifyAsync<TokenPayload>(token, {
 			publicKey: this.publicKey,
 			algorithms: ['RS256' as const],
 		})
+		if (payload.type !== 'refresh') {
+			throw new Error('Invalid token type')
+		}
+		return payload
 	}
 
 	async signCustomerToken(customerId: string, sellerId: string): Promise<string> {
@@ -122,10 +131,19 @@ export class TokenService implements OnModuleInit {
 	async verifyCustomerToken(
 		token: string,
 	): Promise<{ sub: string; sellerId: string; type: string }> {
-		return this.jwtService.verifyAsync(token, {
+		const payload = await this.jwtService.verifyAsync<{
+			sub: string
+			sellerId: string
+			type: string
+		}>(token, {
 			publicKey: this.publicKey,
 			algorithms: ['RS256' as const],
 		})
+		// Ensure a seller access/refresh token can never be used on customer endpoints.
+		if (payload.type !== 'customer_access') {
+			throw new Error('Invalid token type')
+		}
+		return payload
 	}
 
 	async refreshTokens(

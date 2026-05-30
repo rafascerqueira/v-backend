@@ -106,6 +106,15 @@ export class AccountService {
 
 		const byEmail = await this.accountRepository.findByEmail(data.email)
 		if (byEmail) {
+			// Facebook does not guarantee the email is verified, so auto-linking it onto an
+			// existing password-based account would allow account takeover. Refuse and require
+			// the user to sign in with their password and link the provider explicitly.
+			if (data.facebookId && byEmail.password) {
+				throw new UnauthorizedException(
+					'Já existe uma conta com este email. Faça login com sua senha para vincular o Facebook.',
+				)
+			}
+			// Google verifies email ownership (checked in the OAuth callback), so linking is safe.
 			if (data.googleId) await this.accountRepository.linkGoogleId(byEmail.id, data.googleId)
 			if (data.facebookId) await this.accountRepository.linkFacebookId(byEmail.id, data.facebookId)
 			return byEmail

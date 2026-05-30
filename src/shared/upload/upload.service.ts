@@ -28,7 +28,7 @@ export interface UploadResult {
 
 const DEFAULT_OPTIONS: UploadOptions = {
 	maxSizeBytes: 5 * 1024 * 1024, // 5MB
-	allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+	allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
 	resize: {
 		width: 1200,
 		height: 1200,
@@ -60,10 +60,18 @@ export class UploadService {
 		}
 	}
 
-	private generateFilename(originalName: string): string {
+	// Real image formats we accept and the safe extension we store them under.
+	// The extension is derived from the format sharp actually decodes — never from the
+	// client-supplied filename or MIME type — so a disguised SVG/HTML cannot be stored.
+	private static readonly FORMAT_TO_EXT: Record<string, string> = {
+		jpeg: 'jpg',
+		png: 'png',
+		webp: 'webp',
+	}
+
+	private generateFilename(ext: string): string {
 		const timestamp = Date.now()
 		const random = Math.random().toString(36).substring(2, 8)
-		const ext = originalName.split('.').pop()?.toLowerCase() || 'jpg'
 		return `${timestamp}-${random}.${ext}`
 	}
 
@@ -87,13 +95,26 @@ export class UploadService {
 	async processImage(
 		buffer: Buffer,
 		options: UploadOptions = {},
-	): Promise<{ buffer: Buffer; metadata: sharp.Metadata }> {
+	): Promise<{ buffer: Buffer; metadata: sharp.Metadata; ext: string }> {
 		const opts = { ...DEFAULT_OPTIONS, ...options }
 		const resize = opts.resize ??
 			DEFAULT_OPTIONS.resize ?? { width: 1200, height: 1200, fit: 'inside' as const }
 
 		let sharpInstance = sharp(buffer)
-		const metadata = await sharpInstance.metadata()
+
+		// Trust the format sharp actually decodes, not the client. Reject anything that is
+		// not a real raster image we re-encode (e.g. SVG, which can carry script).
+		let metadata: sharp.Metadata
+		try {
+			metadata = await sharpInstance.metadata()
+		} catch {
+			throw new BadRequestException('Arquivo de imagem inválido')
+		}
+
+		const detected = metadata.format === 'jpg' ? 'jpeg' : metadata.format
+		if (!detected || !(detected in UploadService.FORMAT_TO_EXT)) {
+			throw new BadRequestException('Formato de imagem não suportado. Use JPEG, PNG ou WebP.')
+		}
 
 		if (resize.width || resize.height) {
 			sharpInstance = sharpInstance.resize({
@@ -104,19 +125,23 @@ export class UploadService {
 			})
 		}
 
-		const format = metadata.format || 'jpeg'
-		if (format === 'jpeg' || format === 'jpg') {
+		// Always re-encode to the detected safe format, stripping any embedded payload.
+		if (detected === 'jpeg') {
 			sharpInstance = sharpInstance.jpeg({ quality: opts.quality || 80 })
-		} else if (format === 'png') {
+		} else if (detected === 'png') {
 			sharpInstance = sharpInstance.png({ quality: opts.quality || 80 })
-		} else if (format === 'webp') {
+		} else {
 			sharpInstance = sharpInstance.webp({ quality: opts.quality || 80 })
 		}
 
 		const processedBuffer = await sharpInstance.toBuffer()
 		const processedMetadata = await sharp(processedBuffer).metadata()
 
-		return { buffer: processedBuffer, metadata: processedMetadata }
+		return {
+			buffer: processedBuffer,
+			metadata: processedMetadata,
+			ext: UploadService.FORMAT_TO_EXT[detected],
+		}
 	}
 
 	async uploadProductImage(
@@ -128,12 +153,16 @@ export class UploadService {
 	): Promise<UploadResult> {
 		this.validateFile(buffer, mimeType, options)
 
-		const { buffer: processedBuffer, metadata } = await this.processImage(buffer, {
+		const {
+			buffer: processedBuffer,
+			metadata,
+			ext,
+		} = await this.processImage(buffer, {
 			...options,
 			resize: { width: 800, height: 800, fit: 'inside' },
 		})
 
-		const filename = this.generateFilename(originalName)
+		const filename = this.generateFilename(ext)
 		const subDir = join('products', sellerId)
 		const dirPath = join(this.uploadDir, subDir)
 
@@ -167,12 +196,16 @@ export class UploadService {
 	): Promise<UploadResult> {
 		this.validateFile(buffer, mimeType, options)
 
-		const { buffer: processedBuffer, metadata } = await this.processImage(buffer, {
+		const {
+			buffer: processedBuffer,
+			metadata,
+			ext,
+		} = await this.processImage(buffer, {
 			...options,
 			resize: { width: 400, height: 400, fit: 'cover' },
 		})
 
-		const filename = `${userId}-profile.${originalName.split('.').pop()?.toLowerCase() || 'jpg'}`
+		const filename = `${userId}-profile.${ext}`
 		const subDir = 'profiles'
 		const dirPath = join(this.uploadDir, subDir)
 

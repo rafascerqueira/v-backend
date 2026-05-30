@@ -145,6 +145,32 @@ export class PrismaCatalogRepository implements CatalogRepository {
 		return { ...customer, seller_store_slug: seller.store_slug } as unknown as CatalogCustomer
 	}
 
+	async findCustomerWithHashById(id: string): Promise<CatalogCustomerWithHash | null> {
+		const result = await this.prisma.customer.findUnique({
+			where: { id },
+			select: {
+				id: true,
+				seller_id: true,
+				name: true,
+				email: true,
+				phone: true,
+				document: true,
+				address: true,
+				city: true,
+				state: true,
+				zip_code: true,
+				password_hash: true,
+				seller: { select: { store_slug: true } },
+			},
+		})
+		if (!result) return null
+		const { seller, ...customer } = result
+		return {
+			...customer,
+			seller_store_slug: seller.store_slug,
+		} as unknown as CatalogCustomerWithHash
+	}
+
 	async findCustomerByEmailOrPhone(
 		emailOrPhone: string,
 		sellerId: string,

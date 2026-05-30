@@ -2,6 +2,7 @@ import {
 	BadRequestException,
 	Controller,
 	Delete,
+	ForbiddenException,
 	Param,
 	Post,
 	Req,
@@ -66,8 +67,18 @@ export class UploadController {
 	@ApiOperation({ summary: 'Delete uploaded file (path must be base64 encoded)' })
 	@ApiParam({ name: 'encodedPath', type: String, description: 'Base64 encoded file path' })
 	@ApiResponse({ status: 200, description: 'File deleted' })
-	async deleteFile(@Param('encodedPath') encodedPath: string) {
-		const path = Buffer.from(encodedPath, 'base64').toString('utf-8')
+	async deleteFile(@Param('encodedPath') encodedPath: string, @Req() req: any) {
+		const path = Buffer.from(encodedPath, 'base64').toString('utf-8').replace(/\\/g, '/')
+		const userId = req.user.sub
+
+		// Ownership check: callers may only delete files under their own product folder
+		// or their own profile image. Prevents deleting another tenant's uploads.
+		const ownsProductImage = path.startsWith(`products/${userId}/`)
+		const ownsProfileImage = path.startsWith(`profiles/${userId}-profile.`)
+		if (!ownsProductImage && !ownsProfileImage) {
+			throw new ForbiddenException('Você não tem permissão para excluir este arquivo')
+		}
+
 		const deleted = await this.uploadService.deleteFile(path)
 		return { deleted }
 	}

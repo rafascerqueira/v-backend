@@ -1,7 +1,7 @@
 import {
 	BadRequestException,
-	Body,
 	Controller,
+	GoneException,
 	Headers,
 	HttpCode,
 	HttpStatus,
@@ -60,26 +60,16 @@ export class WebhookController {
 		}
 	}
 
+	/**
+	 * @deprecated PagSeguro is no longer used — billing runs entirely on Stripe.
+	 * The handler never verified the webhook signature, so it is disabled to prevent
+	 * forged subscription events. Returns 410 Gone for any caller.
+	 */
 	@Post('pagseguro')
 	@Public()
-	@HttpCode(HttpStatus.OK)
-	@ApiOperation({ summary: 'Handle PagSeguro webhook events' })
-	async handlePagSeguroWebhook(
-		@Body() body: any,
-		@Headers('x-pagseguro-signature') signature: string,
-	) {
-		if (!signature) {
-			throw new BadRequestException('Missing PagSeguro signature header')
-		}
-
-		this.logger.log(`Received PagSeguro webhook: ${body?.type}`)
-
-		try {
-			await this.webhookService.processPagSeguroWebhook(body)
-			return { received: true }
-		} catch (error) {
-			this.logger.error(`PagSeguro webhook error: ${error}`)
-			throw new InternalServerErrorException('Webhook processing failed')
-		}
+	@ApiOperation({ summary: '[DEPRECATED] PagSeguro webhooks are disabled', deprecated: true })
+	async handlePagSeguroWebhook() {
+		this.logger.warn('Rejected call to deprecated/disabled PagSeguro webhook endpoint')
+		throw new GoneException('PagSeguro webhooks are no longer supported')
 	}
 }

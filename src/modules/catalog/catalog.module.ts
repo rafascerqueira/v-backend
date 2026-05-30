@@ -3,6 +3,7 @@ import { PrismaModule } from '@/shared/prisma/prisma.module'
 import { CATALOG_REPOSITORY } from '@/shared/repositories/catalog.repository'
 import { STORE_SETTINGS_REPOSITORY } from '@/shared/repositories/store-settings.repository'
 import { CatalogController } from './controllers/catalog.controller'
+import { CustomerInviteController } from './controllers/customer-invite.controller'
 import { StoreSettingsController } from './controllers/store-settings.controller'
 import { PrismaCatalogRepository } from './repositories/prisma-catalog.repository'
 import { PrismaStoreSettingsRepository } from './repositories/prisma-store-settings.repository'
@@ -11,7 +12,7 @@ import { StoreSettingsService } from './services/store-settings.service'
 
 @Module({
 	imports: [PrismaModule],
-	controllers: [CatalogController, StoreSettingsController],
+	controllers: [CatalogController, StoreSettingsController, CustomerInviteController],
 	providers: [
 		CatalogService,
 		StoreSettingsService,

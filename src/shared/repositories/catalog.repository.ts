@@ -99,6 +99,7 @@ export interface CatalogRepository {
 	findStockByProduct(productId: number): Promise<CatalogStock | null>
 
 	findCustomerById(id: string): Promise<CatalogCustomer | null>
+	findCustomerWithHashById(id: string): Promise<CatalogCustomerWithHash | null>
 	findCustomerByEmailOrPhone(
 		emailOrPhone: string,
 		sellerId: string,

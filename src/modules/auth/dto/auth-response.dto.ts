@@ -14,6 +14,7 @@ export interface TokenPayload {
 	email: string
 	role: AccountRole
 	plan_type: PlanType
+	type?: 'access' | 'refresh'
 	iat?: number
 	exp?: number
 }
