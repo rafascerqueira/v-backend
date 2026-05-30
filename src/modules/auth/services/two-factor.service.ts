@@ -6,13 +6,7 @@ import {
 } from '@/shared/repositories/two-factor.repository'
 
 const authenticator = {
-	generateSecret: () => {
-		const bytes = new Uint8Array(20)
-		crypto.getRandomValues(bytes)
-		return Array.from(bytes)
-			.map((b) => b.toString(16).padStart(2, '0'))
-			.join('')
-	},
+	generateSecret: () => new OTPAuth.Secret({ size: 20 }).base32,
 	keyuri: (email: string, issuer: string, secret: string) => {
 		const totp = new OTPAuth.TOTP({ issuer, label: email, secret })
 		return totp.toString()
