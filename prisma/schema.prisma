@@ -81,6 +81,9 @@ model Account {
   two_factor_secret  String?     @db.VarChar(100)
   two_factor_backup  String[]    @default([])
   last_login_at      DateTime?   @db.Timestamptz()
+  avatar             String?     @db.VarChar(255)
+  phone              String?     @db.VarChar(20)
+  address            String?     @db.VarChar(255)
   store_slug         String?     @unique @db.VarChar(50)
   store_name         String?     @db.VarChar(100)
   store_description  String?     @db.Text

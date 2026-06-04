@@ -6,6 +6,7 @@ import type {
 	AccountRepository,
 	CreateAccountData,
 	CreateOAuthAccountData,
+	UpdateAccountData,
 } from '@/shared/repositories/account.repository'
 
 @Injectable()
@@ -24,7 +25,7 @@ export class PrismaAccountRepository implements AccountRepository {
 		return this.prisma.account.findUnique({ where: { email } })
 	}
 
-	async update(id: string, data: Partial<CreateAccountData>): Promise<Account> {
+	async update(id: string, data: UpdateAccountData): Promise<Account> {
 		return this.prisma.account.update({ where: { id }, data })
 	}
 
@@ -103,6 +104,9 @@ export class PrismaAccountRepository implements AccountRepository {
 					two_factor_enabled: false,
 					two_factor_secret: null,
 					two_factor_backup: [],
+					avatar: null,
+					phone: null,
+					address: null,
 					store_slug: null,
 					store_name: null,
 					store_description: null,

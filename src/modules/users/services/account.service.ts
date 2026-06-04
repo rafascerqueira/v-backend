@@ -11,6 +11,7 @@ import {
 	ACCOUNT_REPOSITORY,
 	type AccountRepository,
 	type CreateOAuthAccountData,
+	type UpdateAccountData,
 } from '@/shared/repositories/account.repository'
 
 type CreateAccountInput = {
@@ -72,7 +73,7 @@ export class AccountService {
 		return this.accountRepository.findById(id)
 	}
 
-	async updateProfile(id: string, data: { name?: string }) {
+	async updateProfile(id: string, data: UpdateAccountData) {
 		return this.accountRepository.update(id, data)
 	}
 

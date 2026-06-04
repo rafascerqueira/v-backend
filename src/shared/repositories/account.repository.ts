@@ -13,6 +13,9 @@ export interface Account {
 	two_factor_enabled: boolean
 	two_factor_secret: string | null
 	last_login_at: Date | null
+	avatar: string | null
+	phone: string | null
+	address: string | null
 	createdAt: Date
 	updatedAt: Date
 }
@@ -39,6 +42,9 @@ export interface UpdateAccountData {
 	password?: string
 	salt?: string
 	last_login_at?: Date
+	avatar?: string | null
+	phone?: string | null
+	address?: string | null
 }
 
 export interface AccountRepository {

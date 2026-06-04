@@ -8,6 +8,9 @@ import type { TokenPayload } from '../dto/auth-response.dto'
 
 const updateProfileSchema = z.object({
 	name: z.string().min(2).max(100).optional(),
+	phone: z.string().max(20).nullish(),
+	address: z.string().max(255).nullish(),
+	avatar: z.url().max(255).nullish(),
 })
 type UpdateProfileDto = z.infer<typeof updateProfileSchema>
 

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import sharp from 'sharp'
@@ -239,8 +239,8 @@ export class UploadService {
 	async deleteFile(path: string): Promise<boolean> {
 		try {
 			const fullPath = join(this.uploadDir, path)
-			const resolved = require('node:path').resolve(fullPath)
-			const resolvedUploadDir = require('node:path').resolve(this.uploadDir)
+			const resolved = resolve(fullPath)
+			const resolvedUploadDir = resolve(this.uploadDir)
 
 			if (!resolved.startsWith(`${resolvedUploadDir}/`)) {
 				this.logger.warn(`Path traversal attempt blocked: ${path}`)

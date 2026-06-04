@@ -14,7 +14,7 @@ export const createProductSchema = z.object({
 		})
 		.optional()
 		.default({}),
-	images: z.array(z.string().url('URL de imagem inválida')).optional().default([]),
+	images: z.array(z.url('URL de imagem inválida')).optional().default([]),
 	active: z.boolean().optional().default(true),
 })
 

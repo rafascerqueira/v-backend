@@ -35,18 +35,24 @@ export function computeDueDate(
 		}
 
 		case 'monthly': {
+			// Find next occurrence, clamping the day to the target month's last day so
+			// billing_day=31 in February rolls to Feb 28/29 (not into March).
+			// JS Date is unsafe here: setDate(31) on a 30-day month overflows to the next
+			// month, which would silently skip the intended billing date — so we compute
+			// year/month/day independently and only build the Date at the end.
 			const day = billingDay ?? 5
-			const d = new Date(reference)
-			d.setDate(day)
-			d.setHours(0, 0, 0, 0)
-			// If that day has already passed this month, move to next month
-			if (d <= reference) {
-				d.setMonth(d.getMonth() + 1)
+			let year = reference.getFullYear()
+			let month = reference.getMonth()
+			const lastDayThisMonth = new Date(year, month + 1, 0).getDate()
+			const candidate = new Date(year, month, Math.min(day, lastDayThisMonth), 0, 0, 0, 0)
+			if (candidate > reference) return candidate
+			month += 1
+			if (month > 11) {
+				month = 0
+				year += 1
 			}
-			// Clamp to last day of month (e.g., billing_day=31 in February)
-			const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-			if (day > lastDay) d.setDate(lastDay)
-			return d
+			const lastDayNext = new Date(year, month + 1, 0).getDate()
+			return new Date(year, month, Math.min(day, lastDayNext), 0, 0, 0, 0)
 		}
 
 		case 'custom':

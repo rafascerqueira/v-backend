@@ -25,6 +25,10 @@ export class MeController {
 			email: account.email,
 			role: account.role,
 			planType: account.plan_type,
+			avatar: account.avatar,
+			phone: account.phone,
+			address: account.address,
+			two_factor_enabled: account.two_factor_enabled,
 			createdAt: account.createdAt,
 			updatedAt: account.updatedAt,
 		}
