@@ -45,7 +45,7 @@ export type PlanFeatures = keyof (typeof PLAN_LIMITS)['free']['features']
 
 export const PLAN_PRICES = {
 	free: 0,
-	pro: 4990, // R$ 49,90 em centavos
+	pro: 1490, // R$ 14,90 em centavos (early adopter; futuro R$ 19,90)
 	enterprise: 14990, // R$ 149,90 em centavos
 } as const
 

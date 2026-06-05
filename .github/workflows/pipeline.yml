@@ -104,35 +104,65 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
 
-      # Sync compiled output and project manifests — no build step needed on VPS
+          # Prefer pinned VPS_KNOWN_HOSTS secret (no network dep). Fall back to
+          # ssh-keyscan with retries + non-empty validation — keyscan exits 0 on
+          # failure, so without -s check known_hosts ends up empty and rsync dies
+          # later with a misleading "Host key verification failed".
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            echo "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+            echo "known_hosts pinned from secret"
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -H -T 10 ${{ secrets.VPS_HOST }} > /tmp/keyscan 2>/dev/null || true
+              if [ -s /tmp/keyscan ]; then
+                cat /tmp/keyscan >> ~/.ssh/known_hosts
+                echo "keyscan ok on attempt $i"
+                exit 0
+              fi
+              echo "keyscan empty (attempt $i/5), retrying in 10s..."
+              sleep 10
+            done
+            echo "ERROR: ssh-keyscan failed — VPS unreachable on port 22"
+            exit 1
+          fi
+
+      # Sync compiled output and project manifests — no build step needed on VPS.
+      # SSH opts: ConnectTimeout + ConnectionAttempts + ServerAlive* survive
+      # transient network blips between GitHub runner and VPS.
       - name: Sync artifacts to VPS
-        run: |
-          rsync -az --delete \
-            -e "ssh -i ~/.ssh/deploy_key" \
-            dist/ \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/dist/
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            SSH_OPTS="-i ~/.ssh/deploy_key -o ConnectTimeout=30 -o ConnectionAttempts=5 -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
 
-          # Mirror prisma/migrations/ exactly so removed or added migration dirs
-          # always match the repo. Exclude manual/ — it holds VPS-only SQL
-          # (e.g. subscription_triggers.sql) that must not be wiped.
-          rsync -az --delete --exclude=manual/ \
-            -e "ssh -i ~/.ssh/deploy_key" \
-            prisma/migrations/ \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/prisma/migrations/
+            rsync -az --delete \
+              -e "ssh $SSH_OPTS" \
+              dist/ \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/dist/
 
-          # Sync prisma schema and seed additively (migrations handled above)
-          rsync -az --exclude=migrations \
-            -e "ssh -i ~/.ssh/deploy_key" \
-            prisma/ \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/prisma/
+            # Mirror prisma/migrations/ exactly so removed or added migration dirs
+            # always match the repo. Exclude manual/ — it holds VPS-only SQL
+            # (e.g. subscription_triggers.sql) that must not be wiped.
+            rsync -az --delete --exclude=manual/ \
+              -e "ssh $SSH_OPTS" \
+              prisma/migrations/ \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/prisma/migrations/
 
-          # Sync remaining project files additively (preserves .env, keys/, uploads/, etc.)
-          rsync -az \
-            -e "ssh -i ~/.ssh/deploy_key" \
-            package.json pnpm-lock.yaml ecosystem.config.js nginx/ \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/
+            # Sync prisma schema and seed additively (migrations handled above)
+            rsync -az --exclude=migrations \
+              -e "ssh $SSH_OPTS" \
+              prisma/ \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/prisma/
+
+            # Sync remaining project files additively (preserves .env, keys/, uploads/, etc.)
+            rsync -az \
+              -e "ssh $SSH_OPTS" \
+              package.json pnpm-lock.yaml ecosystem.config.js nginx/ \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vendinhas/backend/
 
       - name: Activate on VPS
         uses: appleboy/ssh-action@v1.2.2
