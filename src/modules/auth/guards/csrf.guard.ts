@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { AUTH_COOKIES, CSRF_HEADER } from '../constants/cookies'
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
 import { SKIP_CSRF_KEY } from '../decorators/skip-csrf.decorator'
 import { csrfTokensMatch } from '../utils/csrf'
 
@@ -35,6 +36,16 @@ export class CsrfGuard implements CanActivate {
 		const method = String(request.method ?? 'GET').toUpperCase()
 
 		if (SAFE_METHODS.has(method)) return true
+
+		// @Public() routes (login, register, forgot-password, …) don't authenticate
+		// via the session — JwtAuthGuard is skipped and req.user is never set, so
+		// there is no user action to forge. Gating them on CSRF would also deadlock
+		// login whenever a stale access_token cookie lingers without a csrf cookie.
+		const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+			context.getHandler(),
+			context.getClass(),
+		])
+		if (isPublic) return true
 
 		const skip = this.reflector.getAllAndOverride<boolean>(SKIP_CSRF_KEY, [
 			context.getHandler(),

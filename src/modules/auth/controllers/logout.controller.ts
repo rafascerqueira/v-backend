@@ -2,6 +2,7 @@ import { Controller, Headers, HttpCode, HttpStatus, Post, Req, Res } from '@nest
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
+import { SkipCsrf } from '../decorators/skip-csrf.decorator'
 import { TokenService } from '../services/token.service'
 import { TokenBlacklistService } from '../services/token-blacklist.service'
 
@@ -14,6 +15,11 @@ export class LogoutController {
 	) {}
 
 	@Post('logout')
+	// Logout only terminates the caller's OWN session (clears cookies, blacklists the
+	// presented token). A forged logout is at worst a nuisance, never a data/integrity
+	// risk — and requiring CSRF here would lock users out of logging out whenever the
+	// csrf cookie is missing/expired. So it is intentionally CSRF-exempt.
+	@SkipCsrf()
 	@HttpCode(HttpStatus.OK)
 	@ApiBearerAuth()
 	@ApiOperation({ summary: 'Logout user and invalidate token' })
