@@ -1,102 +1,60 @@
-import cookie from "@fastify/cookie";
-import { Test, type TestingModule } from "@nestjs/testing";
-import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { FastifyAdapter } from "@nestjs/platform-fastify";
-import request from "supertest";
-import { AppModule } from "../src/app.module";
-import { PrismaService } from "../src/shared/prisma/prisma.service";
+import type { NestFastifyApplication } from '@nestjs/platform-fastify'
+import request from 'supertest'
+import type { PrismaService } from '../src/shared/prisma/prisma.service'
+import { createE2EApp } from './helpers/e2e'
 
-describe("Users (e2e)", () => {
-	let app: NestFastifyApplication;
-	let prisma: PrismaService;
-
-	// Global DB lifecycle handled by Jest globalSetup/globalTeardown
+describe('Users (e2e)', () => {
+	let app: NestFastifyApplication
+	let prisma: PrismaService
 
 	beforeEach(async () => {
-		const moduleFixture: TestingModule = await Test.createTestingModule({
-			imports: [AppModule],
-		}).compile();
-
-		app = moduleFixture.createNestApplication<NestFastifyApplication>(
-			new FastifyAdapter(),
-		);
-		prisma = app.get<PrismaService>(PrismaService);
-
-		const { ZodExceptionFilter } = await import(
-			"../src/shared/filters/zod-exception.filter"
-		);
-		app.useGlobalFilters(new ZodExceptionFilter());
-
-		await app.register(cookie as any, { secret: "test-secret" });
-
-		await app.init();
-		await app.getHttpAdapter().getInstance().ready();
-	});
+		;({ app, prisma } = await createE2EApp({ realAuth: true }))
+	})
 
 	afterEach(async () => {
-		await prisma.account.deleteMany();
-		await app.close();
-	});
+		await prisma.account.deleteMany()
+		await app.close()
+	})
 
-	describe("/create-account (POST)", () => {
+	describe('/auth/register (POST)', () => {
 		const validAccountData = {
-			name: "John Doe",
-			email: "john@example.com",
-			password: "Password123",
-		};
+			name: 'John Doe',
+			email: 'john@example.com',
+			password: 'Password123',
+		}
 
-		it("should create account successfully", () => {
+		it('should create account successfully', () => {
 			return request(app.getHttpServer())
-				.post("/create-account")
+				.post('/auth/register')
 				.send(validAccountData)
-				.expect(201);
-		});
+				.expect(201)
+		})
 
-		it("should reject duplicate email", async () => {
-			await request(app.getHttpServer())
-				.post("/create-account")
-				.send(validAccountData)
-				.expect(201);
+		it('should reject duplicate email', async () => {
+			await request(app.getHttpServer()).post('/auth/register').send(validAccountData).expect(201)
 
+			return request(app.getHttpServer()).post('/auth/register').send(validAccountData).expect(400)
+		})
+
+		it('should reject invalid email format', () => {
 			return request(app.getHttpServer())
-				.post("/create-account")
-				.send(validAccountData)
-				.expect(400);
-		});
+				.post('/auth/register')
+				.send({ ...validAccountData, email: 'invalid-email' })
+				.expect(400)
+		})
 
-		it("should reject invalid email format", () => {
-			const invalidData = {
-				...validAccountData,
-				email: "invalid-email",
-			};
-
+		it('should reject short password', () => {
 			return request(app.getHttpServer())
-				.post("/create-account")
-				.send(invalidData)
-				.expect(400);
-		});
+				.post('/auth/register')
+				.send({ ...validAccountData, password: '123' })
+				.expect(400)
+		})
 
-		it("should reject short password", () => {
-			const invalidData = {
-				...validAccountData,
-				password: "123",
-			};
-
+		it('should reject missing required fields', () => {
 			return request(app.getHttpServer())
-				.post("/create-account")
-				.send(invalidData)
-				.expect(400);
-		});
-
-		it("should reject missing required fields", () => {
-			const incompleteData = {
-				name: "John Doe",
-			};
-
-			return request(app.getHttpServer())
-				.post("/create-account")
-				.send(incompleteData)
-				.expect(400);
-		});
-	});
-});
+				.post('/auth/register')
+				.send({ name: 'John Doe' })
+				.expect(400)
+		})
+	})
+})

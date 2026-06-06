@@ -85,5 +85,8 @@ export class LogoutController {
 		response.clearCookie(AUTH_COOKIES.REFRESH_TOKEN, {
 			...COOKIE_OPTIONS,
 		})
+		response.clearCookie(AUTH_COOKIES.CSRF_TOKEN, {
+			...COOKIE_OPTIONS,
+		})
 	}
 }

@@ -161,6 +161,11 @@ REDIS_KEY_PREFIX=vendinhas:
 APP_URL=https://api.vendinhas.app
 FRONTEND_URL=https://vendinhas.app
 
+# Shared parent domain so the auth + CSRF cookies are valid on BOTH vendinhas.app
+# and api.vendinhas.app. Without this they are host-only and the authenticated
+# avatar <img> (served from api.vendinhas.app) gets no cookie -> 401.
+COOKIE_DOMAIN=.vendinhas.app
+
 # ===========================================
 # EMAIL (Postfix local)
 # ===========================================

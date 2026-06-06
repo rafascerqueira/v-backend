@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module'
 import { AccountExceptionsModule } from './modules/account-exceptions/account-exceptions.module'
 import { AdminModule } from './modules/admin/admin.module'
 import { AuthModule } from './modules/auth/auth.module'
+import { CsrfGuard } from './modules/auth/guards/csrf.guard'
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
 import { BillingsModule } from './modules/billings/billings.module'
 import { BundlesModule } from './modules/bundles/bundles.module'
@@ -78,6 +79,10 @@ import { WebSocketModule } from './shared/websocket/websocket.module'
 		{
 			provide: APP_GUARD,
 			useClass: JwtAuthGuard,
+		},
+		{
+			provide: APP_GUARD,
+			useClass: CsrfGuard,
 		},
 		{
 			provide: APP_INTERCEPTOR,

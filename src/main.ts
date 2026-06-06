@@ -19,9 +19,13 @@ import { ZodExceptionFilter } from './shared/filters/zod-exception.filter'
 async function bootstrap() {
 	const app = await NestFactory.create<NestFastifyApplication>(
 		AppModule,
-		// trustProxy: the API runs behind nginx in production, so the real client IP comes
-		// from X-Forwarded-For. Without this, rate limiting keys every request to the proxy IP.
-		new FastifyAdapter({ trustProxy: true }),
+		// trustProxy: the API runs behind nginx (which sits behind Cloudflare). The real
+		// client IP must come from X-Forwarded-For — but trusting the WHOLE chain (`true`)
+		// lets any client spoof `X-Forwarded-For` and evade every IP-keyed rate limit. So
+		// trust ONLY the local reverse proxy (nginx on loopback) by default; nginx is
+		// responsible for setting a trustworthy XFF from Cloudflare's CF-Connecting-IP.
+		// Override via TRUST_PROXY when the proxy is not on loopback (e.g. a Docker network).
+		new FastifyAdapter({ trustProxy: process.env.TRUST_PROXY || 'loopback' }),
 		{
 			rawBody: true,
 		},
@@ -31,11 +35,16 @@ async function bootstrap() {
 
 	app.enableCors({
 		origin: (origin, callback) => {
-			// In production only the configured frontend origin is allowed. Loopback origins
-			// (any 127.0.0.1 port) are accepted only outside production for local development.
-			const allowedOrigins: Array<string | RegExp> = [
-				configService.get<string>('cors.origin', 'http://localhost:3000'),
-			]
+			// In production only the configured frontend origin(s) are allowed —
+			// CORS_ORIGIN may be a comma-separated list (e.g. apex + www). The exact
+			// origin is echoed back (never '*'), which is mandatory alongside
+			// credentials. Loopback origins (any 127.0.0.1 port) are accepted only
+			// outside production for local development.
+			const allowedOrigins: Array<string | RegExp> = configService
+				.get<string>('cors.origin', 'http://localhost:3000')
+				.split(',')
+				.map((o) => o.trim())
+				.filter(Boolean)
 			if (!isProduction) {
 				allowedOrigins.push('http://127.0.0.1:3000', /^http:\/\/127\.0\.0\.1:\d+$/)
 			}
@@ -50,7 +59,7 @@ async function bootstrap() {
 		},
 		credentials: true,
 		methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-		allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'stripe-signature'],
+		allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'stripe-signature', 'X-CSRF-Token'],
 	})
 
 	await app.register(cookie as any, {

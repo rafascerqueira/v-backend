@@ -11,6 +11,7 @@ import { TokenService } from '@/modules/auth/services/token.service'
 import { AccountService } from '@/modules/users/services/account.service'
 import { Public } from '../decorators/public.decorator'
 import { OAuthService } from '../services/oauth.service'
+import { setCsrfCookie } from '../utils/csrf'
 
 @ApiTags('auth')
 @Controller('auth')
@@ -36,6 +37,7 @@ export class OAuthController {
 			...COOKIE_OPTIONS,
 			maxAge: 7 * 24 * 60 * 60,
 		})
+		setCsrfCookie(reply, accessMaxAge)
 	}
 
 	private writeStateCookie(reply: FastifyReply, state: string) {

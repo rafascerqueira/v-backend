@@ -1,33 +1,19 @@
-import cookie from "@fastify/cookie";
-import { Test, type TestingModule } from "@nestjs/testing";
-import type { INestApplication } from "@nestjs/common";
-import {
-	FastifyAdapter,
-	type NestFastifyApplication,
-} from "@nestjs/platform-fastify";
-import request from "supertest";
-import { AppModule } from "./../src/app.module";
+import type { NestFastifyApplication } from '@nestjs/platform-fastify'
+import request from 'supertest'
+import { createE2EApp } from './helpers/e2e'
 
-describe("AppController (e2e)", () => {
-	let app: NestFastifyApplication;
+describe('AppController (e2e)', () => {
+	let app: NestFastifyApplication
 
 	beforeEach(async () => {
-		const moduleFixture: TestingModule = await Test.createTestingModule({
-			imports: [AppModule],
-		}).compile();
+		;({ app } = await createE2EApp())
+	})
 
-		app = moduleFixture.createNestApplication<NestFastifyApplication>(
-			new FastifyAdapter(),
-		);
-		await app.register(cookie as any, { secret: "test-secret" });
-		await app.init();
-		await app.getHttpAdapter().getInstance().ready();
-	});
+	afterEach(async () => {
+		await app.close()
+	})
 
-	it("/ (GET)", () => {
-		return request(app.getHttpServer())
-			.get("/")
-			.expect(200)
-			.expect("Hello World!");
-	});
-});
+	it('/ (GET)', () => {
+		return request(app.getHttpServer()).get('/').expect(200).expect('Hello World!')
+	})
+})

@@ -14,6 +14,7 @@ import { AUTH_COOKIES, COOKIE_OPTIONS } from '@/modules/auth/constants/cookies'
 import { Public } from '@/modules/auth/decorators/public.decorator'
 import { TokenService } from '@/modules/auth/services/token.service'
 import { TwoFactorService } from '@/modules/auth/services/two-factor.service'
+import { setCsrfCookie } from '@/modules/auth/utils/csrf'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { type LoginDto, loginSchema } from '../dto/login.dto'
 import { AccountService } from '../services/account.service'
@@ -105,6 +106,9 @@ export class LoginController {
 			...COOKIE_OPTIONS,
 			maxAge: 7 * 24 * 60 * 60,
 		})
+
+		// Issue the matching double-submit CSRF token for the new session.
+		setCsrfCookie(response, tokens.expiresIn)
 
 		return tokens
 	}

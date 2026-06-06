@@ -15,8 +15,10 @@ import { z } from 'zod'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
 import { Public } from '../decorators/public.decorator'
+import { SkipCsrf } from '../decorators/skip-csrf.decorator'
 import { TokenService } from '../services/token.service'
 import { TokenBlacklistService } from '../services/token-blacklist.service'
+import { setCsrfCookie } from '../utils/csrf'
 
 const refreshTokenSchema = z.object({
 	refreshToken: z.string().optional(),
@@ -34,6 +36,11 @@ export class RefreshTokenController {
 
 	@Post('refresh')
 	@Public()
+	// Token rotation is gated by the HttpOnly refresh token, not an ambient form
+	// post, and must keep working even when the access-token session has expired
+	// (so the CSRF cookie may be gone). A forged refresh only rotates tokens —
+	// no state to abuse — so this endpoint is intentionally CSRF-exempt.
+	@SkipCsrf()
 	@Throttle({
 		short: { ttl: 1000, limit: 1 },
 		medium: { ttl: 60000, limit: 10 },
@@ -73,6 +80,9 @@ export class RefreshTokenController {
 				...COOKIE_OPTIONS,
 				maxAge: 7 * 24 * 60 * 60,
 			})
+
+			// Rotate the CSRF token together with the session.
+			setCsrfCookie(response, tokens.expiresIn)
 
 			return tokens
 		} catch {
