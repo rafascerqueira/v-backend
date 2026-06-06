@@ -16,6 +16,7 @@ import {
 	type CatalogCustomerWithHash,
 	type CatalogRepository,
 } from '@/shared/repositories/catalog.repository'
+import { escapeHtml } from '@/shared/security/escape-html'
 import type { AuthCustomerDto } from '../dto/auth-customer.dto'
 import type { CreateCatalogOrderDto } from '../dto/create-catalog-order.dto'
 import type { LookupCustomerDto } from '../dto/lookup-customer.dto'
@@ -496,7 +497,7 @@ export class CatalogService {
 			await this.queueProducer.sendEmail({
 				to: customer.email,
 				subject: 'Seu código de verificação',
-				html: `<p>Olá, ${customer.name.split(' ')[0]}!</p>
+				html: `<p>Olá, ${escapeHtml(customer.name.split(' ')[0])}!</p>
 <p>Use o código abaixo para definir a senha da sua conta. Ele expira em 10 minutos.</p>
 <p style="font-size:24px;font-weight:bold;letter-spacing:4px">${otp}</p>
 <p>Se você não solicitou isso, ignore este email.</p>`,

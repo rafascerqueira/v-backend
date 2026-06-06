@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createTransport, type Transporter } from 'nodemailer'
+import { escapeHtml } from '@/shared/security/escape-html'
 
 export interface SendEmailOptions {
 	to: string
@@ -92,7 +93,7 @@ export class EmailService {
 							<h1>🔐 Redefinição de Senha</h1>
 						</div>
 						<div class="content">
-							<p>Olá, <strong>${name}</strong>!</p>
+							<p>Olá, <strong>${escapeHtml(name)}</strong>!</p>
 							<p>Recebemos uma solicitação para redefinir a senha da sua conta no Vendinhas.</p>
 							<p>Clique no botão abaixo para criar uma nova senha:</p>
 							<p style="text-align: center;">
@@ -140,7 +141,7 @@ export class EmailService {
 							<h1>✉️ Confirme seu Email</h1>
 						</div>
 						<div class="content">
-							<p>Olá, <strong>${name}</strong>!</p>
+							<p>Olá, <strong>${escapeHtml(name)}</strong>!</p>
 							<p>Bem-vindo ao Vendinhas! Para ativar sua conta, confirme seu endereço de email.</p>
 							<p style="text-align: center;">
 								<a href="${verifyUrl}" class="button">Confirmar Email</a>
@@ -189,7 +190,7 @@ export class EmailService {
 							<p>Sua conta foi criada com sucesso</p>
 						</div>
 						<div class="content">
-							<p>Olá, <strong>${name}</strong>!</p>
+							<p>Olá, <strong>${escapeHtml(name)}</strong>!</p>
 							<p>Estamos muito felizes em ter você conosco! O Vendinhas é a ferramenta ideal para gerenciar suas vendas.</p>
 							
 							<h3>O que você pode fazer:</h3>
