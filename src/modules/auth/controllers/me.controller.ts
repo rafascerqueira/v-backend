@@ -1,9 +1,8 @@
-import { Controller, Get, NotFoundException, Req, Res } from '@nestjs/common'
+import { Controller, Get, NotFoundException, Res } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import type { FastifyReply, FastifyRequest } from 'fastify'
+import type { FastifyReply } from 'fastify'
 import { AccountService } from '@/modules/users/services/account.service'
-import { AUTH_COOKIES } from '../constants/cookies'
 import { CurrentUser } from '../decorators/current-user.decorator'
 import type { TokenPayload } from '../dto/auth-response.dto'
 import { resolveAvatarUrl } from '../utils/avatar-url'
@@ -20,22 +19,18 @@ export class MeController {
 
 	@Get('me')
 	@ApiOperation({ summary: 'Get current user data' })
-	async me(
-		@CurrentUser() user: TokenPayload,
-		@Req() request: FastifyRequest,
-		@Res({ passthrough: true }) reply: FastifyReply,
-	) {
+	async me(@CurrentUser() user: TokenPayload, @Res({ passthrough: true }) reply: FastifyReply) {
 		const account = await this.accountService.findById(user.sub)
 
 		if (!account) {
 			throw new NotFoundException('User not found')
 		}
 
-		// Lazily seed the CSRF cookie for sessions that predate it (the SPA calls
-		// /auth/me on boot), so the first mutation already has a token to submit.
-		if (!request.cookies?.[AUTH_COOKIES.CSRF_TOKEN]) {
-			setCsrfCookie(reply, 7 * 24 * 60 * 60)
-		}
+		// Always (re)issue the CSRF cookie on boot. /auth/me is the SPA's startup
+		// sync point, so rotating here guarantees the cookie is never stale — even
+		// after a silent token refresh expired the previous one — and the first
+		// mutation always has a fresh, JS-readable token to submit.
+		setCsrfCookie(reply, 7 * 24 * 60 * 60)
 
 		const appUrl = this.configService.get<string>('appUrl', 'http://localhost:3001')
 

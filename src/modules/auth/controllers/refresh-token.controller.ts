@@ -81,8 +81,11 @@ export class RefreshTokenController {
 				maxAge: 7 * 24 * 60 * 60,
 			})
 
-			// Rotate the CSRF token together with the session.
-			setCsrfCookie(response, tokens.expiresIn)
+			// Rotate the CSRF token together with the session. Its lifetime must match
+			// the refresh token (7d), not the short-lived access token — otherwise the
+			// CSRF cookie expires while the session is still silently renewable, and the
+			// next mutation submits an empty header → 403.
+			setCsrfCookie(response, 7 * 24 * 60 * 60)
 
 			return tokens
 		} catch {
