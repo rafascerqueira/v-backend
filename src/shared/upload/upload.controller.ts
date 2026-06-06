@@ -43,25 +43,9 @@ export class UploadController {
 		)
 	}
 
-	@Post('profile')
-	@ApiOperation({ summary: 'Upload profile image' })
-	@ApiConsumes('multipart/form-data')
-	@ApiBody({
-		schema: {
-			type: 'object',
-			properties: {
-				file: { type: 'string', format: 'binary' },
-			},
-		},
-	})
-	@ApiResponse({ status: 201, description: 'Profile image uploaded successfully' })
-	@ApiResponse({ status: 400, description: 'Invalid file' })
-	async uploadProfileImage(@Req() req: any) {
-		const file = await this.parseMultipartFile(req)
-		const userId = req.user.sub
-
-		return this.uploadService.uploadProfileImage(file.buffer, file.filename, file.mimetype, userId)
-	}
+	// NOTE: profile pictures (avatars) are PRIVATE and handled by the auth module
+	// (POST/GET/DELETE /auth/profile/avatar) — they are never uploaded here, which
+	// only serves the public product-image flow.
 
 	@Delete(':encodedPath')
 	@ApiOperation({ summary: 'Delete uploaded file (path must be base64 encoded)' })

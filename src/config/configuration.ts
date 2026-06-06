@@ -51,6 +51,26 @@ export default () => ({
 		dir: process.env.UPLOAD_DIR,
 	},
 
+	storage: {
+		// 'local' writes to UPLOAD_DIR on disk (dev/tests). 's3' persists to an
+		// S3-compatible object store (AWS S3, MinIO, R2, …) so uploads survive
+		// container/process recreation in production.
+		driver: process.env.STORAGE_DRIVER || 'local',
+		s3: {
+			bucket: process.env.STORAGE_S3_BUCKET,
+			region: process.env.STORAGE_S3_REGION || 'us-east-1',
+			// Set for non-AWS providers (MinIO/R2). Leave empty for AWS S3.
+			endpoint: process.env.STORAGE_S3_ENDPOINT || undefined,
+			accessKeyId: process.env.STORAGE_S3_ACCESS_KEY_ID,
+			secretAccessKey: process.env.STORAGE_S3_SECRET_ACCESS_KEY,
+			// MinIO and most self-hosted gateways require path-style addressing.
+			forcePathStyle: process.env.STORAGE_S3_FORCE_PATH_STYLE === 'true',
+			// Public base URL objects are served from (CDN or public bucket endpoint).
+			// If empty, it is derived from region/endpoint + bucket.
+			publicUrl: process.env.STORAGE_S3_PUBLIC_URL,
+		},
+	},
+
 	frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
 	appUrl: process.env.APP_URL || 'http://localhost:3001',
 

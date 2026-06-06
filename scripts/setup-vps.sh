@@ -112,6 +112,10 @@ else
   JWT_SECRET=$(openssl rand -hex 32)
   JWT_REFRESH_SECRET=$(openssl rand -hex 32)
   POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')
+  MINIO_ROOT_USER=vendinhas_minio
+  MINIO_ROOT_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')
+  MINIO_APP_ACCESS_KEY=vendinhas_app
+  MINIO_APP_SECRET_KEY=$(openssl rand -base64 24 | tr -d '/+=')
 
   cat > .env << EOF
 # ===========================================
@@ -167,10 +171,29 @@ SMTP_PASS=
 SMTP_FROM=noreply@vendinhas.app
 
 # ===========================================
-# UPLOAD DE ARQUIVOS
+# UPLOAD DE ARQUIVOS / OBJECT STORAGE (MinIO)
 # ===========================================
-UPLOAD_DIR=/var/www/vendinhas/uploads
 UPLOAD_MAX_SIZE=5242880
+
+# MinIO (servidor de objetos rodando via docker-compose)
+# ROOT: usado apenas para administração/bootstrap (minio-init). NUNCA pela aplicação.
+MINIO_ROOT_USER=${MINIO_ROOT_USER}
+MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+# APP: conta de serviço com permissão restrita ao bucket (least privilege).
+MINIO_APP_ACCESS_KEY=${MINIO_APP_ACCESS_KEY}
+MINIO_APP_SECRET_KEY=${MINIO_APP_SECRET_KEY}
+
+# Driver S3: imagens persistem no MinIO (independe do processo/filesystem da API).
+# A aplicação autentica com a conta de serviço restrita — não com o root.
+STORAGE_DRIVER=s3
+STORAGE_S3_BUCKET=vendinhas-uploads
+STORAGE_S3_ACCESS_KEY_ID=${MINIO_APP_ACCESS_KEY}
+STORAGE_S3_SECRET_ACCESS_KEY=${MINIO_APP_SECRET_KEY}
+STORAGE_S3_ENDPOINT=http://localhost:9000
+STORAGE_S3_FORCE_PATH_STYLE=true
+# Apenas imagens de produtos (products/) são públicas via nginx. Avatares
+# (profiles/) são privados e servidos por /auth/profile/avatar.
+STORAGE_S3_PUBLIC_URL=https://api.vendinhas.app/uploads
 
 # ===========================================
 # STRIPE (Pagamentos) - Opcional

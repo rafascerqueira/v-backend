@@ -42,6 +42,86 @@ services:
     networks:
       - vendinhas-network
 
+  # S3-compatible object storage for uploaded images (avatars, product photos).
+  # The backend uses STORAGE_DRIVER=s3 against this service so uploads persist
+  # independently of the API process/filesystem.
+  minio:
+    # Pinned for reproducibility — bump deliberately (never use :latest in prod).
+    image: minio/minio:${MINIO_VERSION:-RELEASE.2024-10-13T13-34-11Z}
+    container_name: vendinhas-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    # Bound to loopback only: the API (host/PM2) and nginx reach MinIO via
+    # 127.0.0.1; it is never exposed to the internet. Public reads go through
+    # nginx (/uploads/). Reach the console in prod via an SSH tunnel to 9001.
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000" # S3 API
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001" # Web console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - vendinhas-network
+
+  # One-shot bucket/policy bootstrap. Runs to completion on every `up`; idempotent.
+  #   - Creates the bucket.
+  #   - Makes ONLY the products/ prefix publicly readable (storefront images).
+  #     profiles/ (avatars) stays private — served via the authenticated API proxy.
+  #   - Creates a least-privilege service account scoped to this bucket for the
+  #     app, so the application never authenticates with the MinIO root user.
+  minio-init:
+    image: minio/mc:${MC_VERSION:-RELEASE.2024-10-08T09-37-26Z}
+    container_name: vendinhas-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      MINIO_BUCKET: ${STORAGE_S3_BUCKET:-vendinhas-uploads}
+      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:-vendinhas_app}
+      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY:?MINIO_APP_SECRET_KEY is required}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
+
+        # Public read for product images only; avatars (profiles/) stay private.
+        mc anonymous set download "local/$${MINIO_BUCKET}/products"
+
+        # Least-privilege policy for the application service account.
+        cat > /tmp/app-policy.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            { "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+              "Resource": ["arn:aws:s3:::$${MINIO_BUCKET}/*"] },
+            { "Effect": "Allow",
+              "Action": ["s3:ListBucket"],
+              "Resource": ["arn:aws:s3:::$${MINIO_BUCKET}"] }
+          ]
+        }
+        EOF
+        mc admin policy create local vendinhas-app-rw /tmp/app-policy.json || true
+        mc admin user add local "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}" || true
+        mc admin policy attach local vendinhas-app-rw --user "$${MINIO_APP_ACCESS_KEY}" || true
+
+        echo "MinIO ready: bucket=$${MINIO_BUCKET}, products/ public, app user scoped"
+    networks:
+      - vendinhas-network
+
 networks:
   vendinhas-network:
     driver: bridge
@@ -50,4 +130,6 @@ volumes:
   pgdata:
     driver: local
   redisdata:
+    driver: local
+  miniodata:
     driver: local

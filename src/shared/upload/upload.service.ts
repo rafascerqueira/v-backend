@@ -1,7 +1,5 @@
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { BadRequestException, Injectable, Logger } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
+import { STORAGE_PROVIDER, type StorageProvider } from '@infrastructure/storage/storage.types'
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
 import sharp from 'sharp'
 
 export interface UploadOptions {
@@ -40,25 +38,8 @@ const DEFAULT_OPTIONS: UploadOptions = {
 @Injectable()
 export class UploadService {
 	private readonly logger = new Logger(UploadService.name)
-	private readonly uploadDir: string
-	private readonly baseUrl: string
 
-	constructor(readonly configService: ConfigService) {
-		this.uploadDir = configService.get<string>('upload.dir') || join(process.cwd(), 'uploads')
-		this.baseUrl = configService.get<string>('appUrl', 'http://localhost:3001')
-		this.ensureUploadDir()
-	}
-
-	private ensureUploadDir() {
-		const dirs = ['', 'products', 'profiles', 'temp']
-		for (const dir of dirs) {
-			const path = join(this.uploadDir, dir)
-			if (!existsSync(path)) {
-				mkdirSync(path, { recursive: true })
-				this.logger.log(`📁 Created upload directory: ${path}`)
-			}
-		}
-	}
+	constructor(@Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider) {}
 
 	// Real image formats we accept and the safe extension we store them under.
 	// The extension is derived from the format sharp actually decodes — never from the
@@ -67,6 +48,13 @@ export class UploadService {
 		jpeg: 'jpg',
 		png: 'png',
 		webp: 'webp',
+	}
+
+	// Content type derived from the safe extension above — never the client MIME type.
+	private static readonly EXT_TO_MIME: Record<string, string> = {
+		jpg: 'image/jpeg',
+		png: 'image/png',
+		webp: 'image/webp',
 	}
 
 	private generateFilename(ext: string): string {
@@ -163,25 +151,20 @@ export class UploadService {
 		})
 
 		const filename = this.generateFilename(ext)
-		const subDir = join('products', sellerId)
-		const dirPath = join(this.uploadDir, subDir)
+		const key = `products/${sellerId}/${filename}`
+		const contentType = UploadService.EXT_TO_MIME[ext]
 
-		if (!existsSync(dirPath)) {
-			mkdirSync(dirPath, { recursive: true })
-		}
+		const url = await this.storage.save(key, processedBuffer, contentType)
 
-		const filePath = join(dirPath, filename)
-		writeFileSync(filePath, processedBuffer)
-
-		this.logger.log(`📷 Product image uploaded: ${filename}`)
+		this.logger.log(`📷 Product image uploaded: ${key}`)
 
 		return {
 			filename,
 			originalName,
-			path: join(subDir, filename),
-			url: `${this.baseUrl}/uploads/${subDir}/${filename}`,
+			path: key,
+			url,
 			size: processedBuffer.length,
-			mimeType,
+			mimeType: contentType,
 			width: metadata.width,
 			height: metadata.height,
 		}
@@ -205,61 +188,53 @@ export class UploadService {
 			resize: { width: 400, height: 400, fit: 'cover' },
 		})
 
+		// Stable key per user; the storage backend overwrites the previous image.
 		const filename = `${userId}-profile.${ext}`
-		const subDir = 'profiles'
-		const dirPath = join(this.uploadDir, subDir)
+		const key = `profiles/${filename}`
+		const contentType = UploadService.EXT_TO_MIME[ext]
 
-		if (!existsSync(dirPath)) {
-			mkdirSync(dirPath, { recursive: true })
-		}
+		const url = await this.storage.save(key, processedBuffer, contentType)
 
-		const filePath = join(dirPath, filename)
-
-		// Remove old profile image if exists
-		if (existsSync(filePath)) {
-			unlinkSync(filePath)
-		}
-
-		writeFileSync(filePath, processedBuffer)
-
-		this.logger.log(`👤 Profile image uploaded: ${filename}`)
+		this.logger.log(`👤 Profile image uploaded: ${key}`)
 
 		return {
 			filename,
 			originalName,
-			path: join(subDir, filename),
-			url: `${this.baseUrl}/uploads/${subDir}/${filename}`,
+			path: key,
+			url,
 			size: processedBuffer.length,
-			mimeType,
+			mimeType: contentType,
 			width: metadata.width,
 			height: metadata.height,
 		}
 	}
 
 	async deleteFile(path: string): Promise<boolean> {
-		try {
-			const fullPath = join(this.uploadDir, path)
-			const resolved = resolve(fullPath)
-			const resolvedUploadDir = resolve(this.uploadDir)
-
-			if (!resolved.startsWith(`${resolvedUploadDir}/`)) {
-				this.logger.warn(`Path traversal attempt blocked: ${path}`)
-				return false
-			}
-
-			if (existsSync(fullPath)) {
-				unlinkSync(fullPath)
-				this.logger.log(`File deleted: ${path}`)
-				return true
-			}
-			return false
-		} catch (error) {
-			this.logger.error(`Failed to delete file: ${path}`, error)
-			return false
-		}
+		const key = this.safeKey(path)
+		if (!key) return false
+		return this.storage.delete(key)
 	}
 
-	getUploadDir(): string {
-		return this.uploadDir
+	/** Fetch an object's bytes for streaming (e.g. the private avatar proxy). */
+	async getObject(path: string) {
+		const key = this.safeKey(path)
+		if (!key) return null
+		return this.storage.getObject(key)
+	}
+
+	/** Erase every product image belonging to a seller (account deletion). */
+	async deleteSellerProductImages(sellerId: string): Promise<number> {
+		return this.storage.deletePrefix(`products/${sellerId}/`)
+	}
+
+	// Reject absolute paths and parent-directory traversal before reaching any
+	// storage backend — keys must stay within their tenant-scoped namespace.
+	private safeKey(path: string): string | null {
+		const key = path.replace(/\\/g, '/')
+		if (key.startsWith('/') || key.split('/').includes('..')) {
+			this.logger.warn(`Rejected unsafe storage key: ${path}`)
+			return null
+		}
+		return key
 	}
 }

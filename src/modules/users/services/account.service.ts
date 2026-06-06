@@ -13,6 +13,7 @@ import {
 	type CreateOAuthAccountData,
 	type UpdateAccountData,
 } from '@/shared/repositories/account.repository'
+import { UploadService } from '@/shared/upload/upload.service'
 
 type CreateAccountInput = {
 	name: string
@@ -28,6 +29,7 @@ export class AccountService {
 		@Inject(ACCOUNT_REPOSITORY)
 		private readonly accountRepository: AccountRepository,
 		private readonly passwordHasher: PasswordHasherService,
+		private readonly uploadService: UploadService,
 	) {}
 
 	async verifyPassword(
@@ -75,6 +77,24 @@ export class AccountService {
 
 	async updateProfile(id: string, data: UpdateAccountData) {
 		return this.accountRepository.update(id, data)
+	}
+
+	/** Persist the private storage key for a freshly uploaded avatar. */
+	async setAvatar(id: string, key: string) {
+		return this.accountRepository.update(id, { avatar: key })
+	}
+
+	async removeProfilePicture(id: string) {
+		const account = await this.accountRepository.findById(id)
+		if (!account) throw new NotFoundException('User not found')
+
+		// Uploaded avatars are private storage keys we own; external (OAuth) avatars
+		// are absolute URLs we never wrote — only delete the former.
+		if (account.avatar && !/^https?:\/\//.test(account.avatar)) {
+			await this.uploadService.deleteFile(account.avatar)
+		}
+
+		return this.accountRepository.update(id, { avatar: null })
 	}
 
 	async changePassword(id: string, currentPassword: string, newPassword: string): Promise<void> {
@@ -143,14 +163,29 @@ export class AccountService {
 		const account = await this.accountRepository.findById(id)
 		if (!account) return false
 
-		if (!account.password || !account.salt) return false
+		// Password-based accounts only. The argon2 salt is embedded in the encoded
+		// hash, so `salt` is an empty string by design — do NOT gate on it (doing so
+		// rejected every deletion). verify() ignores the salt argument.
+		if (!account.password) return false
 
 		const isPasswordValid = await this.passwordHasher.verify(
 			password,
 			account.password,
-			account.salt,
+			account.salt ?? '',
 		)
 		if (!isPasswordValid) return false
+
+		// Right to erasure: remove stored media before anonymizing the record.
+		// Storage cleanup must never block the legal erasure of the DB record, so
+		// failures are logged, not thrown.
+		try {
+			if (account.avatar && !/^https?:\/\//.test(account.avatar)) {
+				await this.uploadService.deleteFile(account.avatar)
+			}
+			await this.uploadService.deleteSellerProductImages(id)
+		} catch (error) {
+			this.logger.error(`Failed to erase stored media for account ${id}`, error)
+		}
 
 		await this.accountRepository.anonymize(id)
 		return true

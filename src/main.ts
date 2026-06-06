@@ -63,16 +63,20 @@ async function bootstrap() {
 		},
 	})
 
-	await app.register(fastifyStatic as any, {
-		root: configService.get<string>('upload.dir') || join(process.cwd(), 'uploads'),
-		prefix: '/uploads/',
-		decorateReply: false,
-		// Defense-in-depth: stop browsers from MIME-sniffing uploaded files into an
-		// executable type (e.g. treating a file as HTML/SVG).
-		setHeaders: (res: any) => {
-			res.setHeader('X-Content-Type-Options', 'nosniff')
-		},
-	})
+	// Only the local storage driver serves uploads from disk. With the S3 driver
+	// objects are served directly from the bucket/CDN, so no static route is needed.
+	if (configService.get<string>('storage.driver', 'local') === 'local') {
+		await app.register(fastifyStatic as any, {
+			root: configService.get<string>('upload.dir') || join(process.cwd(), 'uploads'),
+			prefix: '/uploads/',
+			decorateReply: false,
+			// Defense-in-depth: stop browsers from MIME-sniffing uploaded files into an
+			// executable type (e.g. treating a file as HTML/SVG).
+			setHeaders: (res: any) => {
+				res.setHeader('X-Content-Type-Options', 'nosniff')
+			},
+		})
+	}
 
 	app.useGlobalFilters(new GlobalExceptionFilter(), new ZodExceptionFilter())
 

@@ -9,11 +9,13 @@ import { Test, type TestingModule } from '@nestjs/testing'
 import { AccountService } from './account.service'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import { ACCOUNT_REPOSITORY } from '@/shared/repositories/account.repository'
+import { UploadService } from '@/shared/upload/upload.service'
 
 describe('AccountService', () => {
   let service: AccountService
   let accountRepository: any
   let passwordHasher: PasswordHasherService
+  let uploadService: { deleteFile: jest.Mock; deleteSellerProductImages: jest.Mock }
 
   let accountsStore: any[]
 
@@ -38,6 +40,7 @@ describe('AccountService', () => {
       }),
       update: jest.fn(),
       delete: jest.fn(),
+      anonymize: jest.fn(),
       existsByStoreSlug: jest.fn(async (slug: string) => {
         return accountsStore.some((a) => a.store_slug === slug)
       }),
@@ -50,17 +53,23 @@ describe('AccountService', () => {
 
   beforeEach(async () => {
     const repositoryMock = createAccountRepositoryMock()
+    const uploadServiceMock = {
+      deleteFile: jest.fn().mockResolvedValue(true),
+      deleteSellerProductImages: jest.fn().mockResolvedValue(0),
+    }
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AccountService,
         PasswordHasherService,
         { provide: ACCOUNT_REPOSITORY, useValue: repositoryMock },
+        { provide: UploadService, useValue: uploadServiceMock },
       ],
     }).compile()
 
     service = module.get<AccountService>(AccountService)
     accountRepository = module.get(ACCOUNT_REPOSITORY)
     passwordHasher = module.get<PasswordHasherService>(PasswordHasherService)
+    uploadService = module.get(UploadService)
   })
 
   it('should be defined', () => {
@@ -249,6 +258,107 @@ describe('AccountService', () => {
       ).rejects.toThrow(UnauthorizedException)
 
       expect(accountRepository.update).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('setAvatar', () => {
+    it('persists the storage key as the account avatar', async () => {
+      accountRepository.update.mockResolvedValueOnce({
+        id: 'user-1',
+        avatar: 'profiles/user-1-profile.webp',
+      })
+
+      await service.setAvatar('user-1', 'profiles/user-1-profile.webp')
+
+      expect(accountRepository.update).toHaveBeenCalledWith('user-1', {
+        avatar: 'profiles/user-1-profile.webp',
+      })
+    })
+  })
+
+  describe('removeProfilePicture', () => {
+    it('deletes the stored object (avatar is a private key) and clears the avatar', async () => {
+      accountsStore.push({
+        id: 'user-1',
+        name: 'Pic User',
+        email: 'pic@example.com',
+        avatar: 'profiles/user-1-profile.webp',
+      })
+      accountRepository.update.mockResolvedValueOnce({ id: 'user-1', avatar: null })
+
+      await service.removeProfilePicture('user-1')
+
+      expect(uploadService.deleteFile).toHaveBeenCalledWith('profiles/user-1-profile.webp')
+      expect(accountRepository.update).toHaveBeenCalledWith('user-1', { avatar: null })
+    })
+
+    it('clears the avatar without deleting when it is an external OAuth URL', async () => {
+      accountsStore.push({
+        id: 'user-2',
+        name: 'OAuth User',
+        email: 'oauth@example.com',
+        avatar: 'https://lh3.googleusercontent.com/a/some-google-avatar',
+      })
+      accountRepository.update.mockResolvedValueOnce({ id: 'user-2', avatar: null })
+
+      await service.removeProfilePicture('user-2')
+
+      expect(uploadService.deleteFile).not.toHaveBeenCalled()
+      expect(accountRepository.update).toHaveBeenCalledWith('user-2', { avatar: null })
+    })
+
+    it('clears the avatar when none is set (no-op delete)', async () => {
+      accountsStore.push({ id: 'user-4', name: 'No Pic', email: 'nopic@example.com', avatar: null })
+      accountRepository.update.mockResolvedValueOnce({ id: 'user-4', avatar: null })
+
+      await service.removeProfilePicture('user-4')
+
+      expect(uploadService.deleteFile).not.toHaveBeenCalled()
+      expect(accountRepository.update).toHaveBeenCalledWith('user-4', { avatar: null })
+    })
+
+    it('throws NotFoundException when the account does not exist', async () => {
+      await expect(service.removeProfilePicture('ghost')).rejects.toThrow(NotFoundException)
+    })
+  })
+
+  describe('anonymizeAccount (erasure)', () => {
+    it('deletes avatar + product images before anonymizing, on valid password', async () => {
+      const { hash, salt } = await passwordHasher.hash('correct-pass')
+      accountsStore.push({
+        id: 'seller-9',
+        name: 'Seller',
+        email: 'seller@example.com',
+        password: hash,
+        salt,
+        avatar: 'profiles/seller-9-profile.webp',
+      })
+
+      const ok = await service.anonymizeAccount('seller-9', 'correct-pass')
+
+      expect(ok).toBe(true)
+      expect(uploadService.deleteFile).toHaveBeenCalledWith('profiles/seller-9-profile.webp')
+      expect(uploadService.deleteSellerProductImages).toHaveBeenCalledWith('seller-9')
+      expect(accountRepository.anonymize).toHaveBeenCalledWith('seller-9')
+    })
+
+    it('does not touch storage or anonymize when the password is wrong', async () => {
+      const { hash, salt } = await passwordHasher.hash('correct-pass')
+      accountsStore.push({
+        id: 'seller-10',
+        name: 'Seller',
+        email: 'seller10@example.com',
+        password: hash,
+        salt,
+        avatar: 'profiles/seller-10-profile.webp',
+      })
+
+      const ok = await service.anonymizeAccount('seller-10', 'wrong-pass')
+
+      expect(ok).toBe(false)
+      expect(uploadService.deleteFile).not.toHaveBeenCalled()
+      expect(uploadService.deleteSellerProductImages).not.toHaveBeenCalled()
+      expect(accountRepository.anonymize).not.toHaveBeenCalled()
     })
   })
 })

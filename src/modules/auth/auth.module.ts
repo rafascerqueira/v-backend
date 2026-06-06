@@ -4,6 +4,7 @@ import { UsersModule } from '@/modules/users/users.module'
 import { EMAIL_VERIFICATION_REPOSITORY } from '@/shared/repositories/email-verification.repository'
 import { PASSWORD_RESET_REPOSITORY } from '@/shared/repositories/password-reset.repository'
 import { TWO_FACTOR_REPOSITORY } from '@/shared/repositories/two-factor.repository'
+import { AvatarController } from './controllers/avatar.controller'
 import { ChangePasswordController } from './controllers/change-password.controller'
 import { DataDeletionController } from './controllers/data-deletion.controller'
 import { EmailVerificationController } from './controllers/email-verification.controller'
@@ -40,6 +41,7 @@ import { TwoFactorService } from './services/two-factor.service'
 		MeController,
 		OAuthController,
 		ProfileController,
+		AvatarController,
 		ChangePasswordController,
 		ForgotPasswordController,
 		ResetPasswordController,
