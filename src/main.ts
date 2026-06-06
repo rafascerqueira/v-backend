@@ -1,9 +1,7 @@
-import { loadEnvFile } from 'node:process'
-
-try {
-	loadEnvFile()
-} catch {}
-
+// MUST be first: loads .env as a side effect before any import below evaluates
+// process.env at module-load time (e.g. ConfigModule's configuration()). See
+// load-env.ts for the full rationale — this ordering is load-bearing.
+import './load-env'
 import { join } from 'node:path'
 import cookie from '@fastify/cookie'
 import multipart from '@fastify/multipart'
