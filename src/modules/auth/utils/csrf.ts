@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { FastifyReply } from 'fastify'
-import { AUTH_COOKIES, CSRF_COOKIE_OPTIONS } from '../constants/cookies'
+import { AUTH_COOKIES, csrfCookieOptions } from '../constants/cookies'
 
 /** Cryptographically-random, unguessable CSRF token. */
 export function generateCsrfToken(): string {
@@ -13,7 +13,7 @@ export function generateCsrfToken(): string {
  */
 export function setCsrfCookie(reply: FastifyReply, maxAge: number): string {
 	const token = generateCsrfToken()
-	reply.setCookie(AUTH_COOKIES.CSRF_TOKEN, token, { ...CSRF_COOKIE_OPTIONS, maxAge })
+	reply.setCookie(AUTH_COOKIES.CSRF_TOKEN, token, { ...csrfCookieOptions(), maxAge })
 	return token
 }
 

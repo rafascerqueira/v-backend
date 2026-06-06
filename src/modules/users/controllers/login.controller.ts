@@ -10,7 +10,7 @@ import {
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import type { FastifyReply } from 'fastify'
-import { AUTH_COOKIES, COOKIE_OPTIONS } from '@/modules/auth/constants/cookies'
+import { AUTH_COOKIES, cookieOptions } from '@/modules/auth/constants/cookies'
 import { Public } from '@/modules/auth/decorators/public.decorator'
 import { TokenService } from '@/modules/auth/services/token.service'
 import { TwoFactorService } from '@/modules/auth/services/two-factor.service'
@@ -97,13 +97,14 @@ export class LoginController {
 			plan_type: account.plan_type,
 		})
 
+		const opts = cookieOptions()
 		response.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {
-			...COOKIE_OPTIONS,
+			...opts,
 			maxAge: tokens.expiresIn,
 		})
 
 		response.setCookie(AUTH_COOKIES.REFRESH_TOKEN, tokens.refreshToken, {
-			...COOKIE_OPTIONS,
+			...opts,
 			maxAge: 7 * 24 * 60 * 60,
 		})
 

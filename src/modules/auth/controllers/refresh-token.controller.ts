@@ -13,7 +13,7 @@ import { Throttle } from '@nestjs/throttler'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
-import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
+import { AUTH_COOKIES, cookieOptions } from '../constants/cookies'
 import { Public } from '../decorators/public.decorator'
 import { SkipCsrf } from '../decorators/skip-csrf.decorator'
 import { TokenService } from '../services/token.service'
@@ -71,13 +71,14 @@ export class RefreshTokenController {
 		try {
 			const tokens = await this.tokenService.refreshTokens(refreshToken, this.tokenBlacklistService)
 
+			const opts = cookieOptions()
 			response.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {
-				...COOKIE_OPTIONS,
+				...opts,
 				maxAge: tokens.expiresIn,
 			})
 
 			response.setCookie(AUTH_COOKIES.REFRESH_TOKEN, tokens.refreshToken, {
-				...COOKIE_OPTIONS,
+				...opts,
 				maxAge: 7 * 24 * 60 * 60,
 			})
 

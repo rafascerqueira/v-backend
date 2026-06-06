@@ -1,7 +1,7 @@
 import { Controller, Headers, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { AUTH_COOKIES, COOKIE_OPTIONS } from '../constants/cookies'
+import { AUTH_COOKIES, cookieOptions } from '../constants/cookies'
 import { SkipCsrf } from '../decorators/skip-csrf.decorator'
 import { TokenService } from '../services/token.service'
 import { TokenBlacklistService } from '../services/token-blacklist.service'
@@ -85,14 +85,9 @@ export class LogoutController {
 	}
 
 	private clearAuthCookies(response: FastifyReply) {
-		response.clearCookie(AUTH_COOKIES.ACCESS_TOKEN, {
-			...COOKIE_OPTIONS,
-		})
-		response.clearCookie(AUTH_COOKIES.REFRESH_TOKEN, {
-			...COOKIE_OPTIONS,
-		})
-		response.clearCookie(AUTH_COOKIES.CSRF_TOKEN, {
-			...COOKIE_OPTIONS,
-		})
+		const opts = cookieOptions()
+		response.clearCookie(AUTH_COOKIES.ACCESS_TOKEN, { ...opts })
+		response.clearCookie(AUTH_COOKIES.REFRESH_TOKEN, { ...opts })
+		response.clearCookie(AUTH_COOKIES.CSRF_TOKEN, { ...opts })
 	}
 }

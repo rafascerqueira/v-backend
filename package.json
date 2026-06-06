@@ -25,7 +25,9 @@
     "test:e2e:dev": "jest --config ./test/jest-e2e.json --watch --watchman=false",
     "test:db:up": "docker compose -f docker-compose.test.yml up -d",
     "test:db:down": "docker compose -f docker-compose.test.yml down",
-    "db:seed": "pnpm prisma db seed"
+    "db:seed": "pnpm prisma db seed",
+    "avatars:check": "ts-node --transpile-only -r tsconfig-paths/register scripts/remediate-avatars.ts",
+    "avatars:fix": "ts-node --transpile-only -r tsconfig-paths/register scripts/remediate-avatars.ts --fix"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1063.0",

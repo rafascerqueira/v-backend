@@ -4,8 +4,8 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import {
 	AUTH_COOKIES,
-	COOKIE_OPTIONS,
-	OAUTH_STATE_COOKIE_OPTIONS,
+	cookieOptions,
+	oauthStateCookieOptions,
 } from '@/modules/auth/constants/cookies'
 import { TokenService } from '@/modules/auth/services/token.service'
 import { AccountService } from '@/modules/users/services/account.service'
@@ -29,25 +29,27 @@ export class OAuthController {
 		refreshToken: string,
 		accessMaxAge: number,
 	) {
+		const opts = cookieOptions()
 		reply.setCookie(AUTH_COOKIES.ACCESS_TOKEN, accessToken, {
-			...COOKIE_OPTIONS,
+			...opts,
 			maxAge: accessMaxAge,
 		})
 		reply.setCookie(AUTH_COOKIES.REFRESH_TOKEN, refreshToken, {
-			...COOKIE_OPTIONS,
+			...opts,
 			maxAge: 7 * 24 * 60 * 60,
 		})
 		setCsrfCookie(reply, accessMaxAge)
 	}
 
 	private writeStateCookie(reply: FastifyReply, state: string) {
-		reply.setCookie(AUTH_COOKIES.OAUTH_STATE, state, OAUTH_STATE_COOKIE_OPTIONS)
+		reply.setCookie(AUTH_COOKIES.OAUTH_STATE, state, oauthStateCookieOptions())
 	}
 
 	private clearStateCookie(reply: FastifyReply) {
+		const opts = oauthStateCookieOptions()
 		reply.clearCookie(AUTH_COOKIES.OAUTH_STATE, {
-			path: OAUTH_STATE_COOKIE_OPTIONS.path,
-			...(OAUTH_STATE_COOKIE_OPTIONS.domain ? { domain: OAUTH_STATE_COOKIE_OPTIONS.domain } : {}),
+			path: opts.path,
+			...(opts.domain ? { domain: opts.domain } : {}),
 		})
 	}
 

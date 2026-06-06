@@ -85,6 +85,7 @@ src/modules/{feature}/
 - Use `@CurrentUser()` to extract user from request. Never access `request.user` directly.
 - No Passport.js — guards are custom `CanActivate` implementations.
 - Always HttpOnly + Secure cookies.
+- **Cookie options are read lazily at request time, never frozen at module load.** `auth/constants/cookies.ts` exposes `cookieOptions()` / `csrfCookieOptions()` / `oauthStateCookieOptions()` as *functions* that read `process.env` (e.g. `COOKIE_DOMAIN`, `NODE_ENV`) on every call. Never reintroduce a module-scope `const x = configuration()` or `const OPTS = { domain: process.env... }` here. Why: `main.ts` calls `loadEnvFile()` at the top, but ES `import` statements are hoisted above it, so any value computed at module-load time reads env **before** the `.env` is loaded. In production this made `COOKIE_DOMAIN` resolve to `undefined`, the `csrf_token` cookie shipped without a domain (pinned to the API subdomain), the SPA on the apex domain couldn't read it, and every cookie-authenticated mutation 403'd.
 
 ---
 
