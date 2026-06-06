@@ -3,7 +3,6 @@ import {
 	type ExecutionContext,
 	ForbiddenException,
 	Injectable,
-	Logger,
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { AUTH_COOKIES, CSRF_HEADER } from '../constants/cookies'
@@ -30,8 +29,6 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
  */
 @Injectable()
 export class CsrfGuard implements CanActivate {
-	private readonly logger = new Logger(CsrfGuard.name)
-
 	constructor(private readonly reflector: Reflector) {}
 
 	canActivate(context: ExecutionContext): boolean {
@@ -67,16 +64,6 @@ export class CsrfGuard implements CanActivate {
 		const headerToken = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader
 
 		if (!csrfTokensMatch(cookieToken, headerToken)) {
-			// TEMP DIAGNOSTIC (avatar 403 investigation) — logs presence/length only,
-			// never the token values. Remove once the prod root cause is confirmed.
-			this.logger.warn(
-				`CSRF mismatch ${method} ${request.url} | ` +
-					`cookie=${cookieToken ? `present(${cookieToken.length})` : 'MISSING'} ` +
-					`header=${headerToken ? `present(${String(headerToken).length})` : 'MISSING'} ` +
-					`cookieNames=[${Object.keys(request.cookies ?? {}).join(',')}] ` +
-					`origin=${request.headers?.origin ?? '-'} ` +
-					`contentType=${request.headers?.['content-type'] ?? '-'}`,
-			)
 			throw new ForbiddenException('Invalid or missing CSRF token')
 		}
 		return true
