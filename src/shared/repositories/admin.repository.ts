@@ -40,6 +40,7 @@ export interface AccountListItem {
 	email: string
 	role: string
 	plan_type: string
+	is_active: boolean
 	two_factor_enabled: boolean
 	last_login_at: Date | null
 	createdAt: Date

@@ -1,9 +1,15 @@
-import { Controller, Get, Query } from '@nestjs/common'
+import { Controller, Get, Query, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
+import { Roles } from '@/modules/auth/decorators/roles.decorator'
+import { RolesGuard } from '@/modules/auth/guards/roles.guard'
 import { AuditService } from './audit.service'
 
+// Audit logs expose cross-tenant data (request bodies, user ids, IPs of every
+// account) — they must never be readable by regular sellers.
 @ApiTags('audit')
 @Controller('audit')
+@UseGuards(RolesGuard)
+@Roles('admin')
 export class AuditController {
 	constructor(private readonly auditService: AuditService) {}
 

@@ -58,30 +58,53 @@ export class AuditInterceptor implements NestInterceptor {
 		)
 	}
 
+	private isIdSegment(segment: string): boolean {
+		return (
+			/^\d+$/.test(segment) || // numeric id
+			/^c[a-z0-9]{24}$/i.test(segment) || // cuid
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment) // uuid
+		)
+	}
+
 	private extractEntity(path: string): string {
+		// Drop id-like segments so the entity reflects the resource, not a record:
+		// /products/5/prices/2 → "products/prices"
+		// /admin/accounts/cmq.../suspend → "admin/accounts/suspend"
+		// (The previous even-index heuristic embedded record ids into the entity,
+		// polluting the admin logs entity filter with one value per record.)
 		const segments = path.split('/').filter(Boolean)
-		// e.g. /products/5/prices/2 → "products/prices"
-		return segments.filter((_, i) => i % 2 === 0).join('/') || 'unknown'
+		return segments.filter((segment) => !this.isIdSegment(segment)).join('/') || 'unknown'
 	}
 
 	private extractEntityId(path: string): string | undefined {
 		const segments = path.split('/').filter(Boolean)
-		// Return the last numeric/cuid segment
+		// Return the last id-like segment
 		for (let i = segments.length - 1; i >= 0; i--) {
-			if (/^\d+$/.test(segments[i]) || /^c[a-z0-9]{24}$/i.test(segments[i])) {
+			if (this.isIdSegment(segments[i])) {
 				return segments[i]
 			}
 		}
 		return undefined
 	}
 
-	private sanitizeBody(body: unknown): Record<string, unknown> | undefined {
-		if (!body || typeof body !== 'object') return undefined
-		const sanitized = { ...(body as Record<string, unknown>) }
-		const sensitiveKeys = ['password', 'salt', 'token', 'secret', 'twoFactorToken', 'code']
-		for (const key of sensitiveKeys) {
-			if (key in sanitized) {
+	// Match by substring (case-insensitive) so variants like currentPassword,
+	// newPassword, refreshToken, twoFactorToken etc. are all caught — the old
+	// exact-match list let plaintext passwords through into audit_logs.
+	private static readonly SENSITIVE_KEY_PATTERN =
+		/password|senha|secret|token|salt|csrf|authorization|otp|^code$/i
+
+	private sanitizeBody(body: unknown, depth = 0): Record<string, unknown> | undefined {
+		if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined
+		if (depth > 3) return undefined
+
+		const sanitized: Record<string, unknown> = {}
+		for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+			if (AuditInterceptor.SENSITIVE_KEY_PATTERN.test(key)) {
 				sanitized[key] = '[REDACTED]'
+			} else if (value && typeof value === 'object' && !Array.isArray(value)) {
+				sanitized[key] = this.sanitizeBody(value, depth + 1)
+			} else {
+				sanitized[key] = value
 			}
 		}
 		return sanitized
