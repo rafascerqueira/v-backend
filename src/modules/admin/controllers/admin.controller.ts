@@ -161,9 +161,13 @@ export class AdminController {
 		@Query('entity') entity?: string,
 		@Query('action') action?: string,
 	) {
+		// Clamp pagination: NaN or page<1 would produce a negative Prisma skip (500),
+		// and an unbounded limit would let one request dump the whole table.
+		const parsedPage = parseInt(page ?? '1', 10)
+		const parsedLimit = parseInt(limit ?? '50', 10)
 		return this.service.getAuditLogs(
-			page ? parseInt(page, 10) : 1,
-			limit ? parseInt(limit, 10) : 50,
+			Number.isNaN(parsedPage) ? 1 : Math.max(parsedPage, 1),
+			Number.isNaN(parsedLimit) ? 50 : Math.min(Math.max(parsedLimit, 1), 100),
 			{ entity, action },
 		)
 	}

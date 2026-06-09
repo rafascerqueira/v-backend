@@ -93,19 +93,40 @@ export class AuditInterceptor implements NestInterceptor {
 	private static readonly SENSITIVE_KEY_PATTERN =
 		/password|senha|secret|token|salt|csrf|authorization|otp|^code$/i
 
-	private sanitizeBody(body: unknown, depth = 0): Record<string, unknown> | undefined {
+	// Stored bodies are raw client input: without a cap a single oversized
+	// payload field bloats audit_logs and, accumulated over a page of 50 rows,
+	// once pushed the /admin/logs response past V8's max string length (500).
+	private static readonly MAX_BODY_BYTES = 8 * 1024
+
+	private sanitizeBody(body: unknown): Record<string, unknown> | undefined {
 		if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined
-		if (depth > 3) return undefined
+
+		const sanitized = this.sanitizeValue(body, 0) as Record<string, unknown>
+
+		try {
+			if (JSON.stringify(sanitized).length > AuditInterceptor.MAX_BODY_BYTES) {
+				return { _truncated: 'body exceeded audit size limit' }
+			}
+		} catch {
+			return { _truncated: 'body could not be serialized' }
+		}
+
+		return sanitized
+	}
+
+	private sanitizeValue(value: unknown, depth: number): unknown {
+		if (!value || typeof value !== 'object') return value
+		if (depth > 3) return '[TRUNCATED: too deep]'
+
+		if (Array.isArray(value)) {
+			return value.slice(0, 50).map((item) => this.sanitizeValue(item, depth + 1))
+		}
 
 		const sanitized: Record<string, unknown> = {}
-		for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-			if (AuditInterceptor.SENSITIVE_KEY_PATTERN.test(key)) {
-				sanitized[key] = '[REDACTED]'
-			} else if (value && typeof value === 'object' && !Array.isArray(value)) {
-				sanitized[key] = this.sanitizeBody(value, depth + 1)
-			} else {
-				sanitized[key] = value
-			}
+		for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+			sanitized[key] = AuditInterceptor.SENSITIVE_KEY_PATTERN.test(key)
+				? '[REDACTED]'
+				: this.sanitizeValue(entry, depth + 1)
 		}
 		return sanitized
 	}
