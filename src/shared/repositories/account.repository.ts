@@ -10,6 +10,7 @@ export interface Account {
 	facebook_id: string | null
 	role: AccountRole
 	plan_type: PlanType
+	is_active: boolean
 	two_factor_enabled: boolean
 	two_factor_secret: string | null
 	last_login_at: Date | null

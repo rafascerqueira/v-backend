@@ -97,6 +97,7 @@ export class PrismaAdminRepository implements AdminRepository {
 					email: true,
 					role: true,
 					plan_type: true,
+					is_active: true,
 					two_factor_enabled: true,
 					last_login_at: true,
 					createdAt: true,
@@ -151,6 +152,7 @@ export class PrismaAdminRepository implements AdminRepository {
 				email: true,
 				role: true,
 				plan_type: true,
+				is_active: true,
 				two_factor_enabled: true,
 				last_login_at: true,
 				createdAt: true,
@@ -341,6 +343,19 @@ export class PrismaAdminRepository implements AdminRepository {
 		const [logs, total] = await Promise.all([
 			this.prisma.audit_log.findMany({
 				where,
+				// List view only — never fetch old_value/new_value/metadata here. They
+				// hold raw request bodies of unbounded size; 50 of them in one response
+				// has exceeded V8's max string length in production (JSON.stringify →
+				// RangeError → 500 on every page load).
+				select: {
+					id: true,
+					action: true,
+					entity: true,
+					entity_id: true,
+					user_id: true,
+					ip_address: true,
+					created_at: true,
+				},
 				orderBy: { created_at: 'desc' },
 				skip,
 				take: limit,

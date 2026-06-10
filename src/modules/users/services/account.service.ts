@@ -112,6 +112,14 @@ export class AccountService {
 		return this.accountRepository.update(id, { last_login_at: new Date() })
 	}
 
+	// Accounts deactivated/suspended by an admin must not start new sessions
+	// (mirrors the password-login check in LoginController).
+	private assertAccountActive(account: { is_active?: boolean }) {
+		if (account.is_active === false) {
+			throw new UnauthorizedException('Conta desativada. Entre em contato com o suporte.')
+		}
+	}
+
 	async findOrCreateOAuthAccount(data: CreateOAuthAccountData) {
 		const providerField = data.googleId ? 'googleId' : 'facebookId'
 		const providerId = data.googleId ?? data.facebookId
@@ -122,11 +130,15 @@ export class AccountService {
 					? await this.accountRepository.findByGoogleId(providerId)
 					: await this.accountRepository.findByFacebookId(providerId)
 
-			if (byProvider) return byProvider
+			if (byProvider) {
+				this.assertAccountActive(byProvider)
+				return byProvider
+			}
 		}
 
 		const byEmail = await this.accountRepository.findByEmail(data.email)
 		if (byEmail) {
+			this.assertAccountActive(byEmail)
 			// Facebook does not guarantee the email is verified, so auto-linking it onto an
 			// existing password-based account would allow account takeover. Refuse and require
 			// the user to sign in with their password and link the provider explicitly.

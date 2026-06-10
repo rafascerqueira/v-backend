@@ -69,6 +69,12 @@ export class LoginController {
 			throw new UnauthorizedException('Invalid e-mail or password')
 		}
 
+		// Accounts deactivated/suspended by an admin must not start new sessions.
+		// (Checked after the password so the response doesn't reveal which emails exist.)
+		if (account.is_active === false) {
+			throw new UnauthorizedException('Conta desativada. Entre em contato com o suporte.')
+		}
+
 		// Check if 2FA is enabled
 		if (account.two_factor_enabled) {
 			const twoFactorToken = body.twoFactorToken

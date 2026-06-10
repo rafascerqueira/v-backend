@@ -16,6 +16,8 @@ import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from 
 import type { PlanType } from '@/generated/prisma/client'
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
 import { RolesGuard } from '@/modules/auth/guards/roles.guard'
+import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
+import { type UpdateAccountDto, updateAccountSchema } from '../dto/update-account.dto'
 import { AdminService } from '../services/admin.service'
 
 @ApiTags('admin')
@@ -84,14 +86,23 @@ export class AdminController {
 	@ApiParam({ name: 'id', type: String })
 	@ApiBody({
 		schema: {
-			example: { name: 'New Name', email: 'new@email.com', role: 'seller', plan_type: 'pro' },
+			example: {
+				name: 'New Name',
+				email: 'new@email.com',
+				role: 'seller',
+				plan_type: 'pro',
+				is_active: true,
+			},
 		},
 	})
 	@ApiResponse({ status: 200, description: 'Account updated' })
 	@ApiResponse({ status: 404, description: 'Account not found' })
-	async updateAccount(@Param('id') id: string, @Body() body: any, @Req() req: any) {
-		const { name, email, role, plan_type } = body
-		return this.service.updateAccount(id, { name, email, role, plan_type }, req.user.sub)
+	async updateAccount(
+		@Param('id') id: string,
+		@Body(new ZodValidationPipe(updateAccountSchema)) body: UpdateAccountDto,
+		@Req() req: any,
+	) {
+		return this.service.updateAccount(id, body, req.user.sub)
 	}
 
 	@Patch('accounts/:id/plan')
@@ -150,9 +161,13 @@ export class AdminController {
 		@Query('entity') entity?: string,
 		@Query('action') action?: string,
 	) {
+		// Clamp pagination: NaN or page<1 would produce a negative Prisma skip (500),
+		// and an unbounded limit would let one request dump the whole table.
+		const parsedPage = parseInt(page ?? '1', 10)
+		const parsedLimit = parseInt(limit ?? '50', 10)
 		return this.service.getAuditLogs(
-			page ? parseInt(page, 10) : 1,
-			limit ? parseInt(limit, 10) : 50,
+			Number.isNaN(parsedPage) ? 1 : Math.max(parsedPage, 1),
+			Number.isNaN(parsedLimit) ? 50 : Math.min(Math.max(parsedLimit, 1), 100),
 			{ entity, action },
 		)
 	}

@@ -75,6 +75,7 @@ model Account {
   facebook_id        String?     @unique @db.VarChar(255)
   role               AccountRole @default(seller)
   plan_type          PlanType    @default(free)
+  is_active          Boolean     @default(true)
   email_verified     Boolean     @default(false)
   email_verified_at  DateTime?   @db.Timestamptz()
   two_factor_enabled Boolean     @default(false)

@@ -40,6 +40,7 @@ export interface AccountListItem {
 	email: string
 	role: string
 	plan_type: string
+	is_active: boolean
 	two_factor_enabled: boolean
 	last_login_at: Date | null
 	createdAt: Date
@@ -76,15 +77,15 @@ export interface SubscriptionStatsResult {
 	expiringSubscriptions: unknown[]
 }
 
+// List-view projection: old_value/new_value/metadata are intentionally NOT
+// included — they contain raw request bodies of unbounded size.
 export interface AuditLogEntry {
 	id: number
 	action: string
 	entity: string
-	entity_id: string
-	user_id: string
-	old_value: unknown
-	new_value: unknown
-	metadata: unknown
+	entity_id: string | null
+	user_id: string | null
+	ip_address: string | null
 	created_at: Date
 }
 

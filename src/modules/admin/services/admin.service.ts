@@ -107,7 +107,13 @@ export class AdminService {
 
 	async updateAccount(
 		accountId: string,
-		data: { name?: string; email?: string; role?: string; plan_type?: string },
+		data: {
+			name?: string
+			email?: string
+			role?: string
+			plan_type?: string
+			is_active?: boolean
+		},
 		adminId: string,
 	) {
 		const account = await this.adminRepository.findAccountBasicInfo(accountId, {
@@ -116,9 +122,14 @@ export class AdminService {
 			email: true,
 			role: true,
 			plan_type: true,
+			is_active: true,
 		})
 
 		if (!account) throw new NotFoundException('Conta não encontrada')
+
+		if (account.role === 'admin' && data.is_active === false) {
+			throw new BadRequestException('Não é possível desativar um administrador')
+		}
 
 		const updated = await this.adminRepository.updateAccount(accountId, data, {
 			id: true,
@@ -126,6 +137,7 @@ export class AdminService {
 			email: true,
 			role: true,
 			plan_type: true,
+			is_active: true,
 		})
 
 		await this.adminRepository.createAuditLog({
@@ -192,11 +204,12 @@ export class AdminService {
 		// Cancel any active subscriptions
 		await this.adminRepository.cancelActiveSubscriptions(accountId)
 
-		// Downgrade to free (suspended state)
+		// Downgrade to free and deactivate — is_active=false blocks future logins.
+		// (Previously only the plan changed, so "suspended" accounts kept full access.)
 		const updated = await this.adminRepository.updateAccount(
 			accountId,
-			{ plan_type: 'free' },
-			{ id: true, name: true, email: true, plan_type: true },
+			{ plan_type: 'free', is_active: false },
+			{ id: true, name: true, email: true, plan_type: true, is_active: true },
 		)
 
 		await this.adminRepository.createAuditLog({
@@ -205,7 +218,7 @@ export class AdminService {
 			entity_id: accountId,
 			user_id: adminId,
 			old_value: { plan_type: account.plan_type },
-			new_value: { plan_type: 'free', suspended: true },
+			new_value: { plan_type: 'free', is_active: false, suspended: true },
 			metadata: { reason, suspended_by: 'admin' },
 		})
 
