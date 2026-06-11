@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
-import { RemoveProductController } from './remove-product.controller'
 import { ProductService } from '../services/product.service'
+import { RemoveProductController } from './remove-product.controller'
 
 describe('RemoveProductController', () => {
 	let controller: RemoveProductController
@@ -60,9 +60,7 @@ describe('RemoveProductController', () => {
 
 			mockProductService.remove.mockRejectedValue(error)
 
-			await expect(controller.handle(productId)).rejects.toThrow(
-				'Product not found',
-			)
+			await expect(controller.handle(productId)).rejects.toThrow('Product not found')
 			expect(productService.remove).toHaveBeenCalledWith(productId)
 		})
 
@@ -72,9 +70,7 @@ describe('RemoveProductController', () => {
 
 			mockProductService.remove.mockRejectedValue(error)
 
-			await expect(controller.handle(invalidId)).rejects.toThrow(
-				'Invalid ID format',
-			)
+			await expect(controller.handle(invalidId)).rejects.toThrow('Invalid ID format')
 			expect(productService.remove).toHaveBeenCalledWith(invalidId)
 		})
 	})

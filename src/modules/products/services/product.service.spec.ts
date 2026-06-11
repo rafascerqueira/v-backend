@@ -1,24 +1,24 @@
-import { Test, type TestingModule } from "@nestjs/testing";
-import { ProductService } from "./product.service";
+import { Test, type TestingModule } from '@nestjs/testing'
 import {
-	PRODUCT_REPOSITORY,
-	type ProductRepository,
-	type Product,
 	type CreateProductData,
+	PRODUCT_REPOSITORY,
+	type Product,
+	type ProductRepository,
 	type UpdateProductData,
-} from "@/shared/repositories/product.repository";
-import { PRODUCT_PRICE_REPOSITORY } from "@/shared/repositories/product-price.repository";
+} from '@/shared/repositories/product.repository'
+import { PRODUCT_PRICE_REPOSITORY } from '@/shared/repositories/product-price.repository'
+import { ProductService } from './product.service'
 
-describe("ProductService", () => {
-	let service: ProductService;
-	let productRepository: jest.Mocked<ProductRepository>;
+describe('ProductService', () => {
+	let service: ProductService
+	let productRepository: jest.Mocked<ProductRepository>
 
-	let productsStore: Product[];
-	let idSeq: number;
+	let productsStore: Product[]
+	let idSeq: number
 
 	const createRepositoryMock = (): jest.Mocked<ProductRepository> => {
-		productsStore = [];
-		idSeq = 1;
+		productsStore = []
+		idSeq = 1
 		return {
 			create: jest.fn(async (data: CreateProductData): Promise<Product> => {
 				const newItem: Product = {
@@ -36,62 +36,58 @@ describe("ProductService", () => {
 					specifications: data.specifications || {},
 					images: data.images || [],
 					active: data.active ?? true,
-				};
-				productsStore.push(newItem);
-				return newItem;
+				}
+				productsStore.push(newItem)
+				return newItem
 			}),
 			findAll: jest.fn(async () => [...productsStore]),
 			findAllPaginated: jest.fn(
 				async (params: {
-					page: number;
-					limit: number;
-					search?: string;
-					category?: string;
-					status?: string;
-					sortBy?: string;
-					sortOrder?: "asc" | "desc";
+					page: number
+					limit: number
+					search?: string
+					category?: string
+					status?: string
+					sortBy?: string
+					sortOrder?: 'asc' | 'desc'
 				}) => {
-					const { page, limit } = params;
-					const start = (page - 1) * limit;
-					const end = start + limit;
-					const data = productsStore.slice(start, end);
-					return { data, total: productsStore.length };
+					const { page, limit } = params
+					const start = (page - 1) * limit
+					const end = start + limit
+					const data = productsStore.slice(start, end)
+					return { data, total: productsStore.length }
 				},
 			),
 			findById: jest.fn(async (id: number) => {
-				return productsStore.find((p) => p.id === id) ?? null;
+				return productsStore.find((p) => p.id === id) ?? null
 			}),
 			findBySku: jest.fn(async (sellerId: string, sku: string) => {
-				return (
-					productsStore.find(
-						(p) => p.sku === sku && p.seller_id === sellerId,
-					) ?? null
-				);
+				return productsStore.find((p) => p.sku === sku && p.seller_id === sellerId) ?? null
 			}),
 			update: jest.fn(async (id: number, data: UpdateProductData) => {
-				const idx = productsStore.findIndex((p) => p.id === id);
-				if (idx === -1) throw new Error("Not found");
-				productsStore[idx] = { ...productsStore[idx], ...data };
-				return productsStore[idx];
+				const idx = productsStore.findIndex((p) => p.id === id)
+				if (idx === -1) throw new Error('Not found')
+				productsStore[idx] = { ...productsStore[idx], ...data }
+				return productsStore[idx]
 			}),
 			softDelete: jest.fn(async (id: number) => {
-				const idx = productsStore.findIndex((p) => p.id === id);
-				if (idx === -1) throw new Error("Not found");
-				productsStore[idx].deletedAt = new Date();
-				return productsStore[idx];
+				const idx = productsStore.findIndex((p) => p.id === id)
+				if (idx === -1) throw new Error('Not found')
+				productsStore[idx].deletedAt = new Date()
+				return productsStore[idx]
 			}),
-		};
-	};
+		}
+	}
 
 	beforeEach(async () => {
-		const repositoryMock = createRepositoryMock();
+		const repositoryMock = createRepositoryMock()
 		const priceRepositoryMock = {
 			findByProduct: jest.fn(async () => []),
 			findById: jest.fn(async () => null),
 			create: jest.fn(async (data: any) => ({ id: 1, ...data })),
 			update: jest.fn(async (id: number, data: any) => ({ id, ...data })),
 			deactivate: jest.fn(async (id: number) => ({ id, active: false })),
-		};
+		}
 
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
@@ -99,108 +95,108 @@ describe("ProductService", () => {
 				{ provide: PRODUCT_REPOSITORY, useValue: repositoryMock },
 				{ provide: PRODUCT_PRICE_REPOSITORY, useValue: priceRepositoryMock },
 			],
-		}).compile();
+		}).compile()
 
-		service = module.get<ProductService>(ProductService);
-		productRepository = module.get(PRODUCT_REPOSITORY);
-	});
+		service = module.get<ProductService>(ProductService)
+		productRepository = module.get(PRODUCT_REPOSITORY)
+	})
 
-	it("should be defined", () => {
-		expect(service).toBeDefined();
-	});
+	it('should be defined', () => {
+		expect(service).toBeDefined()
+	})
 
-	describe("create", () => {
+	describe('create', () => {
 		const productData = {
-			seller_id: "test-seller-id",
-			name: "Test Product",
-			description: "Test Description",
-			sku: "TEST-SKU-001",
-			category: "Electronics",
-			brand: "Test Brand",
-			unit: "piece",
+			seller_id: 'test-seller-id',
+			name: 'Test Product',
+			description: 'Test Description',
+			sku: 'TEST-SKU-001',
+			category: 'Electronics',
+			brand: 'Test Brand',
+			unit: 'piece',
 			specifications: { imported: false },
-			images: ["image1.jpg"],
+			images: ['image1.jpg'],
 			active: true,
-		};
+		}
 
-		it("should create a product", async () => {
-			const result = await service.create(productData);
+		it('should create a product', async () => {
+			const result = await service.create(productData)
 
-			expect(productRepository.create).toHaveBeenCalledWith(productData);
-			expect(result).toBeTruthy();
-			expect(result?.name).toBe(productData.name);
-		});
-	});
+			expect(productRepository.create).toHaveBeenCalledWith(productData)
+			expect(result).toBeTruthy()
+			expect(result?.name).toBe(productData.name)
+		})
+	})
 
-	describe("findAll", () => {
-		it("should return all products", async () => {
+	describe('findAll', () => {
+		it('should return all products', async () => {
 			await productRepository.create({
-				seller_id: "test-seller-id",
-				name: "Product 1",
-				sku: "SKU-001",
-				unit: "piece",
-			});
+				seller_id: 'test-seller-id',
+				name: 'Product 1',
+				sku: 'SKU-001',
+				unit: 'piece',
+			})
 			await productRepository.create({
-				seller_id: "test-seller-id",
-				name: "Product 2",
-				sku: "SKU-002",
-				unit: "piece",
-			});
+				seller_id: 'test-seller-id',
+				name: 'Product 2',
+				sku: 'SKU-002',
+				unit: 'piece',
+			})
 
-			const result = await service.findAll();
+			const result = await service.findAll()
 
-			expect(result).toHaveLength(2);
-			expect(result[0].name).toBe("Product 1");
-		});
-	});
+			expect(result).toHaveLength(2)
+			expect(result[0].name).toBe('Product 1')
+		})
+	})
 
-	describe("findById", () => {
-		it("should find product by id", async () => {
+	describe('findById', () => {
+		it('should find product by id', async () => {
 			const created = await productRepository.create({
-				seller_id: "test-seller-id",
-				name: "Test Product",
-				sku: "TEST-SKU",
-				unit: "piece",
-			});
+				seller_id: 'test-seller-id',
+				name: 'Test Product',
+				sku: 'TEST-SKU',
+				unit: 'piece',
+			})
 
-			const result = await service.findById(created.id.toString());
+			const result = await service.findById(created.id.toString())
 
-			expect(result).toBeTruthy();
-			expect(result?.id).toBe(created.id);
-		});
-	});
+			expect(result).toBeTruthy()
+			expect(result?.id).toBe(created.id)
+		})
+	})
 
-	describe("update", () => {
-		it("should update product", async () => {
+	describe('update', () => {
+		it('should update product', async () => {
 			const created = await productRepository.create({
-				seller_id: "test-seller-id",
-				name: "Original Product",
-				sku: "ORIG-SKU",
-				unit: "piece",
-			});
+				seller_id: 'test-seller-id',
+				name: 'Original Product',
+				sku: 'ORIG-SKU',
+				unit: 'piece',
+			})
 
 			const result = await service.update(created.id.toString(), {
-				name: "Updated Product",
-			});
+				name: 'Updated Product',
+			})
 
-			expect(result).toBeTruthy();
-			expect(result?.name).toBe("Updated Product");
-		});
-	});
+			expect(result).toBeTruthy()
+			expect(result?.name).toBe('Updated Product')
+		})
+	})
 
-	describe("remove", () => {
-		it("should soft delete product", async () => {
+	describe('remove', () => {
+		it('should soft delete product', async () => {
 			const created = await productRepository.create({
-				seller_id: "test-seller-id",
-				name: "To Delete Product",
-				sku: "DELETE-SKU",
-				unit: "piece",
-			});
+				seller_id: 'test-seller-id',
+				name: 'To Delete Product',
+				sku: 'DELETE-SKU',
+				unit: 'piece',
+			})
 
-			const result = await service.remove(created.id.toString());
+			const result = await service.remove(created.id.toString())
 
-			expect(result).toBeTruthy();
-			expect(result?.deletedAt).toBeTruthy();
-		});
-	});
-});
+			expect(result).toBeTruthy()
+			expect(result?.deletedAt).toBeTruthy()
+		})
+	})
+})

@@ -24,10 +24,7 @@ describe('Users (e2e)', () => {
 		}
 
 		it('should create account successfully', () => {
-			return request(app.getHttpServer())
-				.post('/auth/register')
-				.send(validAccountData)
-				.expect(201)
+			return request(app.getHttpServer()).post('/auth/register').send(validAccountData).expect(201)
 		})
 
 		it('should reject duplicate email', async () => {

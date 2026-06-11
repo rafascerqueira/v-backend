@@ -1,9 +1,9 @@
-import { Test, type TestingModule } from '@nestjs/testing'
-import { CreateProductController } from './create-product.controller'
-import { ProductService } from '../services/product.service'
 import { HttpException, HttpStatus } from '@nestjs/common'
+import { Test, type TestingModule } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { PlanLimitsGuard } from '@/modules/subscriptions/guards/plan-limits.guard'
+import { ProductService } from '../services/product.service'
+import { CreateProductController } from './create-product.controller'
 
 describe('CreateProductController', () => {
 	let controller: CreateProductController
@@ -67,7 +67,10 @@ describe('CreateProductController', () => {
 
 			const result = await controller.handle(validProductData, mockRequest)
 
-			expect(service.create).toHaveBeenCalledWith({ ...validProductData, seller_id: 'test-seller-id' })
+			expect(service.create).toHaveBeenCalledWith({
+				...validProductData,
+				seller_id: 'test-seller-id',
+			})
 			expect(result).toEqual(expectedProduct)
 		})
 
@@ -96,9 +99,7 @@ describe('CreateProductController', () => {
 		})
 
 		it('should handle service errors', async () => {
-			mockProductService.create.mockRejectedValue(
-				new Error('Database connection failed'),
-			)
+			mockProductService.create.mockRejectedValue(new Error('Database connection failed'))
 
 			await expect(controller.handle(validProductData, mockRequest)).rejects.toThrow(
 				'Database connection failed',
@@ -107,15 +108,10 @@ describe('CreateProductController', () => {
 
 		it('should handle duplicate SKU error', async () => {
 			mockProductService.create.mockRejectedValue(
-				new HttpException(
-					'Product with this SKU already exists',
-					HttpStatus.CONFLICT,
-				),
+				new HttpException('Product with this SKU already exists', HttpStatus.CONFLICT),
 			)
 
-			await expect(controller.handle(validProductData, mockRequest)).rejects.toThrow(
-				HttpException,
-			)
+			await expect(controller.handle(validProductData, mockRequest)).rejects.toThrow(HttpException)
 		})
 
 		it('should validate specifications object', async () => {

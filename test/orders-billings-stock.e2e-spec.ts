@@ -106,9 +106,7 @@ describe('Orders + Billings + StoreStock (e2e)', () => {
 		expect(upsertRes.body.product_id).toBe(product.id)
 
 		// get store stock
-		const getRes = await request(app.getHttpServer())
-			.get(`/store-stock/${product.id}`)
-			.expect(200)
+		const getRes = await request(app.getHttpServer()).get(`/store-stock/${product.id}`).expect(200)
 		expect(getRes.body.quantity).toBe(10)
 	})
 })
