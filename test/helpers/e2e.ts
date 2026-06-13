@@ -77,7 +77,12 @@ export async function createE2EApp(options: E2EAppOptions = {}): Promise<E2EApp>
 
 	const module = await builder.compile()
 
-	const app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter())
+	// `logger: ['warn', 'error']` drops Nest's per-boot InstanceLoader/Routes
+	// mapping spam (logged at 'log' level) — the app boots once per suite, so
+	// that's a wall of noise in CI — while keeping warnings/errors for triage.
+	const app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), {
+		logger: ['warn', 'error'],
+	})
 	const instance = app.getHttpAdapter().getInstance()
 
 	if (!options.realAuth) {

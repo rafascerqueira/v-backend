@@ -3,10 +3,14 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../src/generated/prisma/client'
 
 module.exports = async () => {
-	// Start test database container
-	execSync('docker compose -f docker-compose.test.yml up -d', {
-		stdio: 'inherit',
-	})
+	// Locally we bring up Postgres + Redis via compose. In CI the workflow
+	// provides them as native service containers, so skip the compose dance
+	// (and its pull/create log spam) entirely.
+	if (!process.env.CI) {
+		execSync('docker compose -f docker-compose.test.yml up -d', {
+			stdio: 'inherit',
+		})
+	}
 
 	// Ensure DATABASE_URL points to test DB on port 5433
 	const testDbUrl = 'postgresql://test_user:test_password@localhost:5433/test_db'
@@ -34,12 +38,21 @@ module.exports = async () => {
 		}
 	}
 
-	// Apply migrations to ensure a clean state
-	execSync('pnpm prisma migrate deploy', {
-		stdio: 'inherit',
-		env: {
-			...process.env,
-			DATABASE_URL: testDbUrl,
-		},
-	})
+	// Apply migrations to ensure a clean state. Capture output so the long
+	// "Applying migration…" + migrations-tree dump stays out of the CI log; only
+	// surface it if the migration actually fails (where it's worth seeing).
+	try {
+		execSync('pnpm prisma migrate deploy', {
+			stdio: 'pipe',
+			env: {
+				...process.env,
+				DATABASE_URL: testDbUrl,
+			},
+		})
+	} catch (e) {
+		const err = e as { stdout?: Buffer; stderr?: Buffer }
+		// eslint-disable-next-line no-console
+		console.error(err.stdout?.toString(), err.stderr?.toString())
+		throw e
+	}
 }

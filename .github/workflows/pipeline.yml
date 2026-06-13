@@ -78,13 +78,41 @@ jobs:
           JWT_SECRET: ci-test-secret-key
 
   # ─── E2E ───────────────────────────────────────────────────────────────────
-  # Self-contained: test/global-setup.ts brings up Postgres+Redis via
-  # docker-compose.test.yml (ports 5433/6380) and runs `prisma migrate deploy`,
-  # so no GitHub service containers are needed. jest.setup.js supplies the test
-  # DATABASE_URL / Redis / JWT secrets. A broken migration fails this job.
+  # Postgres + Redis run as native GitHub service containers on the same ports
+  # the test infra expects (5433 / 6380), so test/global-setup.ts skips its
+  # compose dance under CI=true and only runs `prisma migrate deploy`. The job
+  # env below points the booted app at those services; RS256 keys are generated
+  # per-run for the realAuth suites. A broken migration fails this job.
   e2e:
     name: E2E — supertest
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports: [ "5433:5432" ]
+        options: >-
+          --health-cmd "pg_isready -U test_user -d test_db" --health-interval 10s
+          --health-timeout 5s --health-retries 5
+
+      redis:
+        image: redis:7
+        ports: [ "6380:6379" ]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout
+          5s --health-retries 5
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5433/test_db
+      REDIS_HOST: localhost
+      REDIS_PORT: "6380"
+      REDIS_KEY_PREFIX: "vendinhas:test:"
+      JWT_KEYS_DIR: ./keys
 
     steps:
       - uses: actions/checkout@v6
@@ -105,10 +133,16 @@ jobs:
         env:
           DATABASE_URL: postgresql://localhost/placeholder
 
+      # TokenService is RS256-only and reads keys/{private,public}.pem at boot;
+      # keys/ is gitignored, so the realAuth suites need ephemeral keys here.
+      - name: Generate ephemeral RS256 JWT keys
+        run: |
+          mkdir -p keys
+          openssl genpkey -algorithm RSA -out keys/private.pem -pkeyopt rsa_keygen_bits:2048
+          openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+
       - name: E2E tests
         run: pnpm test:e2e
-        env:
-          NODE_ENV: test
 
   # ─── Deploy ──────────────────────────────────────────────────────────────────
   deploy:
