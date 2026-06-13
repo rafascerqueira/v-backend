@@ -38,17 +38,25 @@ jobs:
           5s --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Dependency audit (CVE gate)
+        run: |
+          # Full report for visibility — never fails the build on its own.
+          pnpm audit --prod || true
+          # Hard gate: fail only on CRITICAL advisories so accepted lower-severity
+          # items (e.g. unreachable lodash high) don't wedge the pipeline.
+          pnpm audit --prod --audit-level critical
 
       - name: Generate Prisma client
         run: pnpm prisma generate
@@ -69,20 +77,53 @@ jobs:
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: ci-test-secret-key
 
+  # ─── E2E ───────────────────────────────────────────────────────────────────
+  # Self-contained: test/global-setup.ts brings up Postgres+Redis via
+  # docker-compose.test.yml (ports 5433/6380) and runs `prisma migrate deploy`,
+  # so no GitHub service containers are needed. jest.setup.js supplies the test
+  # DATABASE_URL / Redis / JWT secrets. A broken migration fails this job.
+  e2e:
+    name: E2E — supertest
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # generate doesn't connect to the DB — a reachable URL is not required.
+      - name: Generate Prisma client
+        run: pnpm prisma generate
+        env:
+          DATABASE_URL: postgresql://localhost/placeholder
+
+      - name: E2E tests
+        run: pnpm test:e2e
+        env:
+          NODE_ENV: test
+
   # ─── Deploy ──────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy → VPS
-    needs: ci
+    needs: [ci, e2e]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     environment: production
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm

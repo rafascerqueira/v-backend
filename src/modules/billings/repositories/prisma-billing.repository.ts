@@ -24,14 +24,22 @@ export class PrismaBillingRepository implements BillingRepository {
 		return { order: { seller_id: this.tenantContext.requireSellerId() } }
 	}
 
-	/** Compute overdue in-memory: stored `pending`/`partial` + past due_date → overdue */
+	/**
+	 * Compute overdue in-memory: stored `pending`/`partial` whose due date is before
+	 * today → overdue. The comparison is day-granular (against local midnight, matching
+	 * how due dates are stored) so a billing due *today* — including a per_sale charge
+	 * due on the sale day — is not flagged overdue until the day after.
+	 */
 	private applyOverdue(billing: BillingRecord): BillingRecord {
 		if (
 			(billing.status === 'pending' || billing.status === 'partial') &&
-			billing.due_date !== null &&
-			billing.due_date < new Date()
+			billing.due_date !== null
 		) {
-			return { ...billing, status: 'overdue' }
+			const startOfToday = new Date()
+			startOfToday.setHours(0, 0, 0, 0)
+			if (billing.due_date < startOfToday) {
+				return { ...billing, status: 'overdue' }
+			}
 		}
 		return billing
 	}
@@ -98,6 +106,7 @@ export class PrismaBillingRepository implements BillingRepository {
 				order_number: true,
 				total: true,
 				seller_id: true,
+				createdAt: true,
 			},
 		})
 		return orders as unknown as UnbilledOrder[]

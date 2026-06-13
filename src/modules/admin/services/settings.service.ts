@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable } from '@nestjs/common'
 import {
 	SETTINGS_REPOSITORY,
 	type SettingsRepository,
@@ -184,11 +184,13 @@ export class SettingsService {
 		}
 
 		if (!startDate || !endDate) {
-			throw new Error('Both startDate and endDate must be provided to set the unlimited period')
+			throw new BadRequestException(
+				'Both startDate and endDate must be provided to set the unlimited period',
+			)
 		}
 
 		if (startDate >= endDate) {
-			throw new Error('startDate must be before endDate')
+			throw new BadRequestException('startDate must be before endDate')
 		}
 
 		await Promise.all([
@@ -238,7 +240,7 @@ export class SettingsService {
 		discountPercent: number
 	}): Promise<void> {
 		if (discountPercent < 0 || discountPercent > 100) {
-			throw new Error('discountPercent must be between 0 and 100')
+			throw new BadRequestException('discountPercent must be between 0 and 100')
 		}
 
 		if (startDate === null && endDate === null) {
@@ -252,11 +254,13 @@ export class SettingsService {
 		}
 
 		if (!startDate || !endDate) {
-			throw new Error('Both startDate and endDate must be provided to set the promotional period')
+			throw new BadRequestException(
+				'Both startDate and endDate must be provided to set the promotional period',
+			)
 		}
 
 		if (startDate >= endDate) {
-			throw new Error('startDate must be before endDate')
+			throw new BadRequestException('startDate must be before endDate')
 		}
 
 		await Promise.all([
@@ -285,7 +289,7 @@ export class SettingsService {
 			quotas.pro < 0 ||
 			quotas.enterprise < 0
 		) {
-			throw new Error('Quotas must be non-negative integers (0 = unlimited)')
+			throw new BadRequestException('Quotas must be non-negative integers (0 = unlimited)')
 		}
 		await Promise.all([
 			this.set(SETTINGS_KEYS.PLAN_GRANT_PRO_QUOTA, quotas.pro, 'number'),

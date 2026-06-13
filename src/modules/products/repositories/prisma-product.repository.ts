@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateProductData,
@@ -126,7 +126,7 @@ export class PrismaProductRepository implements ProductRepository {
 	async update(id: number, data: UpdateProductData): Promise<Product> {
 		const product = await this.findById(id)
 		if (!product) {
-			throw new Error('Product not found or access denied')
+			throw new NotFoundException('Product not found or access denied')
 		}
 		return this.prisma.product.update({
 			where: { id },
@@ -140,7 +140,7 @@ export class PrismaProductRepository implements ProductRepository {
 	async softDelete(id: number): Promise<Product> {
 		const product = await this.findById(id)
 		if (!product) {
-			throw new Error('Product not found or access denied')
+			throw new NotFoundException('Product not found or access denied')
 		}
 		return this.prisma.product.update({
 			where: { id },

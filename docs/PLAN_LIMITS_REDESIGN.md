@@ -105,7 +105,7 @@ This is the change that actually starts enforcing Pro caps. Combined with 6.1, i
 
 The following docs will be flagged with a checklist for the user to apply (I will not edit them unilaterally):
 
-- `.windsurf/rules/core-rules.md` — remove `PlanGuard` from the "plan enforcement guards" table; rename "Plan limits guard / Plan guard" section.
+- `.devin/rules/core-rules.md` — remove `PlanGuard` from the "plan enforcement guards" table; rename "Plan limits guard / Plan guard" section.
 - `CLAUDE.md` (if it has parallel content).
 
 ---

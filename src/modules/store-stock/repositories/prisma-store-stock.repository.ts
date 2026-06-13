@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	StoreStock,
@@ -67,7 +67,7 @@ export class PrismaStoreStockRepository implements StoreStockRepository {
 		})
 
 		if (!product) {
-			throw new Error('Product not found')
+			throw new NotFoundException('Product not found')
 		}
 
 		return this.prisma.store_stock.upsert({

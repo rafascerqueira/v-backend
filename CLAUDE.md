@@ -70,8 +70,9 @@ src/shared/
 
 ## Architecture rules
 
-- **Repository Pattern** — services never import PrismaService directly
-- **TenantContext** — inject in every repository that has a `seller_id` column; use `requireSellerId()` for writes, `isAdmin()` to bypass filters
+- **Repository Pattern** — services never import PrismaService directly. **All DB access lives in the repository, including `$transaction` and multi-table writes** — a service must stay Prisma-free even when logic needs a transaction (move the whole unit of work into a repository method).
+- **TenantContext** — inject in every repository that has a `seller_id` column; use `requireSellerId()` for writes, `isAdmin()` to bypass filters. Enforce ownership in the repo for point mutations (`update`/`delete` by id), not only in the service.
+- **Exceptions** — services *and repositories* throw Nest `HttpException`s (`NotFoundException`, `BadRequestException`, `ForbiddenException`, …), never raw `throw new Error()`, so the response carries the correct HTTP status (a raw `Error` surfaces as **500** via `GlobalExceptionFilter`). Cross-tenant rows should 404 (don't leak existence).
 - **QueueProducer** — use for any operation with side effects (email, notifications, PDF); never call EmailService directly from a service or controller
 - Controllers are HTTP boundary only — validate input, call service, return
 - Use `ConfigService` for env vars — never raw `process.env` in constructors
@@ -109,24 +110,25 @@ Read the relevant skill file before starting these tasks:
 
 | Task | File |
 |---|---|
-| New feature module (CRUD + tests) | `.windsurf/skills/generate-full-module/SKILL.md` |
-| Repository interface + Prisma implementation | `.windsurf/skills/create-prisma-repository/SKILL.md` |
+| New feature module (CRUD + tests) | `.devin/skills/generate-full-module/SKILL.md` |
+| Repository interface + Prisma implementation | `.devin/skills/create-prisma-repository/SKILL.md` |
 
 Extended context when needed:
 
 | Topic | File |
 |---|---|
-| Full architecture & conventions | `.windsurf/rules/core-rules.md` |
-| Refactoring an existing module | `.windsurf/rules/refactoring-rules.md` |
-| Pre-commit checklist | `.windsurf/workflows/pre-commit-review.md` |
+| Full architecture & conventions | `.devin/rules/core-rules.md` |
+| Refactoring an existing module | `.devin/rules/refactoring-rules.md` |
+| Pre-commit checklist | `.devin/workflows/pre-commit-review.md` |
 
 ## Keeping context in sync
 
-`CLAUDE.md` is a subset of `.windsurf/rules/core-rules.md`. When a task introduces a new architecture rule, package, or convention, flag it at task end — do not update either file unilaterally. The user decides what to propagate to both.
+`CLAUDE.md` is a subset of `.devin/rules/core-rules.md`. When a task introduces a new architecture rule, package, or convention, flag it at task end — do not update either file unilaterally. The user decides what to propagate to both.
 
 ## Never
 
-- Direct Prisma in services
+- Direct Prisma in services — including `$transaction`; put transactional/multi-table logic in the repository
+- Raw `throw new Error()` for user-facing conditions — use a Nest `HttpException` so the status code is correct (raw `Error` → 500)
 - Express / class-validator / ESLint / bcrypt / HS256
 - Raw `process.env` in constructors
 - Float values for monetary amounts (integers/cents only)

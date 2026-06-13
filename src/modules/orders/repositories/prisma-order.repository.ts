@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateOrderData,
@@ -99,6 +99,24 @@ export class PrismaOrderRepository implements OrderRepository {
 						},
 					})
 				}
+			}
+
+			// Create the per_sale charge in the SAME transaction so an order is never
+			// left without its billing record. Previously billing was a separate call
+			// whose failure was swallowed as a warning, silently dropping the charge.
+			if (data.billing) {
+				await tx.billing.create({
+					data: {
+						order_id: order.id,
+						billing_number: data.billing.billing_number,
+						total_amount: data.billing.total_amount,
+						paid_amount: data.billing.paid_amount,
+						payment_method: data.billing.payment_method as any,
+						payment_status: data.billing.payment_status as any,
+						status: data.billing.status as any,
+						due_date: data.billing.due_date,
+					},
+				})
 			}
 
 			return order as unknown as OrderWithRelations
@@ -212,6 +230,14 @@ export class PrismaOrderRepository implements OrderRepository {
 		},
 	): Promise<Order> {
 		return this.prisma.$transaction(async (tx) => {
+			const order = await this.requireOrderInTenant(tx, id)
+
+			// Restore stock when an order moves INTO the canceled state. Idempotent:
+			// skip if it was already canceled so a re-cancel can't double-restore.
+			if (status === 'canceled' && order.status !== 'canceled') {
+				await this.restoreStockInTx(tx, id)
+			}
+
 			const updatedOrder = await tx.order.update({
 				where: { id },
 				data: { status: status as any },
@@ -239,31 +265,56 @@ export class PrismaOrderRepository implements OrderRepository {
 
 	async delete(id: number): Promise<Order> {
 		return this.prisma.$transaction(async (tx) => {
-			// Restore stock for all items
-			const items = await tx.order_item.findMany({ where: { order_id: id } })
+			const order = await this.requireOrderInTenant(tx, id)
 
-			for (const item of items) {
-				const stock = await tx.store_stock.findUnique({
-					where: { product_id: item.product_id },
-				})
-				if (stock) {
-					await tx.store_stock.update({
-						where: { product_id: item.product_id },
-						data: { quantity: { increment: item.quantity } },
-					})
-					await tx.stock_movement.create({
-						data: {
-							movement_type: 'in',
-							reference_type: 'return',
-							reference_id: id,
-							product_id: item.product_id,
-							quantity: item.quantity,
-						},
-					})
-				}
+			// Only restore stock if it wasn't already returned by a prior cancellation —
+			// otherwise deleting a canceled order would double-count stock.
+			if (order.status !== 'canceled') {
+				await this.restoreStockInTx(tx, id)
 			}
 
 			return tx.order.delete({ where: { id } }) as unknown as Order
 		})
+	}
+
+	// Loads an order inside a transaction and enforces tenant ownership. Throws
+	// NotFoundException (404) for both missing AND cross-tenant orders so existence
+	// is never leaked to another seller. Mirrors the guard already used in addItem.
+	private async requireOrderInTenant(tx: any, id: number): Promise<{ status: string }> {
+		const order = await tx.order.findUnique({ where: { id } })
+		if (
+			!order ||
+			(!this.tenantContext.isAdmin() && order.seller_id !== this.tenantContext.getSellerId())
+		) {
+			throw new NotFoundException('Order not found or access denied')
+		}
+		return order
+	}
+
+	// Returns every item's quantity to store_stock and records an `in`/`return`
+	// movement. Shared by cancellation (updateStatus) and delete.
+	private async restoreStockInTx(tx: any, orderId: number): Promise<void> {
+		const items = await tx.order_item.findMany({ where: { order_id: orderId } })
+
+		for (const item of items) {
+			const stock = await tx.store_stock.findUnique({
+				where: { product_id: item.product_id },
+			})
+			if (stock) {
+				await tx.store_stock.update({
+					where: { product_id: item.product_id },
+					data: { quantity: { increment: item.quantity } },
+				})
+				await tx.stock_movement.create({
+					data: {
+						movement_type: 'in',
+						reference_type: 'return',
+						reference_id: orderId,
+						product_id: item.product_id,
+						quantity: item.quantity,
+					},
+				})
+			}
+		}
 	}
 }

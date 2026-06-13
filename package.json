@@ -1,6 +1,6 @@
 {
   "name": "v-backend",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Backend do aplicativo Vendinhas",
   "author": "Rafael Cerqueira<rafascerqueira.dev@gmail.com>",
   "private": true,
@@ -49,7 +49,7 @@
     "argon2": "^0.44.0",
     "bullmq": "^5.71.1",
     "exceljs": "^4.4.0",
-    "fastify": "^5.8.4",
+    "fastify": "^5.8.5",
     "ioredis": "^5.10.1",
     "nodemailer": "^7.0.13",
     "otpauth": "^9.5.0",
@@ -138,5 +138,14 @@
       "^@interfaces/(.*)$": "<rootDir>/interfaces/$1"
     }
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "fastify@<5.8.5": "^5.8.5",
+      "fast-uri@<3.1.2": "^3.1.2",
+      "path-to-regexp@<8.4.0": "^8.4.0",
+      "defu@<6.1.5": "^6.1.5",
+      "tmp@<0.2.6": "^0.2.6"
+    }
+  }
 }

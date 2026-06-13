@@ -53,6 +53,7 @@ export interface UnbilledOrder {
 	order_number: string
 	total: number
 	seller_id: string
+	createdAt: Date
 }
 
 export const BILLING_REPOSITORY = Symbol('BILLING_REPOSITORY')

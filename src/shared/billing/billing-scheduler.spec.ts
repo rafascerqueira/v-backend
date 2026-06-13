@@ -12,8 +12,19 @@ import { computeDueDate } from './billing-scheduler'
 
 describe('computeDueDate', () => {
 	describe('per_sale', () => {
-		it('returns null (seller collects manually)', () => {
-			expect(computeDueDate('per_sale', null, new Date('2026-06-04T12:00:00Z'))).toBeNull()
+		it('uses the sale date (reference) as the due date', () => {
+			const due = computeDueDate('per_sale', null, new Date(2026, 5, 4, 12, 0, 0))
+			expect(due).not.toBeNull()
+			expect(due?.getFullYear()).toBe(2026)
+			expect(due?.getMonth()).toBe(5)
+			expect(due?.getDate()).toBe(4)
+		})
+
+		it('zeroes the time component (local midnight)', () => {
+			const due = computeDueDate('per_sale', null, new Date(2026, 5, 4, 14, 37, 22))
+			expect(due?.getHours()).toBe(0)
+			expect(due?.getMinutes()).toBe(0)
+			expect(due?.getSeconds()).toBe(0)
 		})
 	})
 

@@ -50,6 +50,18 @@ export interface CreateOrderData {
 		discount: number
 		total: number
 	}[]
+	// Optional charge created atomically with the order (per_sale billing mode).
+	billing?: CreateOrderBillingData
+}
+
+export interface CreateOrderBillingData {
+	billing_number: string
+	total_amount: number
+	paid_amount: number
+	payment_method: string
+	payment_status: string
+	status: string
+	due_date?: Date
 }
 
 export interface CreateOrderItemData {

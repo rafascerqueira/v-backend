@@ -7,7 +7,7 @@ import {
 	CUSTOMER_REPOSITORY,
 	type CustomerRepository,
 } from '@/shared/repositories/customer.repository'
-import type { CreateCustomerDto } from '../dto/create-customer.dto'
+import type { UpdateCustomerDto } from '../dto/create-customer.dto'
 
 @Injectable()
 export class CustomersService {
@@ -58,7 +58,7 @@ export class CustomersService {
 		return customer
 	}
 
-	async update(id: string, data: Partial<CreateCustomerDto>) {
+	async update(id: string, data: UpdateCustomerDto) {
 		return this.customerRepository.update(id, data)
 	}
 

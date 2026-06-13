@@ -98,9 +98,10 @@ describe('BillingsService', () => {
 	})
 
 	it('syncBillings should create billings for unbilled per_sale orders', async () => {
+		const saleDate = new Date(2026, 5, 4, 12, 0, 0)
 		repositoryMock.findUnbilledPerSaleOrders.mockResolvedValueOnce([
-			{ id: 1, order_number: 'ORD-001', total: 10000, seller_id: 's1' },
-			{ id: 2, order_number: 'ORD-002', total: 10177, seller_id: 's1' },
+			{ id: 1, order_number: 'ORD-001', total: 10000, seller_id: 's1', createdAt: saleDate },
+			{ id: 2, order_number: 'ORD-002', total: 10177, seller_id: 's1', createdAt: saleDate },
 		])
 		repositoryMock.create.mockResolvedValue({ id: 99 })
 
@@ -109,7 +110,8 @@ describe('BillingsService', () => {
 		expect(result.created).toBe(2)
 		expect(result.orders).toEqual(['COB-001', 'COB-002'])
 		expect(repositoryMock.create).toHaveBeenCalledTimes(2)
-		expect(repositoryMock.create).toHaveBeenCalledWith(
+		const firstCall = repositoryMock.create.mock.calls[0][0]
+		expect(firstCall).toEqual(
 			expect.objectContaining({
 				order_id: 1,
 				billing_number: 'COB-001',
@@ -118,6 +120,9 @@ describe('BillingsService', () => {
 				status: 'pending',
 			}),
 		)
+		// per_sale: due date must be the sale day, never a null that renders as 01/01/1970
+		expect(firstCall.due_date).toBeInstanceOf(Date)
+		expect(firstCall.due_date.getDate()).toBe(4)
 	})
 
 	it('syncBillings should return empty when no unbilled orders', async () => {

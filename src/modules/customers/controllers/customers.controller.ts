@@ -15,7 +15,12 @@ import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { CheckPlanLimit, PlanLimitsGuard } from '@/modules/subscriptions/guards/plan-limits.guard'
 import { paginationSchema } from '@/shared/dto/pagination.dto'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
-import { type CreateCustomerDto, createCustomerSchema } from '../dto/create-customer.dto'
+import {
+	type CreateCustomerDto,
+	createCustomerSchema,
+	type UpdateCustomerDto,
+	updateCustomerSchema,
+} from '../dto/create-customer.dto'
 import { CustomersService } from '../services/customers.service'
 
 @ApiTags('customers')
@@ -81,7 +86,7 @@ export class CustomersController {
 	})
 	update(
 		@Param('id') id: string,
-		@Body(new ZodValidationPipe(createCustomerSchema.partial())) data: Partial<CreateCustomerDto>,
+		@Body(new ZodValidationPipe(updateCustomerSchema)) data: UpdateCustomerDto,
 	) {
 		return this.customersService.update(id, data)
 	}

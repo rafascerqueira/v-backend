@@ -13,8 +13,15 @@ export function computeDueDate(
 	reference: Date = new Date(),
 ): Date | null {
 	switch (mode) {
-		case 'per_sale':
-			return null // seller collects manually on each visit
+		case 'per_sale': {
+			// The sale date itself is the due date — the seller is expected to collect
+			// on the spot (matches the "A data da venda será usada como data de cobrança"
+			// promise in the customer form). Normalize to local midnight so it renders as
+			// a clean date and is not flagged overdue on the sale day (see applyOverdue).
+			const d = new Date(reference)
+			d.setHours(0, 0, 0, 0)
+			return d
+		}
 
 		case 'weekly': {
 			// billingDay = 0 (Sun) … 6 (Sat); default Monday (1)

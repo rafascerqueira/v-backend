@@ -6,6 +6,7 @@ import {
 	Logger,
 	NotFoundException,
 } from '@nestjs/common'
+import { computeDueDate } from '@/shared/billing/billing-scheduler'
 import { RedisService } from '@/shared/redis/redis.service'
 import {
 	BILLING_REPOSITORY,
@@ -40,6 +41,9 @@ export class BillingsService {
 					payment_method: 'cash',
 					payment_status: 'pending',
 					status: 'pending',
+					// per_sale: the sale date is the due date (see computeDueDate); without
+					// this the billing would render as 01/01/1970 in the UI.
+					due_date: computeDueDate('per_sale', null, order.createdAt) ?? undefined,
 				})
 				created.push(billingNumber)
 				this.logger.log(`Cobrança ${billingNumber} criada para pedido ${order.order_number}`)

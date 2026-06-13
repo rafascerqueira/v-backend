@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateCustomerData,
@@ -107,7 +107,7 @@ export class PrismaCustomerRepository implements CustomerRepository {
 	async update(id: string, data: UpdateCustomerData): Promise<Customer> {
 		const customer = await this.findById(id)
 		if (!customer) {
-			throw new Error('Customer not found or access denied')
+			throw new NotFoundException('Customer not found or access denied')
 		}
 		return this.prisma.customer.update({
 			where: { id },
@@ -121,7 +121,7 @@ export class PrismaCustomerRepository implements CustomerRepository {
 	async delete(id: string): Promise<Customer> {
 		const customer = await this.findById(id)
 		if (!customer) {
-			throw new Error('Customer not found or access denied')
+			throw new NotFoundException('Customer not found or access denied')
 		}
 		return this.prisma.customer.delete({
 			where: { id },
