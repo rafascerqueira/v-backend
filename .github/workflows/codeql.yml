@@ -1,0 +1,35 @@
+name: CodeQL
+
+# Phase 2 — SAST. Reporting lane: findings post to the repo's Security tab.
+# Promote to a blocking PR check later via branch protection once it's quiet.
+# JS/TS needs no build step — CodeQL analyzes source directly.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 03:00 UTC — weekly deep scan, off the hot path.
+    - cron: '0 3 * * 1'
+
+jobs:
+  analyze:
+    name: CodeQL — JS/TS
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

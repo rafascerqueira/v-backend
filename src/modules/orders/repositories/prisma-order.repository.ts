@@ -3,10 +3,12 @@ import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateOrderData,
 	CreateOrderItemData,
+	CreateOrderResult,
 	Order,
 	OrderItem,
 	OrderRepository,
 	OrderWithRelations,
+	OversoldItem,
 } from '@/shared/repositories/order.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 
@@ -24,16 +26,33 @@ export class PrismaOrderRepository implements OrderRepository {
 		return { seller_id: this.tenantContext.requireSellerId() }
 	}
 
-	async create(data: CreateOrderData): Promise<OrderWithRelations> {
+	async create(data: CreateOrderData): Promise<CreateOrderResult> {
 		return this.prisma.$transaction(async (tx) => {
 			// Lock stock rows to prevent concurrent overselling
 			if (data.items.length > 0) {
 				const productIds = data.items.map((i) => i.product_id)
+
+				// Every referenced product must belong to the order's seller. Without
+				// this, a seller could place an order with another tenant's product_id
+				// and decrement that tenant's stock (the FOR UPDATE / decrement /
+				// stock_movement below all key off product_id alone).
+				const uniqueIds = [...new Set(productIds)]
+				const ownedCount = await tx.product.count({
+					where: { id: { in: uniqueIds }, seller_id: data.seller_id },
+				})
+				if (ownedCount !== uniqueIds.length) {
+					throw new NotFoundException('Um ou mais produtos não foram encontrados')
+				}
+
 				await tx.$queryRawUnsafe(
 					`SELECT id FROM store_stock WHERE product_id = ANY($1::int[]) FOR UPDATE`,
 					productIds,
 				)
 			}
+
+			// Items sold past their stock via allow_oversell — reported back so the
+			// service can notify the seller that these units are pending delivery.
+			const oversold: OversoldItem[] = []
 
 			// Validate stock availability for items that have stock control
 			for (const item of data.items) {
@@ -47,9 +66,20 @@ export class PrismaOrderRepository implements OrderRepository {
 						const product = await tx.product.findUnique({
 							where: { id: item.product_id },
 						})
-						throw new BadRequestException(
-							`Estoque insuficiente para "${product?.name || item.product_id}". Disponível: ${available}, Solicitado: ${item.quantity}`,
-						)
+						// Products flagged allow_oversell sell past their stock; the
+						// decrement below simply takes the quantity negative. Anything
+						// else is a hard stop.
+						if (!product?.allow_oversell) {
+							throw new BadRequestException(
+								`Estoque insuficiente para "${product?.name || item.product_id}". Disponível: ${available}, Solicitado: ${item.quantity}`,
+							)
+						}
+						oversold.push({
+							product_id: item.product_id,
+							product_name: product?.name ?? String(item.product_id),
+							available,
+							requested: item.quantity,
+						})
 					}
 				}
 			}
@@ -119,7 +149,7 @@ export class PrismaOrderRepository implements OrderRepository {
 				})
 			}
 
-			return order as unknown as OrderWithRelations
+			return { order: order as unknown as OrderWithRelations, oversold }
 		})
 	}
 
@@ -132,12 +162,24 @@ export class PrismaOrderRepository implements OrderRepository {
 				throw new BadRequestException('Order not found')
 			}
 
+			// The item's product must belong to the same seller as the order —
+			// otherwise the stock decrement below would hit another tenant's product.
+			const ownedProduct = await tx.product.findFirst({
+				where: { id: data.product_id, seller_id: order.seller_id },
+				select: { id: true },
+			})
+			if (!ownedProduct) throw new NotFoundException('Produto não encontrado')
+
 			// Validate stock availability
 			const stock = await tx.store_stock.findUnique({ where: { product_id: data.product_id } })
 			if (stock) {
 				const available = stock.quantity - stock.reserved_quantity
 				if (available < data.quantity) {
-					throw new BadRequestException(`Estoque insuficiente. Disponível: ${available}`)
+					const product = await tx.product.findUnique({ where: { id: data.product_id } })
+					// allow_oversell products bypass the shortage block; stock goes negative.
+					if (!product?.allow_oversell) {
+						throw new BadRequestException(`Estoque insuficiente. Disponível: ${available}`)
+					}
 				}
 				// Decrement stock
 				await tx.store_stock.update({

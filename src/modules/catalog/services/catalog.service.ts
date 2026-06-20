@@ -247,26 +247,49 @@ export class CatalogService {
 		}
 	}
 
-	async createOrder(dto: CreateCatalogOrderDto) {
+	async createOrder(slug: string, dto: CreateCatalogOrderDto) {
 		const { items, notes } = dto
 
 		if (items.length === 0) {
 			throw new BadRequestException('O pedido deve ter pelo menos um item')
 		}
 
-		// Verify products exist, have stock, and belong to same seller
+		// The seller is the store being browsed (resolved from the slug), never
+		// inferred from the posted product ids — otherwise a customer could create
+		// an order against a seller they never visited.
+		const store = await this.catalogRepository.findStoreIdBySlug(slug)
+		if (!store) {
+			throw new NotFoundException('Loja não encontrada')
+		}
+		const sellerId = store.id
+
+		// Only this store's active products are orderable. Scoping the lookup to the
+		// seller also stops the previous full-catalog scan on every public request.
 		const productIds = items.map((item) => item.product_id)
-		const products = await this.catalogRepository.findActiveProducts()
+		const products = await this.catalogRepository.findActiveProducts(sellerId)
 		const validProducts = products.filter((p) => productIds.includes(p.id))
 
-		if (validProducts.length !== productIds.length) {
-			throw new BadRequestException('Um ou mais produtos não foram encontrados')
+		if (validProducts.length !== new Set(productIds).size) {
+			throw new BadRequestException('Um ou mais produtos não foram encontrados nesta loja')
 		}
 
-		// Ensure all products belong to the same seller
-		const sellerIds = new Set(validProducts.map((p) => p.seller_id))
-		if (sellerIds.size > 1) {
-			throw new BadRequestException('Todos os produtos devem pertencer à mesma loja')
+		// Customers can only buy what is in stock — allow_oversell is a seller-only
+		// capability and is deliberately NOT honored here. Stock-tracked products that
+		// are short are blocked; untracked products (no stock row) stay orderable, so
+		// out-of-stock items remain visible in the catalog but cannot be ordered.
+		const stocks = await this.catalogRepository.findStocks(productIds)
+		const availableMap = new Map<number, number>()
+		for (const stock of stocks) {
+			availableMap.set(stock.product_id, stock.quantity - stock.reserved_quantity)
+		}
+		for (const item of items) {
+			const available = availableMap.get(item.product_id)
+			if (available !== undefined && available < item.quantity) {
+				const product = validProducts.find((p) => p.id === item.product_id)
+				throw new BadRequestException(
+					`Estoque insuficiente para "${product?.name ?? item.product_id}". Disponível: ${available > 0 ? available : 0}.`,
+				)
+			}
 		}
 
 		// Get prices and active promotions
@@ -283,13 +306,6 @@ export class CatalogService {
 		for (const promo of promotions) {
 			if (!priceMap.has(promo.product_id)) continue
 			priceMap.set(promo.product_id, promo.promotional_price)
-		}
-
-		// Get seller_id from products
-		const firstProduct = validProducts[0]
-		const sellerId = firstProduct?.seller_id
-		if (!sellerId) {
-			throw new BadRequestException('Não foi possível identificar o vendedor')
 		}
 
 		// Resolve customer: by ID (personalized link) or by contact (new/anonymous)

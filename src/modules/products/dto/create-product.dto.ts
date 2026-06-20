@@ -16,6 +16,10 @@ export const createProductSchema = z.object({
 		.default({}),
 	images: z.array(z.url('URL de imagem inválida')).optional().default([]),
 	active: z.boolean().optional().default(true),
+	// When true, sales of this product are never blocked by insufficient stock;
+	// stock simply decrements below zero. Default keeps the "block on shortage"
+	// behavior for stock-tracked products.
+	allow_oversell: z.boolean().optional().default(false),
 })
 
 export type CreateProductDto = z.infer<typeof createProductSchema>

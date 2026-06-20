@@ -40,6 +40,8 @@ const NEVER_THROTTLE = {
 interface E2EAppOptions {
 	/** Keep real auth (TokenService) for suites that log in / assert 401. */
 	realAuth?: boolean
+	/** Override the stubbed token's plan so feature/limit gating can be exercised. */
+	planType?: 'free' | 'pro' | 'enterprise'
 }
 
 export interface E2EApp {
@@ -68,7 +70,7 @@ export async function createE2EApp(options: E2EAppOptions = {}): Promise<E2EApp>
 					sub: TEST_SELLER.id,
 					email: TEST_SELLER.email,
 					role: TEST_SELLER.role,
-					plan_type: TEST_SELLER.plan_type,
+					plan_type: options.planType ?? TEST_SELLER.plan_type,
 				}),
 			})
 			.overrideProvider(TokenBlacklistService)

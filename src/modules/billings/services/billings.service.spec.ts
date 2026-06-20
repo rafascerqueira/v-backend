@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common'
+import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { RedisService } from '@/shared/redis/redis.service'
 import { BILLING_REPOSITORY } from '@/shared/repositories/billing.repository'
@@ -162,6 +162,70 @@ describe('BillingsService', () => {
 		})
 	})
 
+	describe('billing status derivation', () => {
+		it('create derives status from the amounts and ignores any client-sent status', async () => {
+			repositoryMock.verifyOrderAccess.mockResolvedValueOnce({ id: 1, seller_id: 'test-seller-id' })
+			repositoryMock.create.mockResolvedValueOnce({ id: 1 })
+			// Client tries to claim it is already paid while paying nothing.
+			await service.create(1, {
+				billing_number: 'B-1',
+				total_amount: 1000,
+				paid_amount: 0,
+				status: 'paid',
+				payment_status: 'confirmed',
+			} as any)
+			const call = repositoryMock.create.mock.calls[0][0]
+			expect(call.status).toBe('pending')
+			expect(call.payment_status).toBe('pending')
+		})
+
+		it('create marks a fully-paid charge as paid/confirmed', async () => {
+			repositoryMock.verifyOrderAccess.mockResolvedValueOnce({ id: 1, seller_id: 'test-seller-id' })
+			repositoryMock.create.mockResolvedValueOnce({ id: 1 })
+			await service.create(1, {
+				billing_number: 'B-2',
+				total_amount: 1000,
+				paid_amount: 1000,
+			} as any)
+			const call = repositoryMock.create.mock.calls[0][0]
+			expect(call.status).toBe('paid')
+			expect(call.payment_status).toBe('confirmed')
+		})
+
+		it('update re-derives status from the resulting paid amount', async () => {
+			repositoryMock.findById.mockResolvedValueOnce({
+				id: 20,
+				status: 'pending',
+				total_amount: 1000,
+				paid_amount: 0,
+				payment_date: null,
+				order: { seller_id: 'test-seller-id' },
+			})
+			repositoryMock.update.mockResolvedValueOnce({ id: 20 })
+			await service.update(20, { paid_amount: 400 } as any)
+			const call = repositoryMock.update.mock.calls[0][1]
+			expect(call.status).toBe('partial')
+			expect(call.payment_status).toBe('pending')
+		})
+
+		it('update preserves a canceled billing instead of resurrecting it', async () => {
+			repositoryMock.findById.mockResolvedValueOnce({
+				id: 21,
+				status: 'canceled',
+				total_amount: 1000,
+				paid_amount: 0,
+				payment_date: null,
+				order: { seller_id: 'test-seller-id' },
+			})
+			repositoryMock.update.mockResolvedValueOnce({ id: 21 })
+			await service.update(21, { paid_amount: 1000 } as any)
+			const call = repositoryMock.update.mock.calls[0][1]
+			// Terminal state untouched: no derived status/payment_status written back.
+			expect(call.status).toBeUndefined()
+			expect(call.payment_status).toBeUndefined()
+		})
+	})
+
 	describe('create overpayment guard', () => {
 		it('should throw BadRequestException when paid_amount exceeds total_amount', async () => {
 			repositoryMock.verifyOrderAccess.mockResolvedValueOnce({ id: 1, seller_id: 'test-seller-id' })
@@ -172,12 +236,10 @@ describe('BillingsService', () => {
 	})
 
 	describe('update', () => {
-		it('should throw ForbiddenException when seller does not own billing', async () => {
-			repositoryMock.findById.mockResolvedValueOnce({
-				id: 5,
-				order: { seller_id: 'other-seller' },
-			})
-			await expect(service.update(5, { notes: 'x' } as any)).rejects.toThrow(ForbiddenException)
+		it('returns 404 (not a 403 leak) for a cross-tenant billing — findById is tenant-scoped to null', async () => {
+			repositoryMock.findById.mockResolvedValueOnce(null)
+			await expect(service.update(5, { notes: 'x' } as any)).rejects.toThrow(NotFoundException)
+			expect(repositoryMock.update).not.toHaveBeenCalled()
 		})
 
 		it('should throw BadRequestException when paid_amount exceeds total_amount after merge', async () => {
@@ -223,18 +285,38 @@ describe('BillingsService', () => {
 		})
 	})
 
+	describe('cancel', () => {
+		it('voids a billing the tenant owns by writing the canceled state', async () => {
+			repositoryMock.findById.mockResolvedValueOnce({
+				id: 30,
+				status: 'pending',
+				order: { seller_id: 'test-seller-id' },
+			})
+			repositoryMock.update.mockResolvedValueOnce({ id: 30, status: 'canceled' })
+			await service.cancel(30)
+			expect(repositoryMock.update).toHaveBeenCalledWith(30, {
+				status: 'canceled',
+				payment_status: 'canceled',
+			})
+		})
+
+		it('returns 404 for a missing/cross-tenant billing and never writes', async () => {
+			repositoryMock.findById.mockResolvedValueOnce(null)
+			await expect(service.cancel(999)).rejects.toThrow(NotFoundException)
+			expect(repositoryMock.update).not.toHaveBeenCalled()
+		})
+	})
+
 	describe('delete', () => {
 		it('should throw NotFoundException when billing not found', async () => {
 			repositoryMock.findById.mockResolvedValueOnce(null)
 			await expect(service.delete(999)).rejects.toThrow(NotFoundException)
 		})
 
-		it('should throw ForbiddenException when seller does not own billing', async () => {
-			repositoryMock.findById.mockResolvedValueOnce({
-				id: 10,
-				order: { seller_id: 'other-seller' },
-			})
-			await expect(service.delete(10)).rejects.toThrow(ForbiddenException)
+		it('returns 404 (not a 403 leak) for a cross-tenant billing — findById is tenant-scoped to null', async () => {
+			repositoryMock.findById.mockResolvedValueOnce(null)
+			await expect(service.delete(10)).rejects.toThrow(NotFoundException)
+			expect(repositoryMock.delete).not.toHaveBeenCalled()
 		})
 
 		it('should call repository.delete when authorized', async () => {

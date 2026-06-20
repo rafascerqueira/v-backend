@@ -38,6 +38,6 @@ export class CreateProductController {
 		@Body(new ZodValidationPipe(createProductSchema)) body: CreateProductDto,
 		@Req() req: any,
 	) {
-		return this.productService.create({ ...body, seller_id: req.user.sub })
+		return this.productService.create({ ...body, seller_id: req.user.sub }, req.user.plan_type)
 	}
 }

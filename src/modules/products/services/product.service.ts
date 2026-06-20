@@ -1,4 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common'
+import { FEATURE_UPGRADE_MESSAGE } from '@/modules/subscriptions/guards/feature.guard'
+import { PlanLimitsService } from '@/modules/subscriptions/services/plan-limits.service'
 import type { PaginationDto } from '@/shared/dto/pagination.dto'
 import { createPaginatedResponse } from '@/shared/dto/pagination.dto'
 import {
@@ -20,9 +22,22 @@ export class ProductService {
 		private readonly productRepository: ProductRepository,
 		@Inject(PRODUCT_PRICE_REPOSITORY)
 		private readonly productPriceRepository: ProductPriceRepository,
+		private readonly planLimitsService: PlanLimitsService,
 	) {}
 
-	async create(data: CreateProductData) {
+	// Multiple images per product is a paid feature. Only a count > 1 is gated, so
+	// free sellers keep a single image. Plan is the caller's, resolved at the edge.
+	private async assertImagesAllowed(sellerId: string, planType: string, images?: string[]) {
+		if (images && images.length > 1) {
+			const allowed = await this.planLimitsService.hasFeature(sellerId, planType, 'multipleImages')
+			if (!allowed) {
+				throw new ForbiddenException(FEATURE_UPGRADE_MESSAGE.multipleImages)
+			}
+		}
+	}
+
+	async create(data: CreateProductData, planType: string) {
+		await this.assertImagesAllowed(data.seller_id, planType, data.images)
 		return this.productRepository.create(data)
 	}
 
@@ -39,7 +54,8 @@ export class ProductService {
 		return this.productRepository.findById(parseInt(id, 10))
 	}
 
-	async update(id: string, data: UpdateProductDto) {
+	async update(id: string, data: UpdateProductDto, sellerId: string, planType: string) {
+		await this.assertImagesAllowed(sellerId, planType, data.images)
 		return this.productRepository.update(parseInt(id, 10), data)
 	}
 

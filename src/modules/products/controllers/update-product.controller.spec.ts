@@ -11,6 +11,10 @@ describe('UpdateProductController', () => {
 		update: jest.fn(),
 	}
 
+	const mockRequest = {
+		user: { sub: 'test-seller-id', role: 'seller', plan_type: 'enterprise' },
+	}
+
 	beforeEach(async () => {
 		const module: TestingModule = await Test.createTestingModule({
 			controllers: [UpdateProductController],
@@ -64,10 +68,15 @@ describe('UpdateProductController', () => {
 
 			mockProductService.update.mockResolvedValue(expectedResult)
 
-			const result = await controller.handle(productId, updateData)
+			const result = await controller.handle(productId, updateData, mockRequest)
 
 			expect(result).toBe(expectedResult)
-			expect(productService.update).toHaveBeenCalledWith(productId, updateData)
+			expect(productService.update).toHaveBeenCalledWith(
+				productId,
+				updateData,
+				'test-seller-id',
+				'enterprise',
+			)
 			expect(productService.update).toHaveBeenCalledTimes(1)
 		})
 
@@ -88,10 +97,15 @@ describe('UpdateProductController', () => {
 
 			mockProductService.update.mockResolvedValue(expectedResult)
 
-			const result = await controller.handle(productId, updateData)
+			const result = await controller.handle(productId, updateData, mockRequest)
 
 			expect(result).toBe(expectedResult)
-			expect(productService.update).toHaveBeenCalledWith(productId, updateData)
+			expect(productService.update).toHaveBeenCalledWith(
+				productId,
+				updateData,
+				'test-seller-id',
+				'enterprise',
+			)
 		})
 
 		it('should update only specifications', async () => {
@@ -115,10 +129,15 @@ describe('UpdateProductController', () => {
 
 			mockProductService.update.mockResolvedValue(expectedResult)
 
-			const result = await controller.handle(productId, updateData)
+			const result = await controller.handle(productId, updateData, mockRequest)
 
 			expect(result).toBe(expectedResult)
-			expect(productService.update).toHaveBeenCalledWith(productId, updateData)
+			expect(productService.update).toHaveBeenCalledWith(
+				productId,
+				updateData,
+				'test-seller-id',
+				'enterprise',
+			)
 		})
 
 		it('should handle service errors', async () => {
@@ -130,9 +149,16 @@ describe('UpdateProductController', () => {
 
 			mockProductService.update.mockRejectedValue(error)
 
-			await expect(controller.handle(productId, updateData)).rejects.toThrow('Product not found')
+			await expect(controller.handle(productId, updateData, mockRequest)).rejects.toThrow(
+				'Product not found',
+			)
 
-			expect(productService.update).toHaveBeenCalledWith(productId, updateData)
+			expect(productService.update).toHaveBeenCalledWith(
+				productId,
+				updateData,
+				'test-seller-id',
+				'enterprise',
+			)
 		})
 
 		it('should handle empty update object', async () => {
@@ -147,10 +173,15 @@ describe('UpdateProductController', () => {
 
 			mockProductService.update.mockResolvedValue(expectedResult)
 
-			const result = await controller.handle(productId, updateData)
+			const result = await controller.handle(productId, updateData, mockRequest)
 
 			expect(result).toBe(expectedResult)
-			expect(productService.update).toHaveBeenCalledWith(productId, updateData)
+			expect(productService.update).toHaveBeenCalledWith(
+				productId,
+				updateData,
+				'test-seller-id',
+				'enterprise',
+			)
 		})
 	})
 })

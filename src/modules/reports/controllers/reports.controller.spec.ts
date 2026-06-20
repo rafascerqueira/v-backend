@@ -7,6 +7,7 @@
 
 import { Test } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { FeatureGuard } from '@/modules/subscriptions/guards/feature.guard'
 import { ReportsService } from '../services/reports.service'
 import { ReportsController } from './reports.controller'
 
@@ -28,6 +29,8 @@ describe('ReportsController', () => {
 			providers: [{ provide: ReportsService, useValue: serviceMock }],
 		})
 			.overrideGuard(JwtAuthGuard)
+			.useValue({ canActivate: () => true })
+			.overrideGuard(FeatureGuard)
 			.useValue({ canActivate: () => true })
 			.compile()
 

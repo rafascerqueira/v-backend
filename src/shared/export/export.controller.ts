@@ -2,6 +2,7 @@ import { Controller, Get, Query, Req, Res, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply } from 'fastify'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { FeatureGuard, RequiredFeature } from '@/modules/subscriptions/guards/feature.guard'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import { parseLocalDate } from '@/shared/utils/date'
@@ -9,7 +10,9 @@ import { ExportService } from './export.service'
 
 @ApiTags('export')
 @Controller('export')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, FeatureGuard)
+@RequiredFeature('exportData')
+@ApiResponse({ status: 403, description: 'Requer plano Pro' })
 export class ExportController {
 	constructor(
 		private readonly exportService: ExportService,

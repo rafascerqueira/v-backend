@@ -2,7 +2,8 @@
  * CatalogService unit tests
  * Covers: getStoreBySlug, getStoreProducts, getStoreProductById, getProducts,
  *         getProductById, getCustomerById, createOrder
- * Verifies: not-found errors, product-price-stock assembly, multi-seller rejection,
+ * Verifies: not-found errors, product-price-stock assembly, slug-scoped seller
+ *           resolution (order seller comes from the store slug, not posted ids),
  *           customer find-or-create, order total calculation (integers)
  */
 import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common'
@@ -96,6 +97,8 @@ describe('CatalogService', () => {
 		service = module.get(CatalogService)
 		jest.resetAllMocks()
 		repositoryMock.findActivePromotions.mockResolvedValue([])
+		// Default: products are not stock-tracked, so catalog orders aren't blocked.
+		repositoryMock.findStocks.mockResolvedValue([])
 	})
 
 	describe('getStoreBySlug', () => {
@@ -506,29 +509,32 @@ describe('CatalogService', () => {
 		}
 
 		it('should throw BadRequestException when items is empty', async () => {
-			await expect(service.createOrder({ ...baseDto, items: [] })).rejects.toThrow(
+			await expect(service.createOrder('myshop', { ...baseDto, items: [] })).rejects.toThrow(
 				BadRequestException,
 			)
 		})
 
-		it('should throw when some products not found', async () => {
-			repositoryMock.findActiveProducts.mockResolvedValueOnce([]) // no products match
+		it('should throw NotFoundException when the store slug does not resolve', async () => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce(null)
 
-			await expect(service.createOrder(baseDto)).rejects.toThrow(BadRequestException)
+			await expect(service.createOrder('ghost-store', baseDto)).rejects.toThrow(NotFoundException)
+			expect(repositoryMock.createOrderWithItems).not.toHaveBeenCalled()
 		})
 
-		it('should throw when products belong to multiple sellers', async () => {
-			repositoryMock.findActiveProducts.mockResolvedValueOnce([
-				makeProduct(1, 'seller-1'),
-				makeProduct(2, 'seller-2'),
-			] as any)
-			repositoryMock.findActivePrices.mockResolvedValueOnce([
-				{ product_id: 1, price: 1000 },
-				{ product_id: 2, price: 2000 },
-			] as any)
+		it('should throw when some products are not in this store', async () => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
+			repositoryMock.findActiveProducts.mockResolvedValueOnce([]) // store has no matching product
+
+			await expect(service.createOrder('myshop', baseDto)).rejects.toThrow(BadRequestException)
+		})
+
+		it('rejects a product that belongs to another seller (seller comes from the slug)', async () => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
+			// findActiveProducts is scoped to seller-1, so product 2 (foreign) is absent.
+			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1, 'seller-1')] as any)
 
 			await expect(
-				service.createOrder({
+				service.createOrder('myshop', {
 					...baseDto,
 					items: [
 						{ product_id: 1, quantity: 1 },
@@ -536,9 +542,43 @@ describe('CatalogService', () => {
 					],
 				}),
 			).rejects.toThrow(BadRequestException)
+			expect(repositoryMock.createOrderWithItems).not.toHaveBeenCalled()
+		})
+
+		it('scopes the product lookup to the store seller (no global catalog scan)', async () => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
+			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
+			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price: 1500 }] as any)
+			repositoryMock.findCustomerByContact.mockResolvedValueOnce({ id: 'cust-1' } as any)
+			repositoryMock.createOrderWithItems.mockResolvedValueOnce({
+				id: 100,
+				order_number: 'PED-X',
+				status: 'pending',
+				total: 3000,
+				customer: { id: 'cust-1', name: 'Alice' },
+				Order_item: [],
+			} as any)
+
+			await service.createOrder('myshop', baseDto)
+
+			expect(repositoryMock.findActiveProducts).toHaveBeenCalledWith('seller-1')
+		})
+
+		it('blocks the order when a tracked product is out of stock (no oversell for customers)', async () => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
+			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
+			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price: 1500 }] as any)
+			repositoryMock.findStocks.mockResolvedValueOnce([
+				{ product_id: 1, quantity: 1, reserved_quantity: 0 },
+			] as any)
+
+			// baseDto orders quantity 2 of product 1, which only has 1 available.
+			await expect(service.createOrder('myshop', baseDto)).rejects.toThrow('Estoque insuficiente')
+			expect(repositoryMock.createOrderWithItems).not.toHaveBeenCalled()
 		})
 
 		it('should create order with correct integer totals using existing customer', async () => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
 			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
 			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price: 1500 }] as any)
 			repositoryMock.findCustomerByContact.mockResolvedValueOnce({ id: 'cust-1' } as any)
@@ -553,7 +593,7 @@ describe('CatalogService', () => {
 				],
 			} as any)
 
-			const result = await service.createOrder(baseDto)
+			const result = await service.createOrder('myshop', baseDto)
 
 			expect(result.total).toBe(3000) // integer cents
 			expect(repositoryMock.createCustomer).not.toHaveBeenCalled()
@@ -561,9 +601,11 @@ describe('CatalogService', () => {
 			expect(orderData.subtotal).toBe(3000) // 2 * 1500
 			expect(orderData.total).toBe(3000)
 			expect(orderData.discount).toBe(0)
+			expect(orderData.seller_id).toBe('seller-1') // seller resolved from the slug
 		})
 
 		it('should create a new customer when none exists', async () => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
 			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
 			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price: 1000 }] as any)
 			repositoryMock.findCustomerByContact.mockResolvedValueOnce(null)
@@ -577,7 +619,7 @@ describe('CatalogService', () => {
 				Order_item: [],
 			} as any)
 
-			await service.createOrder(baseDto)
+			await service.createOrder('myshop', baseDto)
 
 			expect(repositoryMock.createCustomer).toHaveBeenCalled()
 		})

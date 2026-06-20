@@ -10,6 +10,7 @@ export interface Product {
 	specifications: Record<string, unknown>
 	images: string[]
 	active: boolean
+	allow_oversell: boolean
 	deletedAt: Date | null
 	createdAt: Date
 	updatedAt: Date
@@ -26,6 +27,7 @@ export interface CreateProductData {
 	specifications?: Record<string, unknown>
 	images?: string[]
 	active?: boolean
+	allow_oversell?: boolean
 }
 
 export type UpdateProductData = Partial<CreateProductData>

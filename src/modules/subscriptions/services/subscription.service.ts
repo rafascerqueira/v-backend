@@ -5,6 +5,7 @@ import {
 	type SubscriptionRepository,
 } from '@/shared/repositories/subscription.repository'
 import { PLAN_LIMITS, type PlanType } from '../constants/plan-limits'
+import { PlanLimitsService } from './plan-limits.service'
 
 @Injectable()
 export class SubscriptionService {
@@ -12,6 +13,7 @@ export class SubscriptionService {
 		@Inject(SUBSCRIPTION_REPOSITORY)
 		private readonly subscriptionRepository: SubscriptionRepository,
 		private readonly settingsService: SettingsService,
+		private readonly planLimitsService: PlanLimitsService,
 	) {}
 
 	async getAccountPlan(accountId: string): Promise<PlanType> {
@@ -80,6 +82,11 @@ export class SubscriptionService {
 		const limits = PLAN_LIMITS[plan]
 		const unlimitedActiveForFree = plan === 'free' && unlimitedWindow.isActive
 
+		// Features must reflect the EFFECTIVE plan (promo window / admin grant), the same
+		// resolution the FeatureGuard uses — otherwise the UI would lock a feature the API
+		// actually allows (or vice-versa).
+		const features = await this.planLimitsService.getEffectiveFeatures(accountId, plan)
+
 		const effectiveLimits = unlimitedActiveForFree
 			? { products: -1, orders: -1, customers: -1 }
 			: {
@@ -117,7 +124,7 @@ export class SubscriptionService {
 							: Math.round((usage.customers_count / effectiveLimits.customers) * 100),
 				},
 			},
-			features: limits.features,
+			features,
 			periodStart: usage.period_start,
 			periodEnd: usage.period_end,
 			activeWindow: unlimitedActiveForFree

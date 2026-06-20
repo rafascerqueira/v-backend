@@ -54,6 +54,23 @@ export interface CreateOrderData {
 	billing?: CreateOrderBillingData
 }
 
+// An item that was sold past its available stock because the product is flagged
+// allow_oversell. Surfaced from create() so the service can notify the seller that
+// these units are pending delivery (stock has gone negative).
+export interface OversoldItem {
+	product_id: number
+	product_name: string
+	available: number
+	requested: number
+}
+
+// create() returns the order plus any oversold items, keeping the notification
+// (a side effect) in the service layer instead of the repository transaction.
+export interface CreateOrderResult {
+	order: OrderWithRelations
+	oversold: OversoldItem[]
+}
+
 export interface CreateOrderBillingData {
 	billing_number: string
 	total_amount: number
@@ -76,7 +93,7 @@ export interface CreateOrderItemData {
 export const ORDER_REPOSITORY = Symbol('ORDER_REPOSITORY')
 
 export interface OrderRepository {
-	create(data: CreateOrderData): Promise<OrderWithRelations>
+	create(data: CreateOrderData): Promise<CreateOrderResult>
 	addItem(data: CreateOrderItemData): Promise<OrderItem>
 	findById(id: number): Promise<OrderWithRelations | null>
 	findAll(filter: Record<string, unknown>): Promise<OrderWithRelations[]>

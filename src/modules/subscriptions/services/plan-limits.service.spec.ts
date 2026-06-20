@@ -78,6 +78,47 @@ describe('PlanLimitsService', () => {
 		})
 	})
 
+	describe('hasFeature', () => {
+		it('denies all gated features on the free plan', async () => {
+			expect(await service.hasFeature('s', 'free', 'reports')).toBe(false)
+			expect(await service.hasFeature('s', 'free', 'exportData')).toBe(false)
+			expect(await service.hasFeature('s', 'free', 'multipleImages')).toBe(false)
+			expect(await service.hasFeature('s', 'free', 'customBranding')).toBe(false)
+		})
+
+		it('grants Pro features but not enterprise-only ones on the pro plan', async () => {
+			expect(await service.hasFeature('s', 'pro', 'reports')).toBe(true)
+			expect(await service.hasFeature('s', 'pro', 'exportData')).toBe(true)
+			expect(await service.hasFeature('s', 'pro', 'multipleImages')).toBe(true)
+			expect(await service.hasFeature('s', 'pro', 'customBranding')).toBe(false)
+		})
+
+		it('grants every feature on the enterprise plan', async () => {
+			expect(await service.hasFeature('s', 'enterprise', 'customBranding')).toBe(true)
+			expect(await service.hasFeature('s', 'enterprise', 'apiAccess')).toBe(true)
+		})
+
+		it('lifts a free seller to Pro features during an active unlimited window', async () => {
+			settingsServiceMock.getUnlimitedPeriodWindow.mockResolvedValue({
+				startDate: null,
+				endDate: null,
+				isActive: true,
+			})
+			expect(await service.hasFeature('s', 'free', 'reports')).toBe(true)
+			expect(await service.hasFeature('s', 'free', 'customBranding')).toBe(false)
+		})
+
+		it('respects an admin plan grant (free → enterprise features)', async () => {
+			exceptionServiceMock.resolveActiveExceptions.mockResolvedValue({
+				unlimitedWindow: null,
+				planGrant: { grantedPlan: 'enterprise' },
+				customLimits: null,
+				billingAdjustment: null,
+			})
+			expect(await service.hasFeature('s', 'free', 'customBranding')).toBe(true)
+		})
+	})
+
 	describe('getLimits', () => {
 		it('should return free plan limits', () => {
 			const limits = service.getLimits('free')

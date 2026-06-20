@@ -1,4 +1,6 @@
+import { ForbiddenException } from '@nestjs/common'
 import { Test, type TestingModule } from '@nestjs/testing'
+import { PlanLimitsService } from '@/modules/subscriptions/services/plan-limits.service'
 import {
 	type CreateProductData,
 	PRODUCT_REPOSITORY,
@@ -12,6 +14,7 @@ import { ProductService } from './product.service'
 describe('ProductService', () => {
 	let service: ProductService
 	let productRepository: jest.Mocked<ProductRepository>
+	const planLimitsServiceMock = { hasFeature: jest.fn() }
 
 	let productsStore: Product[]
 	let idSeq: number
@@ -36,6 +39,7 @@ describe('ProductService', () => {
 					specifications: data.specifications || {},
 					images: data.images || [],
 					active: data.active ?? true,
+					allow_oversell: data.allow_oversell ?? false,
 				}
 				productsStore.push(newItem)
 				return newItem
@@ -94,11 +98,13 @@ describe('ProductService', () => {
 				ProductService,
 				{ provide: PRODUCT_REPOSITORY, useValue: repositoryMock },
 				{ provide: PRODUCT_PRICE_REPOSITORY, useValue: priceRepositoryMock },
+				{ provide: PlanLimitsService, useValue: planLimitsServiceMock },
 			],
 		}).compile()
 
 		service = module.get<ProductService>(ProductService)
 		productRepository = module.get(PRODUCT_REPOSITORY)
+		planLimitsServiceMock.hasFeature.mockReset().mockResolvedValue(true)
 	})
 
 	it('should be defined', () => {
@@ -120,11 +126,39 @@ describe('ProductService', () => {
 		}
 
 		it('should create a product', async () => {
-			const result = await service.create(productData)
+			const result = await service.create(productData, 'pro')
 
 			expect(productRepository.create).toHaveBeenCalledWith(productData)
 			expect(result).toBeTruthy()
 			expect(result?.name).toBe(productData.name)
+		})
+
+		it('blocks more than one image without the multipleImages feature', async () => {
+			planLimitsServiceMock.hasFeature.mockResolvedValue(false)
+			await expect(
+				service.create({ ...productData, images: ['a.jpg', 'b.jpg'] } as CreateProductData, 'free'),
+			).rejects.toThrow(ForbiddenException)
+			expect(productRepository.create).not.toHaveBeenCalled()
+			expect(planLimitsServiceMock.hasFeature).toHaveBeenCalledWith(
+				'test-seller-id',
+				'free',
+				'multipleImages',
+			)
+		})
+
+		it('allows multiple images when the feature is available', async () => {
+			planLimitsServiceMock.hasFeature.mockResolvedValue(true)
+			const result = await service.create(
+				{ ...productData, images: ['a.jpg', 'b.jpg'] } as CreateProductData,
+				'pro',
+			)
+			expect(result).toBeTruthy()
+			expect(productRepository.create).toHaveBeenCalled()
+		})
+
+		it('allows a single image without checking the feature', async () => {
+			await service.create({ ...productData, images: ['only.jpg'] } as CreateProductData, 'free')
+			expect(planLimitsServiceMock.hasFeature).not.toHaveBeenCalled()
 		})
 	})
 
@@ -175,9 +209,14 @@ describe('ProductService', () => {
 				unit: 'piece',
 			})
 
-			const result = await service.update(created.id.toString(), {
-				name: 'Updated Product',
-			})
+			const result = await service.update(
+				created.id.toString(),
+				{
+					name: 'Updated Product',
+				},
+				'test-seller-id',
+				'pro',
+			)
 
 			expect(result).toBeTruthy()
 			expect(result?.name).toBe('Updated Product')

@@ -5,7 +5,7 @@ import {
 	PLAN_LIMITS_REPOSITORY,
 	type PlanLimitsRepository,
 } from '@/shared/repositories/plan-limits.repository'
-import { PLAN_LIMITS as CANONICAL_LIMITS } from '../constants/plan-limits'
+import { PLAN_LIMITS as CANONICAL_LIMITS, type PlanFeatures } from '../constants/plan-limits'
 
 export interface PlanLimits {
 	maxProducts: number
@@ -118,6 +118,43 @@ export class PlanLimitsService {
 			return this.isUnlimitedPeriodActive()
 		}
 		return false
+	}
+
+	/**
+	 * Whether a seller may use a plan feature (reports, exportData, multipleImages,
+	 * customBranding, …). Resolves the *effective* plan the same way usage limits do:
+	 * an admin plan grant raises the plan, and an active promo/unlimited window lifts a
+	 * free seller to Pro-level features. Enterprise grants everything. The canonical
+	 * source of truth is the PLAN_LIMITS feature matrix — no separate config.
+	 */
+	async hasFeature(sellerId: string, planType: string, feature: PlanFeatures): Promise<boolean> {
+		const features = await this.getEffectiveFeatures(sellerId, planType)
+		return features[feature]
+	}
+
+	/**
+	 * The full feature set for a seller's *effective* plan. Single source of truth for
+	 * both the FeatureGuard (`hasFeature`) and the `/subscriptions/info` payload the
+	 * frontend gates on — so backend enforcement and UI locks never disagree during a
+	 * promo window or under an admin plan grant.
+	 */
+	async getEffectiveFeatures(
+		sellerId: string,
+		planType: string,
+	): Promise<Record<PlanFeatures, boolean>> {
+		const resolved = await this.resolveEffectivePlan(sellerId, planType)
+		let effectivePlan = resolved.effectivePlan
+
+		if (
+			effectivePlan === 'free' &&
+			(resolved.unlimitedFromException || (await this.isUnlimitedPeriodActive()))
+		) {
+			effectivePlan = 'pro'
+		}
+
+		const plan =
+			CANONICAL_LIMITS[effectivePlan as keyof typeof CANONICAL_LIMITS] ?? CANONICAL_LIMITS.free
+		return plan.features
 	}
 
 	async getUsageStats(sellerId: string): Promise<UsageStats> {

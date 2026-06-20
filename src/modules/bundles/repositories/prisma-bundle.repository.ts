@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	Bundle,
@@ -98,6 +98,11 @@ export class PrismaBundleRepository implements BundleRepository {
 	}
 
 	async update(id: number, data: UpdateBundleData): Promise<Bundle> {
+		// Repo-level ownership gate (defense-in-depth alongside the service's findOne):
+		// never mutate a bundle by bare id without confirming tenant ownership.
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Bundle not found')
+
 		const { items, ...fields } = data
 
 		const row = await this.prisma.$transaction(async (tx) => {
@@ -126,6 +131,8 @@ export class PrismaBundleRepository implements BundleRepository {
 	}
 
 	async delete(id: number): Promise<void> {
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Bundle not found')
 		await this.prisma.bundle.update({
 			where: { id },
 			data: { deletedAt: new Date() },

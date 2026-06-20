@@ -32,7 +32,7 @@ You are a senior NestJS engineer working on https://github.com/rafascerqueira/v-
 - UI language: Portuguese (Brazil). Code identifiers: English.
 - Multi-tenant: seller isolation via `TenantContext` (AsyncLocalStorage) at `shared/tenant/tenant.context.ts`.
 - Two user roles: `admin` (Sysadmin/Help Desk) and `user` (Salesperson).
-- Two plans: `free` and `pro`, enforced via `PlanLimitsGuard` and `PlanGuard`.
+- Plans: `free`, `pro`, `enterprise`, enforced via `PlanLimitsGuard` (usage quotas) and `FeatureGuard` (feature flags).
 - Auth: email/password + Google + Facebook. JWT RS256 access (1d) + refresh (7d) tokens.
 - Tokens returned in response body AND set as HttpOnly cookies.
 - Password reset forces change. Email verification on registration.
@@ -94,7 +94,7 @@ src/modules/{feature}/
 | Guard | Location | Purpose |
 |---|---|---|
 | `PlanLimitsGuard` | `subscriptions/guards/plan-limits.guard.ts` | Enforces **quota limits** (max products, customers, orders/month). Use `@CheckPlanLimit('product' \| 'customer' \| 'order')` on creation endpoints. |
-| `PlanGuard` | `subscriptions/guards/plan.guard.ts` | Enforces **plan tier and feature flags**. Use `@RequiredPlan(...)` or `@RequiredFeature(...)` decorators. |
+| `FeatureGuard` | `subscriptions/guards/feature.guard.ts` | Enforces **feature flags** from the `PLAN_LIMITS[plan].features` matrix (`reports`, `exportData`, `multipleImages`, `customBranding`, …). Use `@RequiredFeature('reports' \| 'exportData' \| …)` for endpoint-level gates → 403 with a pt-BR upgrade message; admins bypass; resolves the **effective** plan (admin grants + promo window). For value-based gates (e.g. image count) call `PlanLimitsService.hasFeature(sellerId, planType, feature)` inside the service. A raw `@RequiredPlan(tier)` guard is intentionally **not** used — gating is feature-flag based. |
 
 Both are exported from `SubscriptionsModule` (global). Import neither — they're already available globally.
 
@@ -143,9 +143,9 @@ Both are exported from `SubscriptionsModule` (global). Import neither — they'r
   ```typescript
   .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
   .overrideGuard(PlanLimitsGuard).useValue({ canActivate: () => true })
-  .overrideGuard(PlanGuard).useValue({ canActivate: () => true })
+  .overrideGuard(FeatureGuard).useValue({ canActivate: () => true }) // on feature-gated controllers (reports/export)
   ```
-- When `PlanLimitsGuard` or `PlanGuard` is present, provide a `PlanLimitsService` mock.
+- When `PlanLimitsGuard` or `FeatureGuard` is present, provide a `PlanLimitsService` mock.
 - Service tests mock repository interfaces via DI tokens. Never use real PrismaService in unit tests.
 - E2E tests must authenticate (obtain JWT) before calling protected endpoints.
 - Coverage target: 60% minimum, collected from `modules/**/controllers/**` and `modules/**/services/**`.

@@ -1,0 +1,57 @@
+name: SBOM + Dependency-Track
+
+# Phase 4 — continuous SCA. Generates a CycloneDX SBOM on every release to main and
+# weekly, uploads it as a build artifact, and — only if a Dependency-Track server is
+# configured via secrets — pushes it there for continuous "new CVE in an already-
+# shipped dep" alerting. Async: zero cost to the PR hot path.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 5 * * 1' # Mondays 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    name: Generate + publish SBOM
+    runs-on: ubuntu-latest
+    env:
+      DTRACK_URL: ${{ secrets.DTRACK_URL }}
+      DTRACK_API_KEY: ${{ secrets.DTRACK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # cdxgen reads pnpm-lock.yaml + node_modules to produce a full dependency SBOM.
+      - name: Generate CycloneDX SBOM
+        run: npx --yes @cyclonedx/cdxgen@^11 -o sbom.json --spec-version 1.5
+        env:
+          FETCH_LICENSE: "true"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-backend-${{ github.sha }}
+          path: sbom.json
+
+      # Optional continuous monitoring — runs only when a DT server is configured.
+      # DT's BOM API: POST /api/v1/bom (multipart), X-Api-Key header, autoCreate.
+      - name: Upload SBOM to Dependency-Track
+        if: ${{ env.DTRACK_URL != '' && env.DTRACK_API_KEY != '' }}
+        run: |
+          curl -sf -X POST "$DTRACK_URL/api/v1/bom" \
+            -H "X-Api-Key: $DTRACK_API_KEY" \
+            -F "autoCreate=true" \
+            -F "projectName=v-backend" \
+            -F "projectVersion=${{ github.ref_name }}" \
+            -F "bom=@sbom.json"

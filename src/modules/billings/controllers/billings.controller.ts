@@ -58,7 +58,6 @@ export class BillingsController {
 				billing_number: 'BILL-001',
 				total_amount: 1000,
 				paid_amount: 0,
-				status: 'pending',
 			},
 		},
 	})
@@ -70,13 +69,22 @@ export class BillingsController {
 	}
 
 	@Patch('billings/:id')
-	@ApiOperation({ summary: 'Update billing' })
+	@ApiOperation({ summary: 'Update billing (status/payment_status are derived from amounts)' })
 	@ApiParam({ name: 'id', type: Number })
 	async update(
 		@Param('id') id: string,
 		@Body(new ZodValidationPipe(updateBillingSchema)) body: UpdateBillingDto,
 	) {
 		return this.service.update(Number(id), body)
+	}
+
+	@Patch('billings/:id/cancel')
+	@ApiOperation({ summary: 'Cancel (void) a billing' })
+	@ApiParam({ name: 'id', type: Number })
+	@ApiResponse({ status: 200, description: 'Billing canceled' })
+	@ApiResponse({ status: 404, description: 'Billing not found' })
+	async cancel(@Param('id') id: string) {
+		return this.service.cancel(Number(id))
 	}
 
 	@Delete('billings/:id')

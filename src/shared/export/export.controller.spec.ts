@@ -8,6 +8,7 @@
 
 import { Test } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { FeatureGuard } from '@/modules/subscriptions/guards/feature.guard'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import { ExportController } from './export.controller'
@@ -50,6 +51,8 @@ describe('ExportController', () => {
 			],
 		})
 			.overrideGuard(JwtAuthGuard)
+			.useValue({ canActivate: () => true })
+			.overrideGuard(FeatureGuard)
 			.useValue({ canActivate: () => true })
 			.compile()
 

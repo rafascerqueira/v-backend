@@ -164,9 +164,10 @@ export class CatalogController {
 	}
 
 	@Public()
-	@Post('orders')
+	@Post('loja/:slug/orders')
 	@HttpCode(HttpStatus.CREATED)
-	@ApiOperation({ summary: 'Create order from catalog (public)' })
+	@ApiOperation({ summary: 'Create order from a specific store (public)' })
+	@ApiParam({ name: 'slug', type: String, description: 'Store slug' })
 	@ApiBody({
 		schema: {
 			example: {
@@ -190,9 +191,11 @@ export class CatalogController {
 	})
 	@ApiResponse({ status: 201, description: 'Order created successfully' })
 	@ApiResponse({ status: 400, description: 'Invalid data' })
+	@ApiResponse({ status: 404, description: 'Store not found' })
 	async createOrder(
+		@Param('slug') slug: string,
 		@Body(new ZodValidationPipe(createCatalogOrderSchema)) body: CreateCatalogOrderDto,
 	) {
-		return this.service.createOrder(body)
+		return this.service.createOrder(slug, body)
 	}
 }

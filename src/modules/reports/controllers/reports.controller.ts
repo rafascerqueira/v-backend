@@ -1,11 +1,14 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common'
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { FeatureGuard, RequiredFeature } from '@/modules/subscriptions/guards/feature.guard'
 import { ReportsService } from '../services/reports.service'
 
 @ApiTags('reports')
 @Controller('reports')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, FeatureGuard)
+@RequiredFeature('reports')
+@ApiResponse({ status: 403, description: 'Requer plano Pro' })
 export class ReportsController {
 	constructor(private readonly reportsService: ReportsService) {}
 

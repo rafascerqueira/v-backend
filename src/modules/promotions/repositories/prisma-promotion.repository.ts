@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreatePromotionData,
@@ -21,6 +21,15 @@ export class PrismaPromotionRepository implements PromotionRepository {
 
 	private readonly include = {
 		product: { select: { id: true, name: true } },
+	}
+
+	// A seller may only build a promotion on their own product. Foreign product → 404
+	// so its price can't be read cross-tenant.
+	private async verifyProductOwnership(productId: number): Promise<void> {
+		const product = await this.prisma.product.findFirst({
+			where: { id: productId, ...this.getTenantFilter() },
+		})
+		if (!product) throw new NotFoundException('Product not found')
 	}
 
 	private computeStatus(row: {
@@ -72,6 +81,10 @@ export class PrismaPromotionRepository implements PromotionRepository {
 	}
 
 	async end(id: number): Promise<Promotion> {
+		// Repo-level ownership gate (defense-in-depth alongside the service's findOne).
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Promotion not found')
+
 		const row = await this.prisma.promotion.update({
 			where: { id },
 			data: { status: 'expired' },
@@ -81,6 +94,9 @@ export class PrismaPromotionRepository implements PromotionRepository {
 	}
 
 	async getLatestProductPrice(productId: number): Promise<number> {
+		// Confirm the product belongs to the caller before exposing its price.
+		await this.verifyProductOwnership(productId)
+
 		const price = await this.prisma.product_price.findFirst({
 			where: { product_id: productId, active: true, price_type: 'sale' },
 			orderBy: { createdAt: 'desc' },

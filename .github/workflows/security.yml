@@ -1,0 +1,29 @@
+name: Security
+
+# Phase 2 — secret scanning. Additive: independent of the deploy pipeline.
+# Blocking lane: a leaked credential fails the job (and the PR check).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history so gitleaks scans past commits, not just the PR diff.
+          # The first run may surface historical findings to triage.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE is only required for GitHub *organization* accounts.
+          # Personal/public repos run free without it.
+          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

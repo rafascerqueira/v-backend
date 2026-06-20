@@ -70,6 +70,16 @@ export class PrismaStoreStockRepository implements StoreStockRepository {
 			throw new NotFoundException('Product not found')
 		}
 
+		// Deriving seller_id from the product is not an ownership check: without
+		// this gate a seller could create/overwrite another tenant's stock row by
+		// guessing a product id. Foreign product → 404 (never leak existence).
+		if (
+			!this.tenantContext.isAdmin() &&
+			product.seller_id !== this.tenantContext.requireSellerId()
+		) {
+			throw new NotFoundException('Product not found')
+		}
+
 		return this.prisma.store_stock.upsert({
 			where: { product_id: productId },
 			create: {

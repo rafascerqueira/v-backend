@@ -187,6 +187,7 @@ model Product {
   specifications Json             @default("{}") @db.JsonB()
   images         String[]         @default([])
   active         Boolean          @default(true)
+  allow_oversell Boolean          @default(false)
   createdAt      DateTime         @default(now()) @db.Timestamptz()
   updatedAt      DateTime         @updatedAt @db.Timestamptz()
   deletedAt      DateTime?        @db.Timestamptz()

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	BillingRecord,
@@ -79,8 +79,10 @@ export class PrismaBillingRepository implements BillingRepository {
 	}
 
 	async findById(id: number): Promise<BillingWithOrder | null> {
-		const row = await this.prisma.billing.findUnique({
-			where: { id },
+		// Tenant-scope through the order relation so a foreign billing looks
+		// non-existent (→ service returns 404, never a 403 that leaks existence).
+		const row = await this.prisma.billing.findFirst({
+			where: { id, ...this.getTenantFilter() } as any,
 			include: {
 				order: { select: { id: true, order_number: true, seller_id: true, status: true } },
 			},
@@ -131,6 +133,11 @@ export class PrismaBillingRepository implements BillingRepository {
 	}
 
 	async update(id: number, data: UpdateBillingData): Promise<BillingRecord> {
+		// Repo-level ownership gate: never mutate a billing by bare id without
+		// confirming it belongs to the caller's tenant first.
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Cobrança não encontrada')
+
 		const row = await this.prisma.billing.update({
 			where: { id },
 			data: {
@@ -144,6 +151,8 @@ export class PrismaBillingRepository implements BillingRepository {
 	}
 
 	async delete(id: number): Promise<void> {
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Cobrança não encontrada')
 		await this.prisma.billing.delete({ where: { id } })
 	}
 

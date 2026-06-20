@@ -1,5 +1,10 @@
 # VPS Runbook — Vendinhas Backend
 
+> Backend-focused operations + incident history. The **canonical** end-to-end
+> deploy, bootstrap, and disaster-recovery guide is `DEPLOY.md` at the monorepo
+> root — when the two disagree, `DEPLOY.md` and the live pipeline win. Keep this
+> file in sync with it.
+
 ## Infrastructure Overview
 
 ```
@@ -13,7 +18,7 @@
 ┌───────────────────────┐   ┌───────────────────────┐
 │   vendinhas.app       │   │  api.vendinhas.app    │
 │   (Next.js :3000)     │   │   (NestJS :3001)      │
-│   PM2 - 2 instances   │   │   PM2 - 2 instances   │
+│   PM2 fork, 1 inst.   │   │   PM2 fork, 1 inst.   │
 └───────────────────────┘   └───────────┬───────────┘
                                         │
                     ┌───────────────────┴───────────────────┐
@@ -28,7 +33,7 @@
 
 - **VPS**: Hostinger KVM2, Ubuntu 22.04/24.04
 - **Domain**: vendinhas.app (frontend) / api.vendinhas.app (backend API)
-- **App runtime**: Node.js 22 + PM2 (cluster mode, 2 instances)
+- **App runtime**: Node.js 22 + PM2 (fork mode, 1 instance per app)
 - **Database**: PostgreSQL 17 (Docker) — `public` schema only
 - **Cache**: Redis 7 (Docker)
 - **Reverse proxy**: Nginx + Let's Encrypt SSL
@@ -41,7 +46,7 @@
 ├── backend/              # v-backend repo (NestJS API)
 │   ├── .env              # Environment variables (NOT in git)
 │   ├── .env.docker       # Docker Compose env (NOT in git)
-│   ├── dist/             # Compiled JS (built by deploy.sh)
+│   ├── dist/             # Compiled JS (built on the CI runner, rsynced in)
 │   ├── keys/             # RSA keys for JWT (NOT in git)
 │   ├── ecosystem.config.js  # PM2 config (from repo)
 │   └── nginx/vendinhas.conf # Canonical Nginx config
@@ -50,7 +55,7 @@
 │   ├── products/
 │   ├── profiles/
 │   └── temp/
-└── backups/              # Rollback artifacts (managed by deploy.sh)
+└── backups/              # Nightly DB dumps (cron) + rollback artifacts (manual deploy.sh)
     ├── dist/             # Previous compiled output
     ├── package.json
     └── pnpm-lock.yaml
@@ -58,32 +63,51 @@
 
 ## Deploy Flow
 
-Deploys are triggered automatically by GitHub Actions on push to `main`:
+Deploys are triggered automatically by GitHub Actions on push to `main`. The VPS
+**does not build** — artifacts are compiled on the GitHub runner and rsynced in.
+(Full guide: `DEPLOY.md` at the monorepo root.)
 
-1. **CI job** (GitHub-hosted runner): lint → build → test
-2. **Deploy job** (SSH to VPS): runs `scripts/deploy.sh main`
-3. **External health check**: `curl https://api.vendinhas.app/health`
+1. **CI jobs** (GitHub-hosted runners): lint (`biome ci`) → build → unit tests,
+   plus a separate **E2E** job (supertest against ephemeral Postgres + Redis) and
+   a `pnpm audit` CVE gate that fails on CRITICAL advisories.
+2. **Deploy job** (gated on CI + E2E, `main` only): builds on the runner, then
+   rsyncs `dist/`, `prisma/`, `package.json`, `pnpm-lock.yaml`,
+   `ecosystem.config.js`, and `nginx/` into `/var/www/vendinhas/backend/`.
+3. **Activate over SSH** — inlined in the workflow; it does **not** call
+   `deploy.sh`:
+   1. `pnpm install --frozen-lockfile`
+   2. `source .env` → `pnpm prisma generate`
+   3. `pnpm prisma migrate deploy`
+   4. **Migration-drift guard**: aborts before any reload if the migration
+      directories on disk ≠ applied rows in `_prisma_migrations`.
+   5. Apply `prisma/migrations/manual/subscription_triggers.sql` if present.
+   6. Copy `nginx/vendinhas.conf` → `nginx -t` → reload nginx.
+   7. `pm2 reload ecosystem.config.js --update-env`.
+4. **Health check** (on the VPS): `curl http://localhost:3001/health/liveness`,
+   5 retries 15s apart. The CI deploy does **not** auto-roll-back — to recover
+   from a bad deploy, re-run the last green workflow.
 
-### What `deploy.sh` does:
-1. Backs up current `dist/`, `package.json`, `pnpm-lock.yaml` to `/var/www/vendinhas/backups/`
-2. `git pull origin main`
-3. `pnpm install --frozen-lockfile`
-4. Sources `.env` and runs `pnpm prisma generate`
-5. `pnpm prisma migrate deploy`
-6. `pnpm build`
-7. `pm2 reload ecosystem.config.js --update-env` (env vars from `.env`)
-8. Local health check with retries
-9. **On failure**: automatic rollback to previous `dist/` + PM2 reload
+### Manual deploy fallback — `scripts/deploy.sh`
 
-### Manual deploy:
+`scripts/deploy.sh` is **not** what CI runs; it's a manual, on-box fallback for
+when GitHub Actions is down or the pipeline is broken. Unlike the pipeline it
+**builds on the VPS**: backs up the current `dist/` + manifests → `git pull` →
+`pnpm install --frozen-lockfile` → `prisma generate` → `prisma migrate deploy` →
+`pnpm build` → `pm2 reload --update-env` → health check, and its `trap`
+**auto-rolls-back** to the previous `dist/` on failure.
+
 ```bash
 cd /var/www/vendinhas/backend
 ./scripts/deploy.sh main
 ```
 
+> The script's header comment still reads "Called by GitHub Actions deploy
+> workflow" — that's **stale**. The workflow inlines its own activation steps
+> (above) and never invokes `deploy.sh`.
+
 ## Environment Variables
 
-PM2 receives environment variables from the shell. The `deploy.sh` script sources `.env` before reloading PM2 with `--update-env`.
+PM2 receives environment variables from the shell. Both the deploy pipeline and `deploy.sh` source `.env` before `pm2 reload --update-env`.
 
 **Never hardcode secrets in `ecosystem.config.js`.**
 
@@ -149,7 +173,10 @@ sudo systemctl reload nginx
 
 ## Rollback
 
-`deploy.sh` handles rollback automatically on failure. For manual rollback:
+The manual `scripts/deploy.sh` auto-rolls-back on a failed health check. The
+**GitHub Actions deploy does not** — to recover from a bad CI deploy, re-run the
+last green workflow (on the prior commit's run page). For a manual rollback to
+the previous build (the backup only exists if `deploy.sh` has run):
 
 ```bash
 cd /var/www/vendinhas/backend
@@ -160,13 +187,15 @@ pm2 reload ecosystem.config.js --update-env
 
 ## GitHub Actions Secrets
 
-Configure at: https://github.com/rafascerqueira/v-backend/settings/secrets/actions
+Configured under **Settings → Environments → production** (the deploy job runs
+with `environment: production`):
 
 | Secret | Description |
 |--------|-------------|
 | `VPS_HOST` | VPS IP address or hostname |
-| `VPS_USER` | SSH username on the VPS |
+| `VPS_USER` | SSH username on the VPS (owns `/var/www/vendinhas`, runs PM2) |
 | `VPS_SSH_KEY` | Full private SSH key (`-----BEGIN ... END-----`) |
+| `VPS_KNOWN_HOSTS` | *(optional)* pinned SSH host key; if unset the deploy falls back to `ssh-keyscan` with retries |
 
 ## Known Constraints
 
@@ -257,8 +286,8 @@ column in `public.customers`).
   `prisma.config.ts`.
 - Removed leftover untracked files under `backend/` that were a stale
   manual deploy: `migrations/`, `schema.prisma`, `seed.ts`,
-  `vendinhas.conf`. Deploys happen via `scripts/deploy.sh` triggered by
-  GitHub Actions.
+  `vendinhas.conf`. Automated deploys rsync build artifacts from the GitHub
+  Actions pipeline (not a manual on-box build), so these shouldn't reappear.
 
 **Open follow-ups (not addressed in this incident)**
 

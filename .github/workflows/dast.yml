@@ -1,0 +1,96 @@
+name: DAST (nightly)
+
+# Phase 3 — dynamic scan. Out of the hot path: scheduled nightly, never per-PR.
+# Boots the API against ephemeral Postgres + Redis and runs an OWASP ZAP baseline
+# (passive spider + passive checks — no active attacks). Report-only: the job never
+# fails the build; findings are uploaded as an artifact.
+on:
+  schedule:
+    - cron: '0 4 * * *' # 04:00 UTC nightly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zap-baseline:
+    name: ZAP baseline — booted API
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports: [ "5433:5432" ]
+        options: >-
+          --health-cmd "pg_isready -U test_user -d test_db" --health-interval 10s
+          --health-timeout 5s --health-retries 5
+
+      redis:
+        image: redis:7
+        ports: [ "6380:6379" ]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout
+          5s --health-retries 5
+
+    env:
+      # NODE_ENV=test keeps isProduction=false, so the app boots without the full
+      # prod secret set and Swagger is mounted — more surface for the spider.
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5433/test_db
+      REDIS_HOST: localhost
+      REDIS_PORT: "6380"
+      REDIS_KEY_PREFIX: "vendinhas:dast:"
+      JWT_KEYS_DIR: ./keys
+      PORT: "3001"
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm prisma generate
+        env:
+          DATABASE_URL: postgresql://localhost/placeholder
+
+      # TokenService is RS256-only and reads keys/{private,public}.pem at boot.
+      - name: Generate ephemeral RS256 JWT keys
+        run: |
+          mkdir -p keys
+          openssl genpkey -algorithm RSA -out keys/private.pem -pkeyopt rsa_keygen_bits:2048
+          openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+
+      - name: Apply migrations
+        run: pnpm prisma migrate deploy
+
+      - name: Build
+        run: pnpm build
+
+      - name: Boot API and wait for liveness
+        run: |
+          node dist/main &
+          echo $! > app.pid
+          # Background process survives into the next step until job end.
+          npx --yes wait-on -t 60000 http://localhost:3001/health/liveness
+
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://localhost:3001'
+          # Report-only: do not fail the job, do not auto-open GitHub issues.
+          fail_action: false
+          allow_issue_writing: false
+          # NOTE: header findings (HSTS / X-Frame-Options / CSP) on the bare app are
+          # EXPECTED — those are added by nginx at the edge in prod, not by Node.
+          # The value here is spidering for unexpected endpoints, error/info leaks,
+          # and app-level passive issues. See EDGE_SECURITY_RUNBOOK.md.

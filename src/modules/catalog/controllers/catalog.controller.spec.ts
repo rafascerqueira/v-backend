@@ -105,9 +105,8 @@ describe('CatalogController', () => {
 	})
 
 	describe('createOrder', () => {
-		it('should create order from catalog and return the new order', async () => {
+		it('should create an order for the store in the route and pass the slug through', async () => {
 			const orderBody: any = {
-				seller_id: 'seller-1',
 				customer: {
 					name: 'João Silva',
 					email: 'joao@email.com',
@@ -119,16 +118,16 @@ describe('CatalogController', () => {
 			const createdOrder = { id: 100, ...orderBody }
 			serviceMock.createOrder.mockResolvedValueOnce(createdOrder)
 
-			const result = await controller.createOrder(orderBody)
+			const result = await controller.createOrder('my-shop', orderBody)
 
-			expect(serviceMock.createOrder).toHaveBeenCalledWith(orderBody)
+			expect(serviceMock.createOrder).toHaveBeenCalledWith('my-shop', orderBody)
 			expect(result).toEqual(createdOrder)
 		})
 
 		it('should propagate service errors', async () => {
 			serviceMock.createOrder.mockRejectedValueOnce(new Error('Out of stock'))
 
-			await expect(controller.createOrder({} as any)).rejects.toThrow('Out of stock')
+			await expect(controller.createOrder('my-shop', {} as any)).rejects.toThrow('Out of stock')
 		})
 	})
 })

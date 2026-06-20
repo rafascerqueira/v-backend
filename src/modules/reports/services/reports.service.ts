@@ -61,8 +61,13 @@ export class ReportsService {
 			this.reportsRepository.findOrdersBasic(tenantFilter, { gte: prevStart, lte: prevEnd }),
 		])
 
-		const currentRevenue = currentOrders.reduce((acc, o) => acc + o.total, 0)
-		const previousRevenue = previousOrders.reduce((acc, o) => acc + o.total, 0)
+		// A canceled order is not a sale: it contributes 0 to every money sum, but
+		// still counts toward order totals and status breakdowns.
+		const currentRevenueOrders = currentOrders.filter((o) => o.status !== 'canceled')
+		const previousRevenueOrders = previousOrders.filter((o) => o.status !== 'canceled')
+
+		const currentRevenue = currentRevenueOrders.reduce((acc, o) => acc + o.total, 0)
+		const previousRevenue = previousRevenueOrders.reduce((acc, o) => acc + o.total, 0)
 		const revenueChange =
 			previousRevenue > 0 ? ((currentRevenue - previousRevenue) / previousRevenue) * 100 : 0
 
@@ -78,8 +83,10 @@ export class ReportsService {
 		const avgTicketChange =
 			previousAvgTicket > 0 ? ((currentAvgTicket - previousAvgTicket) / previousAvgTicket) * 100 : 0
 
-		const salesByMonth = this.aggregateSalesByPeriod(currentOrders, period)
-		const categoryData = this.aggregateSalesByCategory(currentOrders)
+		// Money charts use only revenue-bearing (non-canceled) orders; the weekly chart
+		// is an order count, so it keeps every order.
+		const salesByMonth = this.aggregateSalesByPeriod(currentRevenueOrders, period)
+		const categoryData = this.aggregateSalesByCategory(currentRevenueOrders)
 		const weeklyData = this.aggregateOrdersByDayOfWeek(currentOrders)
 		const topProducts = this.extractTopProducts(currentOrders)
 
@@ -202,6 +209,7 @@ export class ReportsService {
 
 	private extractTopProducts(
 		orders: Array<{
+			status: string
 			Order_item: Array<{
 				product_id: number
 				quantity: number
@@ -214,6 +222,8 @@ export class ReportsService {
 		const productStats: Record<string, { name: string; vendas: number; receita: number }> = {}
 
 		for (const order of orders) {
+			// Canceled orders still count toward units moved (vendas) but bring no revenue.
+			const countsRevenue = order.status !== 'canceled'
 			for (const item of order.Order_item) {
 				const productId = item.product_id
 				const productName = item.product?.name || 'Produto removido'
@@ -227,7 +237,7 @@ export class ReportsService {
 				}
 
 				productStats[productId].vendas += item.quantity
-				productStats[productId].receita += item.total
+				if (countsRevenue) productStats[productId].receita += item.total
 			}
 		}
 
@@ -248,11 +258,13 @@ export class ReportsService {
 			lte: end,
 		})
 
-		const totalSales = orders.reduce((acc, o) => acc + o.total, 0)
+		// Canceled orders carry no revenue but still count as orders placed.
+		const revenueOrders = orders.filter((o) => o.status !== 'canceled')
+		const totalSales = revenueOrders.reduce((acc, o) => acc + o.total, 0)
 		const totalOrders = orders.length
 		const avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0
 
-		const salesByDay = orders.reduce(
+		const salesByDay = revenueOrders.reduce(
 			(acc, order) => {
 				const day = order.createdAt.toISOString().split('T')[0]
 				acc[day] = (acc[day] || 0) + order.total
@@ -313,6 +325,8 @@ export class ReportsService {
 		const categoryTotals: Record<string, number> = {}
 
 		for (const order of orders) {
+			// Canceled orders count toward units sold / order frequency but not revenue.
+			const countsRevenue = order.status !== 'canceled'
 			for (const item of order.Order_item) {
 				const productId = item.product_id
 
@@ -329,11 +343,12 @@ export class ReportsService {
 				}
 
 				productStats[productId].quantitySold += item.quantity
-				productStats[productId].totalRevenue += item.total
 				productStats[productId].orderCount++
-
-				const category = item.product?.category || 'Outros'
-				categoryTotals[category] = (categoryTotals[category] || 0) + item.total
+				if (countsRevenue) {
+					productStats[productId].totalRevenue += item.total
+					const category = item.product?.category || 'Outros'
+					categoryTotals[category] = (categoryTotals[category] || 0) + item.total
+				}
 			}
 		}
 
@@ -369,15 +384,17 @@ export class ReportsService {
 			statusCounts[order.status] = (statusCounts[order.status] || 0) + 1
 		}
 
-		// Daily revenue trend
+		// Daily revenue trend — canceled orders bring no revenue (but stay in the
+		// hourly/status counts above).
+		const revenueOrders = orders.filter((o) => o.status !== 'canceled')
 		const dailyRevenue: Record<string, number> = {}
-		for (const order of orders) {
+		for (const order of revenueOrders) {
 			const day = order.createdAt.toISOString().split('T')[0]
 			dailyRevenue[day] = (dailyRevenue[day] || 0) + order.total
 		}
 
 		// Growth metrics
-		const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0)
+		const totalRevenue = revenueOrders.reduce((sum, o) => sum + o.total, 0)
 		const avgDailyRevenue =
 			Object.keys(dailyRevenue).length > 0 ? totalRevenue / Object.keys(dailyRevenue).length : 0
 

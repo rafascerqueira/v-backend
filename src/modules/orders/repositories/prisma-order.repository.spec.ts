@@ -38,7 +38,13 @@ describe('PrismaOrderRepository', () => {
 			},
 			stock_movement: { create: jest.fn() },
 			billing: { updateMany: jest.fn(), create: jest.fn() },
-			product: { findUnique: jest.fn().mockResolvedValue({ name: 'P' }) },
+			product: {
+				findUnique: jest.fn().mockResolvedValue({ name: 'P' }),
+				// Ownership checks added for tenant isolation: every requested product
+				// is owned by the order's seller by default.
+				findFirst: jest.fn().mockResolvedValue({ id: 7 }),
+				count: jest.fn().mockResolvedValue(1),
+			},
 		}
 		prismaMock = {
 			$transaction: jest.fn((cb: any) => cb(tx)),
@@ -156,6 +162,68 @@ describe('PrismaOrderRepository', () => {
 					}),
 				}),
 			)
+		})
+
+		it('blocks the sale when stock is insufficient and oversell is off', async () => {
+			tx.store_stock.findUnique.mockResolvedValue({ quantity: 1, reserved_quantity: 0 })
+			tx.product.findUnique.mockResolvedValue({ name: 'P', allow_oversell: false })
+
+			await expect(
+				repo.create({
+					seller_id: 'seller-1',
+					customer_id: 'c1',
+					order_number: 'ORD-11',
+					subtotal: 5000,
+					discount: 0,
+					total: 5000,
+					items: [{ product_id: 7, quantity: 5, unit_price: 1000, discount: 0, total: 5000 }],
+				}),
+			).rejects.toThrow('Estoque insuficiente')
+			expect(tx.order.create).not.toHaveBeenCalled()
+		})
+
+		it('completes the sale and lets stock go negative when oversell is on', async () => {
+			tx.store_stock.findUnique.mockResolvedValue({ quantity: 1, reserved_quantity: 0 })
+			tx.product.findUnique.mockResolvedValue({ name: 'P', allow_oversell: true })
+
+			const result = await repo.create({
+				seller_id: 'seller-1',
+				customer_id: 'c1',
+				order_number: 'ORD-12',
+				subtotal: 5000,
+				discount: 0,
+				total: 5000,
+				items: [{ product_id: 7, quantity: 5, unit_price: 1000, discount: 0, total: 5000 }],
+			})
+
+			expect(tx.order.create).toHaveBeenCalled()
+			expect(tx.store_stock.update).toHaveBeenCalledWith({
+				where: { product_id: 7 },
+				data: { quantity: { decrement: 5 } },
+			})
+			// The oversold item is surfaced so the service can notify the seller.
+			expect(result.oversold).toEqual([
+				{ product_id: 7, product_name: 'P', available: 1, requested: 5 },
+			])
+		})
+
+		it('rejects an order whose product belongs to another seller (tenant isolation)', async () => {
+			// 0 of the 1 requested products belong to seller-1 → 404, no stock touched.
+			tx.product.count.mockResolvedValueOnce(0)
+
+			await expect(
+				repo.create({
+					seller_id: 'seller-1',
+					customer_id: 'c1',
+					order_number: 'ORD-13',
+					subtotal: 1000,
+					discount: 0,
+					total: 1000,
+					items: [{ product_id: 99, quantity: 1, unit_price: 1000, discount: 0, total: 1000 }],
+				}),
+			).rejects.toBeInstanceOf(NotFoundException)
+			expect(tx.order.create).not.toHaveBeenCalled()
+			expect(tx.store_stock.update).not.toHaveBeenCalled()
 		})
 
 		it('does not create a charge when none is attached', async () => {

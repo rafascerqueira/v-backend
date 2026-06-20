@@ -90,8 +90,8 @@ src/shared/
 - All routes require `JwtAuthGuard` by default
 - `@Public()` to bypass
 - `@CurrentUser()` to extract user — never access `request.user` directly
-- `PlanLimitsGuard` + `@CheckPlanLimit('product'|'customer'|'order')` on creation endpoints
-- `PlanGuard` + `@RequiredPlan(...)` for plan-tier restrictions
+- `PlanLimitsGuard` + `@CheckPlanLimit('product'|'customer'|'order')` on creation endpoints (usage limits)
+- Plan **feature**-gating: `FeatureGuard` + `@RequiredFeature('reports'|'exportData'|'multipleImages'|'customBranding'|...)` enforces the `PLAN_LIMITS[plan].features` matrix (403 with a pt-BR upgrade message; admins bypass; resolves the **effective** plan — admin grants + promo window). Use it for endpoint-level gates; for value-based gates (e.g. image count) call `PlanLimitsService.hasFeature(sellerId, planType, feature)` inside the service. A raw `@RequiredPlan(tier)` guard is intentionally **not** used — gating is feature-flag based.
 
 ## Testing
 
@@ -99,7 +99,7 @@ Mock all guards in controller specs:
 ```typescript
 .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
 .overrideGuard(PlanLimitsGuard).useValue({ canActivate: () => true })
-.overrideGuard(PlanGuard).useValue({ canActivate: () => true })
+.overrideGuard(FeatureGuard).useValue({ canActivate: () => true }) // on reports/export controllers
 ```
 
 Mock repositories via DI token in service specs — never use real PrismaService in unit tests.

@@ -1,7 +1,7 @@
 /**
  * StripeService unit tests
  * Covers: isConfigured, createCustomer, createCheckoutSession, createPortalSession,
- *         cancelSubscription, constructWebhookEvent, handleWebhookEvent
+ *         cancelSubscription, constructWebhookEvent
  * Verifies: graceful no-op when Stripe not configured, delegation to repository,
  *           webhook event routing (checkout, subscription, invoice)
  */
@@ -257,51 +257,6 @@ describe('StripeService', () => {
 			const result = service.constructWebhookEvent(Buffer.from('payload'), 'bad-sig')
 
 			expect(result).toBeNull()
-		})
-	})
-
-	describe('handleWebhookEvent', () => {
-		it('should call createSubscriptionFromCheckout for checkout.session.completed', async () => {
-			subscriptionRepositoryMock.createSubscriptionFromCheckout.mockResolvedValueOnce(undefined)
-			subscriptionRepositoryMock.updateAccountPlan.mockResolvedValueOnce(undefined)
-
-			const event = {
-				type: 'checkout.session.completed',
-				data: {
-					object: {
-						metadata: { account_id: 'acc-1' },
-						subscription: 'sub_123',
-						customer: 'cus_123',
-					},
-				},
-			}
-
-			await service.handleWebhookEvent(event as any)
-
-			expect(subscriptionRepositoryMock.createSubscriptionFromCheckout).toHaveBeenCalled()
-			expect(subscriptionRepositoryMock.updateAccountPlan).toHaveBeenCalledWith('acc-1', 'pro')
-		})
-
-		it('should call updateSubscriptionsByProviderId for customer.subscription.deleted', async () => {
-			subscriptionRepositoryMock.updateSubscriptionsByProviderId.mockResolvedValueOnce(undefined)
-			subscriptionRepositoryMock.updateAccountPlan.mockResolvedValueOnce(undefined)
-
-			const event = {
-				type: 'customer.subscription.deleted',
-				data: {
-					object: {
-						id: 'sub_123',
-						metadata: { account_id: 'acc-1' },
-					},
-				},
-			}
-
-			await service.handleWebhookEvent(event as any)
-
-			expect(subscriptionRepositoryMock.updateSubscriptionsByProviderId).toHaveBeenCalledWith(
-				'sub_123',
-				expect.objectContaining({ status: 'canceled' }),
-			)
 		})
 	})
 })

@@ -11,6 +11,7 @@ import {
 	SUBSCRIPTION_REPOSITORY,
 	type SubscriptionRepository,
 } from '@/shared/repositories/subscription.repository'
+import { PlanLimitsService } from './plan-limits.service'
 import { SubscriptionService } from './subscription.service'
 
 const repositoryMock: jest.Mocked<SubscriptionRepository> = {
@@ -55,6 +56,10 @@ describe('SubscriptionService', () => {
 							isActive: false,
 						}),
 					},
+				},
+				{
+					provide: PlanLimitsService,
+					useValue: { getEffectiveFeatures: jest.fn().mockResolvedValue({}) },
 				},
 			],
 		}).compile()

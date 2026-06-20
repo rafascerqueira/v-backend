@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateDebtData,
@@ -69,6 +69,11 @@ export class PrismaSupplierRepository implements SupplierRepository {
 	}
 
 	async update(id: string, data: UpdateSupplierData): Promise<Supplier> {
+		// Ownership gate in the repo (not only the service): a bare id must never
+		// let one seller write another seller's row. findById is tenant-scoped.
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Supplier not found')
+
 		const row = await this.prisma.supplier.update({
 			where: { id },
 			data,
@@ -84,12 +89,16 @@ export class PrismaSupplierRepository implements SupplierRepository {
 	}
 
 	async delete(id: string): Promise<void> {
+		const existing = await this.findById(id)
+		if (!existing) throw new NotFoundException('Supplier not found')
 		await this.prisma.supplier.update({ where: { id }, data: { active: false } })
 	}
 
 	async findDebts(supplierId: string): Promise<SupplierDebt[]> {
+		// Scope debts by the owning supplier's tenant so seller A can't read
+		// seller B's debts by guessing a supplier id. Admin → empty filter.
 		return this.prisma.supplier_debt.findMany({
-			where: { supplier_id: supplierId },
+			where: { supplier_id: supplierId, supplier: { ...this.getTenantFilter() } },
 			orderBy: { createdAt: 'desc' },
 		}) as unknown as SupplierDebt[]
 	}
@@ -106,8 +115,20 @@ export class PrismaSupplierRepository implements SupplierRepository {
 	}
 
 	async payDebt(debtId: number, amount: number): Promise<SupplierDebt> {
-		const debt = await this.prisma.supplier_debt.findUniqueOrThrow({ where: { id: debtId } })
+		// Load the debt only if its supplier belongs to the caller's tenant. A
+		// cross-tenant (or missing) debt id must look non-existent → 404, never a
+		// silent write against another seller's ledger.
+		const debt = await this.prisma.supplier_debt.findFirst({
+			where: { id: debtId, supplier: { ...this.getTenantFilter() } },
+		})
+		if (!debt) throw new NotFoundException('Supplier debt not found')
+
 		const newPaid = debt.paid_amount + amount
+		// Never let a payment exceed the outstanding amount (mirrors the
+		// paid_amount ≤ total_amount guard in BillingsService).
+		if (newPaid > debt.amount) {
+			throw new BadRequestException('O pagamento excede o valor da dívida')
+		}
 		const newStatus = newPaid >= debt.amount ? 'paid' : 'partial'
 
 		return this.prisma.supplier_debt.update({

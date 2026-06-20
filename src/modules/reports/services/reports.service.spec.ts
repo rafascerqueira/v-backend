@@ -115,6 +115,20 @@ describe('ReportsService', () => {
 			expect(res.summary.revenueChange).toBe(0)
 			expect(res.summary.ordersChange).toBe(0)
 		})
+
+		it('excludes canceled orders from revenue but still counts them as orders', async () => {
+			repositoryMock.findOrdersWithItems.mockResolvedValueOnce([
+				orderWithItems({ id: 1, total: 1000, status: 'delivered' }),
+				orderWithItems({ id: 2, total: 5000, status: 'canceled' }),
+			])
+			repositoryMock.findOrdersBasic.mockResolvedValueOnce([])
+
+			const res = await service.getFullReport('month')
+
+			expect(res.summary.totalRevenue).toBe(1000) // 5000 canceled dropped from revenue
+			expect(res.summary.totalOrders).toBe(2) // both still counted
+			expect(res.summary.avgTicket).toBe(500) // 1000 / 2
+		})
 	})
 
 	describe('getSalesReport', () => {
@@ -131,6 +145,19 @@ describe('ReportsService', () => {
 			expect(res.summary.avgOrderValue).toBe(750)
 			expect(res.salesByStatus).toEqual({ delivered: 1, pending: 1 })
 			expect(res.recentOrders).toHaveLength(2)
+		})
+
+		it('drops canceled orders from sales totals but counts them as orders', async () => {
+			repositoryMock.findOrdersWithItems.mockResolvedValueOnce([
+				orderWithItems({ id: 1, total: 1000, status: 'delivered' }),
+				orderWithItems({ id: 2, total: 4000, status: 'canceled' }),
+			])
+
+			const res = await service.getSalesReport()
+
+			expect(res.summary.totalSales).toBe(1000) // canceled excluded from money
+			expect(res.summary.totalOrders).toBe(2) // but still an order
+			expect(res.salesByStatus).toEqual({ delivered: 1, canceled: 1 })
 		})
 	})
 
@@ -161,6 +188,42 @@ describe('ReportsService', () => {
 			expect(res.topProducts[0].quantitySold).toBe(5)
 			expect(res.salesByCategory[0]).toEqual({ category: 'X', value: 600 })
 		})
+
+		it('counts units from canceled orders but excludes their revenue', async () => {
+			repositoryMock.findOrdersWithItems.mockResolvedValueOnce([
+				orderWithItems({
+					id: 1,
+					status: 'delivered',
+					Order_item: [
+						{
+							product_id: 1,
+							quantity: 2,
+							total: 200,
+							product: { id: 1, name: 'A', category: 'X' },
+						},
+					],
+				}),
+				orderWithItems({
+					id: 2,
+					status: 'canceled',
+					Order_item: [
+						{
+							product_id: 1,
+							quantity: 3,
+							total: 300,
+							product: { id: 1, name: 'A', category: 'X' },
+						},
+					],
+				}),
+			])
+
+			const res = await service.getProductsReport()
+
+			const a = res.topProducts.find((p) => p.product.name === 'A')
+			expect(a?.quantitySold).toBe(5) // 2 + 3 units counted
+			expect(a?.totalRevenue).toBe(200) // only the non-canceled 200
+			expect(res.salesByCategory[0]).toEqual({ category: 'X', value: 200 })
+		})
 	})
 
 	describe('getChartsData', () => {
@@ -173,10 +236,13 @@ describe('ReportsService', () => {
 
 			const res = await service.getChartsData('month')
 
-			expect(res.metrics.totalRevenue).toBe(4000)
+			// The 2000 canceled order brings no revenue, but is still one of the 3 orders.
+			expect(res.metrics.totalRevenue).toBe(2000)
 			expect(res.metrics.totalOrders).toBe(3)
 			const delivered = res.statusDistribution.find((s) => s.status === 'delivered')
 			expect(delivered).toEqual({ status: 'delivered', count: 2, percentage: 67 })
+			const canceled = res.statusDistribution.find((s) => s.status === 'canceled')
+			expect(canceled).toEqual({ status: 'canceled', count: 1, percentage: 33 })
 		})
 	})
 

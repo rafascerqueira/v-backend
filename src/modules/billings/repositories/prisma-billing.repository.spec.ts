@@ -1,13 +1,14 @@
+import { NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import { PrismaBillingRepository } from './prisma-billing.repository'
 
 // Billing rows have no seller_id of their own — tenancy is enforced through the
-// related order (order.seller_id). These tests pin that the list queries always
-// constrain by the owning seller for non-admins, and document that point-lookup
-// (findById) is intentionally unscoped because BillingsService is the ownership
-// boundary for update/delete (it checks billing.order.seller_id and 403s).
+// related order (order.seller_id). These tests pin that list AND point-lookup
+// queries constrain by the owning seller for non-admins, that findById returns
+// null for a foreign billing (so the service answers 404, never a 403 that would
+// leak the id exists), and that update/delete refuse to write a cross-tenant row.
 describe('PrismaBillingRepository', () => {
 	let repo: PrismaBillingRepository
 	let prisma: any
@@ -25,7 +26,9 @@ describe('PrismaBillingRepository', () => {
 		prisma = {
 			billing: {
 				findMany: jest.fn().mockResolvedValue([]),
-				findUnique: jest.fn(),
+				findFirst: jest.fn(),
+				update: jest.fn().mockResolvedValue({ id: 5, status: 'paid', due_date: null }),
+				delete: jest.fn(),
 			},
 		}
 
@@ -65,20 +68,53 @@ describe('PrismaBillingRepository', () => {
 	})
 
 	describe('findById (point lookup)', () => {
-		it('returns the row unscoped — ownership is enforced by the service layer', async () => {
-			prisma.billing.findUnique.mockResolvedValue({
+		it('tenant-scopes through the related order — a foreign billing returns null (404, not a 403 leak)', async () => {
+			prisma.billing.findFirst.mockResolvedValue(null) // scoped query excludes foreign rows
+			const row = await repo.findById(5)
+			expect(row).toBeNull()
+			const where = prisma.billing.findFirst.mock.calls[0][0].where
+			expect(where.id).toBe(5)
+			expect(where.order).toEqual({ seller_id: 'seller-1' })
+		})
+
+		it('returns the row for the owning seller', async () => {
+			prisma.billing.findFirst.mockResolvedValue({
 				id: 5,
 				status: 'paid',
 				due_date: null,
-				order: { seller_id: 'other-seller' },
+				order: { seller_id: 'seller-1' },
 			})
 			const row = await repo.findById(5)
 			expect(row).not.toBeNull()
-			// No tenant filter applied here by design; BillingsService.update/delete
-			// reject cross-tenant access with ForbiddenException.
-			expect(prisma.billing.findUnique).toHaveBeenCalledWith(
-				expect.objectContaining({ where: { id: 5 } }),
+		})
+
+		it('does not constrain by seller for admins', async () => {
+			tenant.isAdmin.mockReturnValue(true)
+			prisma.billing.findFirst.mockResolvedValue({
+				id: 5,
+				status: 'paid',
+				due_date: null,
+				order: { seller_id: 'whoever' },
+			})
+			await repo.findById(5)
+			const where = prisma.billing.findFirst.mock.calls[0][0].where
+			expect(where.order).toBeUndefined()
+		})
+	})
+
+	describe('update / delete ownership gate', () => {
+		it('update throws NotFound for a cross-tenant billing and never writes', async () => {
+			prisma.billing.findFirst.mockResolvedValue(null)
+			await expect(repo.update(5, { paid_amount: 100 } as any)).rejects.toBeInstanceOf(
+				NotFoundException,
 			)
+			expect(prisma.billing.update).not.toHaveBeenCalled()
+		})
+
+		it('delete throws NotFound for a cross-tenant billing and never writes', async () => {
+			prisma.billing.findFirst.mockResolvedValue(null)
+			await expect(repo.delete(5)).rejects.toBeInstanceOf(NotFoundException)
+			expect(prisma.billing.delete).not.toHaveBeenCalled()
 		})
 	})
 })

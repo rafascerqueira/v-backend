@@ -35,6 +35,7 @@ export class PrismaProductRepository implements ProductRepository {
 				specifications: data.specifications as any,
 				images: data.images,
 				active: data.active,
+				allow_oversell: data.allow_oversell,
 			},
 		}) as unknown as Product
 	}

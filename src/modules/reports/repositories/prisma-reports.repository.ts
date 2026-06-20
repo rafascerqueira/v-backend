@@ -67,12 +67,16 @@ export class PrismaReportsRepository implements ReportsRepository {
 			...tenantFilter,
 			createdAt: dateFilter,
 		}
-		const result = await this.prisma.order.aggregate({
-			where,
-			_sum: { total: true },
-			_count: true,
-		})
-		return { _sum: { total: result._sum.total }, _count: result._count }
+		// Revenue excludes canceled orders (no money), but the order count keeps them
+		// (a placed-then-canceled order still happened).
+		const [sumResult, countResult] = await Promise.all([
+			this.prisma.order.aggregate({
+				where: { ...where, status: { not: 'canceled' } } as any,
+				_sum: { total: true },
+			}),
+			this.prisma.order.aggregate({ where, _count: true }),
+		])
+		return { _sum: { total: sumResult._sum.total }, _count: countResult._count }
 	}
 
 	async countCustomers(
@@ -101,14 +105,31 @@ export class PrismaReportsRepository implements ReportsRepository {
 		tenantFilter: Record<string, unknown>,
 		limit: number,
 	): Promise<CustomerOrderGroup[]> {
-		return this.prisma.order.groupBy({
+		// Rank top customers by realized (non-canceled) spend...
+		const revenueGroups = await this.prisma.order.groupBy({
 			by: ['customer_id'],
-			where: tenantFilter,
+			where: { ...tenantFilter, status: { not: 'canceled' } } as any,
 			_sum: { total: true },
-			_count: { id: true },
 			orderBy: { _sum: { total: 'desc' } },
 			take: limit,
-		}) as unknown as CustomerOrderGroup[]
+		})
+
+		// ...but report their total order count including canceled orders.
+		const customerIds = revenueGroups.map((g) => g.customer_id)
+		const countGroups = customerIds.length
+			? await this.prisma.order.groupBy({
+					by: ['customer_id'],
+					where: { ...tenantFilter, customer_id: { in: customerIds } } as any,
+					_count: { id: true },
+				})
+			: []
+		const countMap = new Map(countGroups.map((g) => [g.customer_id, g._count.id]))
+
+		return revenueGroups.map((g) => ({
+			customer_id: g.customer_id,
+			_sum: { total: g._sum.total },
+			_count: { id: countMap.get(g.customer_id) ?? 0 },
+		})) as unknown as CustomerOrderGroup[]
 	}
 
 	async findCustomersByIds(ids: string[]): Promise<CustomerBasic[]> {

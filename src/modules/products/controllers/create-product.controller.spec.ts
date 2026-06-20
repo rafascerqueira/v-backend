@@ -14,7 +14,7 @@ describe('CreateProductController', () => {
 	}
 
 	const mockRequest = {
-		user: { sub: 'test-seller-id', role: 'seller' },
+		user: { sub: 'test-seller-id', role: 'seller', plan_type: 'enterprise' },
 	}
 
 	beforeEach(async () => {
@@ -59,6 +59,7 @@ describe('CreateProductController', () => {
 			},
 			images: ['https://example.com/image1.jpg'],
 			active: true,
+			allow_oversell: false,
 		}
 
 		it('should create a product successfully', async () => {
@@ -67,10 +68,13 @@ describe('CreateProductController', () => {
 
 			const result = await controller.handle(validProductData, mockRequest)
 
-			expect(service.create).toHaveBeenCalledWith({
-				...validProductData,
-				seller_id: 'test-seller-id',
-			})
+			expect(service.create).toHaveBeenCalledWith(
+				{
+					...validProductData,
+					seller_id: 'test-seller-id',
+				},
+				'enterprise',
+			)
 			expect(result).toEqual(expectedProduct)
 		})
 
@@ -87,6 +91,7 @@ describe('CreateProductController', () => {
 				},
 				images: [],
 				active: true,
+				allow_oversell: false,
 			}
 
 			// The validation should throw an error for empty name
@@ -145,13 +150,17 @@ describe('CreateProductController', () => {
 				},
 				images: [],
 				active: true,
+				allow_oversell: false,
 			}
 
 			mockProductService.create.mockResolvedValue({ id: 2, ...minimalData })
 
 			const result = await controller.handle(minimalData, mockRequest)
 
-			expect(service.create).toHaveBeenCalledWith({ ...minimalData, seller_id: 'test-seller-id' })
+			expect(service.create).toHaveBeenCalledWith(
+				{ ...minimalData, seller_id: 'test-seller-id' },
+				'enterprise',
+			)
 			expect(result).toBeDefined()
 		})
 	})

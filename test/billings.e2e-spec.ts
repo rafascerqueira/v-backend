@@ -128,6 +128,22 @@ describe('Billings (e2e)', () => {
 			.expect(400)
 	})
 
+	it('cancels (voids) a charge through the dedicated endpoint', async () => {
+		const orderId = await createOrder()
+		const billing = (
+			await request(app.getHttpServer())
+				.post(`/orders/${orderId}/billings`)
+				.send({ billing_number: `COB-${Date.now()}`, total_amount: 5000, paid_amount: 0 })
+				.expect(201)
+		).body
+
+		const canceled = (
+			await request(app.getHttpServer()).patch(`/billings/${billing.id}/cancel`).expect(200)
+		).body
+		expect(canceled.status).toBe('canceled')
+		expect(canceled.payment_status).toBe('canceled')
+	})
+
 	it("never exposes or mutates another seller's billing", async () => {
 		// Seed a charge owned by a different seller directly in the DB.
 		await prisma.account.upsert({
@@ -170,11 +186,13 @@ describe('Billings (e2e)', () => {
 		const list = (await request(app.getHttpServer()).get('/billings').expect(200)).body
 		expect(list.find((b: { id: number }) => b.id === otherBilling.id)).toBeUndefined()
 
-		// Cross-tenant update / delete are forbidden.
+		// Cross-tenant update / delete must look non-existent → 404 (never a 403
+		// that would leak that the billing id exists).
 		await request(app.getHttpServer())
 			.patch(`/billings/${otherBilling.id}`)
 			.send({ paid_amount: 500 })
-			.expect(403)
-		await request(app.getHttpServer()).delete(`/billings/${otherBilling.id}`).expect(403)
+			.expect(404)
+		await request(app.getHttpServer()).patch(`/billings/${otherBilling.id}/cancel`).expect(404)
+		await request(app.getHttpServer()).delete(`/billings/${otherBilling.id}`).expect(404)
 	})
 })

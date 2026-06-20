@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Patch, UseGuards } from '@nestjs/common'
+import { Body, Controller, Param, Patch, Req, UseGuards } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
@@ -29,7 +29,8 @@ export class UpdateProductController {
 	async handle(
 		@Param('id') id: string,
 		@Body(new ZodValidationPipe(updateProductSchema)) body: UpdateProductDto,
+		@Req() req: any,
 	) {
-		return this.productService.update(id, body)
+		return this.productService.update(id, body, req.user.sub, req.user.plan_type)
 	}
 }

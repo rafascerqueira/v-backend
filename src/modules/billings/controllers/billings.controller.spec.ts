@@ -6,6 +6,7 @@ const serviceMock = {
 	listByOrder: jest.fn(),
 	create: jest.fn(),
 	update: jest.fn(),
+	cancel: jest.fn(),
 	delete: jest.fn(),
 	findAll: jest.fn(),
 	syncBillings: jest.fn(),
@@ -50,6 +51,13 @@ describe('BillingsController', () => {
 		const res = await controller.update('9', dto)
 		expect(serviceMock.update).toHaveBeenCalledWith(9, dto)
 		expect(res).toEqual({ id: 9, ...dto })
+	})
+
+	it('cancel should call service.cancel with numeric id', async () => {
+		serviceMock.cancel.mockResolvedValueOnce({ id: 9, status: 'canceled' })
+		const res = await controller.cancel('9')
+		expect(serviceMock.cancel).toHaveBeenCalledWith(9)
+		expect(res).toEqual({ id: 9, status: 'canceled' })
 	})
 
 	it('sync should call service.syncBillings', async () => {
