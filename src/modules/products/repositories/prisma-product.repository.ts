@@ -1,5 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import {
+	BACKORDER_REPOSITORY,
+	type BackorderRepository,
+} from '@/shared/repositories/backorder.repository'
 import type {
 	CreateProductData,
 	Product,
@@ -13,6 +17,7 @@ export class PrismaProductRepository implements ProductRepository {
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly tenantContext: TenantContext,
+		@Inject(BACKORDER_REPOSITORY) private readonly backorderRepository: BackorderRepository,
 	) {}
 
 	private getTenantFilter() {
@@ -115,7 +120,23 @@ export class PrismaProductRepository implements ProductRepository {
 			this.prisma.product.count({ where }),
 		])
 
-		return { data: data as unknown as Product[], total }
+		// Surface units owed to open orders so the products list can show the
+		// "aguardando reposição" badge and clamp the displayed stock to 0.
+		const owedMap = await this.backorderRepository.summaryByProductIds(data.map((p) => p.id))
+		const enriched = data.map((product) => {
+			const owed = owedMap.get(product.id)
+			if (!product.stock) return product
+			return {
+				...product,
+				stock: {
+					...product.stock,
+					owed_quantity: owed?.owed ?? 0,
+					pending_orders_count: owed?.pending_orders_count ?? 0,
+				},
+			}
+		})
+
+		return { data: enriched as unknown as Product[], total }
 	}
 
 	async findBySku(sellerId: string, sku: string): Promise<Product | null> {

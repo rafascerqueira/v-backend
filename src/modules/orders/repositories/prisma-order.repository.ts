@@ -51,37 +51,54 @@ export class PrismaOrderRepository implements OrderRepository {
 			}
 
 			// Items sold past their stock via allow_oversell — reported back so the
-			// service can notify the seller that these units are pending delivery.
+			// service can notify the seller, and recorded as backorders below.
 			const oversold: OversoldItem[] = []
+			// Units newly owed per line (parallel to data.items); turned into backorder
+			// rows once the order items have ids. Zero for in-stock lines.
+			const owedByIndex: number[] = new Array(data.items.length).fill(0)
+			// Running available-per-product so multiple lines of the same product each
+			// see the stock earlier lines already consumed — otherwise the owed total
+			// (and the negative the stock lands on) would disagree.
+			const runningAvailable = new Map<number, number>()
 
 			// Validate stock availability for items that have stock control
-			for (const item of data.items) {
+			for (let i = 0; i < data.items.length; i++) {
+				const item = data.items[i]
 				const stock = await tx.store_stock.findUnique({
 					where: { product_id: item.product_id },
 				})
-				// Only validate if stock record exists
-				if (stock) {
-					const available = stock.quantity - stock.reserved_quantity
-					if (available < item.quantity) {
-						const product = await tx.product.findUnique({
-							where: { id: item.product_id },
-						})
-						// Products flagged allow_oversell sell past their stock; the
-						// decrement below simply takes the quantity negative. Anything
-						// else is a hard stop.
-						if (!product?.allow_oversell) {
-							throw new BadRequestException(
-								`Estoque insuficiente para "${product?.name || item.product_id}". Disponível: ${available}, Solicitado: ${item.quantity}`,
-							)
-						}
-						oversold.push({
-							product_id: item.product_id,
-							product_name: product?.name ?? String(item.product_id),
-							available,
-							requested: item.quantity,
-						})
-					}
+				// Only items with a stock record participate in oversell/backorders.
+				if (!stock) continue
+
+				if (!runningAvailable.has(item.product_id)) {
+					runningAvailable.set(item.product_id, stock.quantity - stock.reserved_quantity)
 				}
+				const available = runningAvailable.get(item.product_id) ?? 0
+
+				if (available < item.quantity) {
+					const product = await tx.product.findUnique({
+						where: { id: item.product_id },
+					})
+					// Products flagged allow_oversell sell past their stock; the
+					// decrement below simply takes the quantity negative. Anything
+					// else is a hard stop.
+					if (!product?.allow_oversell) {
+						throw new BadRequestException(
+							`Estoque insuficiente para "${product?.name || item.product_id}". Disponível: ${available}, Solicitado: ${item.quantity}`,
+						)
+					}
+					// Only the part beyond what's on hand is owed (clamp at 0 so an
+					// already-negative stock doesn't re-count the prior deficit).
+					owedByIndex[i] = item.quantity - Math.max(available, 0)
+					oversold.push({
+						product_id: item.product_id,
+						product_name: product?.name ?? String(item.product_id),
+						available,
+						requested: item.quantity,
+					})
+				}
+
+				runningAvailable.set(item.product_id, available - item.quantity)
 			}
 
 			// Create order with items
@@ -106,6 +123,26 @@ export class PrismaOrderRepository implements OrderRepository {
 				},
 				include: { Order_item: true },
 			})
+
+			// Record owed units as backorders, one per oversold line, so the order-level
+			// "aguardando reposição" detail survives and a restock can be allocated to it.
+			// Order_item ids come back in creation (id-ascending) order, matching the
+			// data.items order owedByIndex was computed against.
+			const createdItems = [...order.Order_item].sort((a, b) => a.id - b.id)
+			for (let i = 0; i < owedByIndex.length; i++) {
+				const owed = owedByIndex[i]
+				const createdItem = createdItems[i]
+				if (owed <= 0 || !createdItem) continue
+				await tx.backorder.create({
+					data: {
+						seller_id: data.seller_id,
+						order_id: order.id,
+						order_item_id: createdItem.id,
+						product_id: data.items[i].product_id,
+						quantity: owed,
+					},
+				})
+			}
 
 			// Decrement stock and create movements only for items with stock control
 			for (const item of data.items) {
@@ -171,6 +208,7 @@ export class PrismaOrderRepository implements OrderRepository {
 			if (!ownedProduct) throw new NotFoundException('Produto não encontrado')
 
 			// Validate stock availability
+			let owed = 0
 			const stock = await tx.store_stock.findUnique({ where: { product_id: data.product_id } })
 			if (stock) {
 				const available = stock.quantity - stock.reserved_quantity
@@ -180,6 +218,7 @@ export class PrismaOrderRepository implements OrderRepository {
 					if (!product?.allow_oversell) {
 						throw new BadRequestException(`Estoque insuficiente. Disponível: ${available}`)
 					}
+					owed = data.quantity - Math.max(available, 0)
 				}
 				// Decrement stock
 				await tx.store_stock.update({
@@ -210,6 +249,19 @@ export class PrismaOrderRepository implements OrderRepository {
 				},
 			})
 
+			// Record the owed units as a backorder for this new line (mirrors create()).
+			if (owed > 0) {
+				await tx.backorder.create({
+					data: {
+						seller_id: order.seller_id,
+						order_id: order.id,
+						order_item_id: item.id,
+						product_id: data.product_id,
+						quantity: owed,
+					},
+				})
+			}
+
 			// Update order totals
 			const allItems = await tx.order_item.findMany({ where: { order_id: data.order_id } })
 			const subtotal = allItems.reduce((acc, it) => acc + it.total, 0)
@@ -226,7 +278,13 @@ export class PrismaOrderRepository implements OrderRepository {
 	async findById(id: number): Promise<OrderWithRelations | null> {
 		const order = await this.prisma.order.findUnique({
 			where: { id },
-			include: { Order_item: true, Billing: true, customer: true },
+			include: {
+				Order_item: {
+					include: { product: { select: { id: true, name: true } }, backorder: true },
+				},
+				Billing: true,
+				customer: true,
+			},
 		})
 		if (!order) return null
 		if (!this.tenantContext.isAdmin() && order.seller_id !== this.tenantContext.getSellerId()) {
@@ -255,6 +313,7 @@ export class PrismaOrderRepository implements OrderRepository {
 								name: true,
 							},
 						},
+						backorder: true,
 					},
 				},
 			},
@@ -336,6 +395,15 @@ export class PrismaOrderRepository implements OrderRepository {
 	// Returns every item's quantity to store_stock and records an `in`/`return`
 	// movement. Shared by cancellation (updateStatus) and delete.
 	private async restoreStockInTx(tx: any, orderId: number): Promise<void> {
+		// Cancel any units this order still owes — canceling/deleting it drops the
+		// obligation, and the full-quantity restore below already brings the negative
+		// stock back to baseline. (Known limitation: a partially-fulfilled backorder
+		// over-restores by the already-fulfilled amount — deferred per plan.)
+		await tx.backorder.updateMany({
+			where: { order_id: orderId, status: 'pending' },
+			data: { status: 'canceled' },
+		})
+
 		const items = await tx.order_item.findMany({ where: { order_id: orderId } })
 
 		for (const item of items) {

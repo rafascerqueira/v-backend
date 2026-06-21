@@ -26,6 +26,15 @@ export interface OrderItem {
 	unit_price: number
 	discount: number
 	total: number
+	product?: { id: number; name: string } | null
+	// Present when this line was sold past stock — drives the per-item "aguardando
+	// reposição / reposto" status in the order detail view.
+	backorder?: {
+		id: number
+		quantity: number
+		fulfilled_quantity: number
+		status: string
+	} | null
 }
 
 export interface Billing {

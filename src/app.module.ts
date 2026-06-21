@@ -10,6 +10,7 @@ import { AdminModule } from './modules/admin/admin.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { CsrfGuard } from './modules/auth/guards/csrf.guard'
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
+import { BackordersModule } from './modules/backorders/backorders.module'
 import { BillingsModule } from './modules/billings/billings.module'
 import { BundlesModule } from './modules/bundles/bundles.module'
 import { CatalogModule } from './modules/catalog/catalog.module'
@@ -54,6 +55,7 @@ import { WebSocketModule } from './shared/websocket/websocket.module'
 		CustomersModule,
 		ProductPricesModule,
 		OrdersModule,
+		BackordersModule,
 		BillingsModule,
 		BundlesModule,
 		StoreStockModule,

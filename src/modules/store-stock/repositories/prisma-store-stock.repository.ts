@@ -1,5 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import {
+	BACKORDER_REPOSITORY,
+	type BackorderRepository,
+} from '@/shared/repositories/backorder.repository'
 import type {
 	StoreStock,
 	StoreStockRepository,
@@ -13,6 +17,7 @@ export class PrismaStoreStockRepository implements StoreStockRepository {
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly tenantContext: TenantContext,
+		@Inject(BACKORDER_REPOSITORY) private readonly backorderRepository: BackorderRepository,
 	) {}
 
 	private getTenantFilter() {
@@ -39,12 +44,18 @@ export class PrismaStoreStockRepository implements StoreStockRepository {
 		})
 
 		const productMap = new Map(products.map((p) => [p.id, p]))
+		const owedMap = await this.backorderRepository.summaryByProductIds(productIds)
 
-		return stocks.map((stock) => ({
-			...stock,
-			product: productMap.get(stock.product_id) || null,
-			isLowStock: stock.quantity <= stock.min_stock && stock.min_stock > 0,
-		})) as unknown as StoreStockWithProduct[]
+		return stocks.map((stock) => {
+			const owed = owedMap.get(stock.product_id)
+			return {
+				...stock,
+				product: productMap.get(stock.product_id) || null,
+				isLowStock: stock.quantity <= stock.min_stock && stock.min_stock > 0,
+				owed_quantity: owed?.owed ?? 0,
+				pending_orders_count: owed?.pending_orders_count ?? 0,
+			}
+		}) as unknown as StoreStockWithProduct[]
 	}
 
 	async findByProduct(productId: number): Promise<StoreStock | null> {

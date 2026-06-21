@@ -38,6 +38,12 @@ describe('PrismaOrderRepository', () => {
 			},
 			stock_movement: { create: jest.fn() },
 			billing: { updateMany: jest.fn(), create: jest.fn() },
+			backorder: {
+				create: jest.fn(),
+				update: jest.fn(),
+				updateMany: jest.fn(),
+				findMany: jest.fn().mockResolvedValue([]),
+			},
 			product: {
 				findUnique: jest.fn().mockResolvedValue({ name: 'P' }),
 				// Ownership checks added for tenant isolation: every requested product
@@ -74,6 +80,10 @@ describe('PrismaOrderRepository', () => {
 			})
 			expect(tx.stock_movement.create).toHaveBeenCalled()
 			expect(tx.billing.updateMany).toHaveBeenCalled()
+			expect(tx.backorder.updateMany).toHaveBeenCalledWith({
+				where: { order_id: 1, status: 'pending' },
+				data: { status: 'canceled' },
+			})
 			expect(tx.order.update).toHaveBeenCalledWith({
 				where: { id: 1 },
 				data: { status: 'canceled' },
@@ -205,6 +215,33 @@ describe('PrismaOrderRepository', () => {
 			expect(result.oversold).toEqual([
 				{ product_id: 7, product_name: 'P', available: 1, requested: 5 },
 			])
+		})
+
+		it('records a backorder for only the owed units when oversold', async () => {
+			tx.store_stock.findUnique.mockResolvedValue({ quantity: 2, reserved_quantity: 0 })
+			tx.product.findUnique.mockResolvedValue({ name: 'P', allow_oversell: true })
+			tx.order.create.mockResolvedValue({ id: 50, Order_item: [{ id: 500, product_id: 7 }] })
+
+			await repo.create({
+				seller_id: 'seller-1',
+				customer_id: 'c1',
+				order_number: 'ORD-14',
+				subtotal: 5000,
+				discount: 0,
+				total: 5000,
+				items: [{ product_id: 7, quantity: 5, unit_price: 1000, discount: 0, total: 5000 }],
+			})
+
+			// available 2, sold 5 → 3 owed (the 2 on hand are not backordered).
+			expect(tx.backorder.create).toHaveBeenCalledWith({
+				data: {
+					seller_id: 'seller-1',
+					order_id: 50,
+					order_item_id: 500,
+					product_id: 7,
+					quantity: 3,
+				},
+			})
 		})
 
 		it('rejects an order whose product belongs to another seller (tenant isolation)', async () => {

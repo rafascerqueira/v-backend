@@ -106,6 +106,7 @@ model Account {
   bundles                   Bundle[]
   suppliers                 Supplier[]
   promotions                Promotion[]
+  backorders                Backorder[]
   exceptions                AccountException[]         @relation("AccountExceptions")
   exceptions_created        AccountException[]         @relation("AccountExceptionsCreated")
 
@@ -197,6 +198,7 @@ model Product {
   stock          Store_stock?
   bundle_items   Bundle_item[]
   promotions     Promotion[]
+  backorders     Backorder[]
 
   @@unique([seller_id, sku])
   @@index([seller_id], name: "idx_products_seller")
@@ -289,6 +291,7 @@ model Order {
   updatedAt  DateTime     @updatedAt @db.Timestamptz()
   Order_item Order_item[]
   Billing    Billing[]
+  Backorder  Backorder[]
 
   @@unique([seller_id, order_number])
   @@index([seller_id], name: "idx_orders_seller")
@@ -309,6 +312,7 @@ model Order_item {
 
   createdAt DateTime @default(now()) @db.Timestamptz()
   updatedAt DateTime @updatedAt @db.Timestamptz()
+  backorder Backorder?
 
   @@index([order_id], name: "idx_order_items_order_id")
   @@index([product_id], name: "idx_order_items_product_id")
@@ -370,6 +374,41 @@ model Stock_movement {
 
   @@index([product_id], name: "idx_stock_movements_product_id")
   @@map("stock_movements")
+}
+
+enum BackorderStatus {
+  pending
+  fulfilled
+  canceled
+}
+
+// Order-level ledger of units sold past available stock (allow_oversell). One row
+// per oversold order line. The aggregate deficit still lives in
+// Store_stock.quantity (which goes negative); this table records WHICH orders owe
+// WHAT so a restock can be allocated FIFO and the seller can finalize the order.
+// Invariant: sum(quantity - fulfilled_quantity) for pending rows of a product ==
+// max(reserved_quantity - store_stock.quantity, 0).
+model Backorder {
+  id                 Int             @id @default(autoincrement())
+  seller_id          String
+  seller             Account         @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  order_id           Int
+  order              Order           @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  order_item_id      Int             @unique
+  order_item         Order_item      @relation(fields: [order_item_id], references: [id], onDelete: Cascade)
+  product_id         Int
+  product            Product         @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity           Int
+  fulfilled_quantity Int             @default(0)
+  status             BackorderStatus @default(pending)
+  fulfilledAt        DateTime?       @db.Timestamptz()
+  createdAt          DateTime        @default(now()) @db.Timestamptz()
+  updatedAt          DateTime        @updatedAt @db.Timestamptz()
+
+  @@index([seller_id], name: "idx_backorders_seller")
+  @@index([product_id, status], name: "idx_backorders_product_status")
+  @@index([order_id], name: "idx_backorders_order")
+  @@map("backorders")
 }
 
 model Audit_log {

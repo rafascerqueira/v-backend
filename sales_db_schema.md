@@ -151,11 +151,18 @@ CREATE TABLE store_stock (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     UNIQUE(product_id),
     -- Check constraints específicos do PostgreSQL
-    CONSTRAINT check_positive_quantity CHECK (quantity >= 0),
-    CONSTRAINT check_positive_reserved CHECK (reserved_quantity >= 0),
-    CONSTRAINT check_reserved_not_greater_than_total CHECK (reserved_quantity <= quantity)
+    CONSTRAINT check_positive_reserved CHECK (reserved_quantity >= 0)
 );
 ```
+
+> ⚠️ **`quantity` PODE ser negativo.** Produtos marcados com `allow_oversell`
+> podem ser vendidos sem estoque: a venda decrementa `quantity` normalmente, então
+> um produto vendido além do disponível fica com `quantity < 0`. O valor negativo
+> é o **déficit** (unidades devidas a pedidos em aberto). Por isso o schema real
+> (Prisma) **não** aplica `CHECK (quantity >= 0)` nem
+> `reserved_quantity <= quantity`. O frontend nunca exibe número negativo — mostra
+> `max(quantity, 0)` mais um selo "aguardando reposição". Veja a tabela
+> **`backorders`** abaixo e a regra de domínio no fim deste documento.
 
 ### 6. **orders** (Pedidos/Vendas)
 ```sql
@@ -282,6 +289,49 @@ CREATE INDEX idx_stock_movements_batch ON stock_movements (batch_id);
 CREATE INDEX idx_stock_movements_reference ON stock_movements (reference_type, reference_id);
 ```
 
+### 10. **backorders** (Reposição pendente / venda sem estoque)
+```sql
+CREATE TYPE backorder_status AS ENUM ('pending', 'fulfilled', 'canceled');
+
+-- Razão de cada unidade vendida além do estoque (allow_oversell), por linha de
+-- pedido. O déficit agregado continua em store_stock.quantity (que fica negativo);
+-- esta tabela registra QUAL pedido deve QUANTAS unidades, para alocar uma reposição
+-- por ordem de chegada (FIFO) e permitir finalizar o pedido.
+CREATE TABLE backorders (
+    id BIGSERIAL PRIMARY KEY,
+    seller_id BIGINT NOT NULL,
+    order_id BIGINT NOT NULL,
+    order_item_id BIGINT NOT NULL UNIQUE, -- 1 backorder por linha vendida sem estoque
+    product_id BIGINT NOT NULL,
+    quantity INT NOT NULL,                -- unidades devidas originalmente
+    fulfilled_quantity INT NOT NULL DEFAULT 0,
+    status backorder_status NOT NULL DEFAULT 'pending',
+    fulfilled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_backorders_seller ON backorders (seller_id);
+CREATE INDEX idx_backorders_product_status ON backorders (product_id, status); -- alocação FIFO + resumo
+CREATE INDEX idx_backorders_order ON backorders (order_id);
+```
+
+**Ciclo de vida**
+- **Criação:** ao criar/adicionar item de pedido com déficit em produto `allow_oversell`,
+  grava-se um backorder com `quantity = unidades além do disponível` (o que já estava
+  em mãos não vira backorder). Produto **sem** `allow_oversell` → a rota responde
+  **400** (estoque insuficiente), nenhum pedido/backorder é criado.
+- **Reposição:** uma movimentação `in` em `stock_movements` aloca as unidades que
+  cobre aos backorders `pending` do produto, do mais antigo ao mais novo (FIFO),
+  incrementando `fulfilled_quantity`; quando a linha é totalmente coberta vira
+  `fulfilled` (+ `fulfilled_at`) e o vendedor é notificado ("pronto para finalizar").
+- **Cancelamento do pedido:** os backorders `pending` daquele pedido viram
+  `canceled` junto com a restauração de estoque.
+
 ## Relacionamentos Principais
 
 1. **users** ↔ **orders** (n:1) - Um usuário pode ter várias vendas
@@ -291,6 +341,8 @@ CREATE INDEX idx_stock_movements_reference ON stock_movements (reference_type, r
 5. **products** ↔ **store_stock** (1:1) - Cada produto tem um registro de estoque
 6. **products** ↔ **product_prices** (1:n) - Um produto pode ter vários preços
 7. **orders** ↔ **billings** (1:1) - Cada venda gera um faturamento
+8. **order_items** ↔ **backorders** (1:1) - Linha vendida sem estoque gera um backorder
+9. **products** ↔ **backorders** (1:n) - Um produto pode ter vários backorders pendentes
 
 ## Índices Recomendados
 
@@ -686,3 +738,21 @@ Este esquema otimizado para PostgreSQL oferece:
 - **Segurança** com RLS e criptografia
 - **Monitoramento** com notificações automáticas
 - **Facilidade de manutenção** com funções automatizadas
+
+## Regras de domínio — estoque negativo e backorders
+
+- **Estoque pode ser negativo.** `store_stock.quantity < 0` é um estado válido para
+  produtos `allow_oversell` e representa o **déficit** (unidades vendidas e ainda
+  devidas). Não trate negativo como erro/dado corrompido em relatórios, KPIs ou
+  validações — use `max(quantity, 0)` para "em mãos" e `max(reserved_quantity - quantity, 0)`
+  (ou a soma dos backorders pendentes) para "devido".
+- **Invariante:** para cada produto,
+  `Σ(quantity - fulfilled_quantity)` dos backorders `pending`
+  `== max(reserved_quantity - store_stock.quantity, 0)`.
+  Mantido escrevendo backorder e estoque na **mesma transação** (criação do pedido,
+  alocação na reposição, cancelamento).
+- **Alocação na reposição é FIFO** (mais antigo primeiro), feita dentro da transação
+  do `stock_movements` de entrada (`in`).
+- **Limitação conhecida:** cancelar um pedido cujo backorder foi **parcialmente**
+  reposto super-restaura o estoque pelas unidades já repostas (cancela o pendente +
+  restaura a quantidade cheia do item). Reconciliação do caso parcial está adiada.

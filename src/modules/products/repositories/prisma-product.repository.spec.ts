@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { BACKORDER_REPOSITORY } from '@/shared/repositories/backorder.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import { PrismaProductRepository } from './prisma-product.repository'
 
@@ -35,6 +36,10 @@ describe('PrismaProductRepository', () => {
 				PrismaProductRepository,
 				{ provide: PrismaService, useValue: prisma },
 				{ provide: TenantContext, useValue: tenant },
+				{
+					provide: BACKORDER_REPOSITORY,
+					useValue: { summaryByProductIds: jest.fn().mockResolvedValue(new Map()) },
+				},
 			],
 		}).compile()
 

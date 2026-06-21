@@ -10,6 +10,10 @@ export interface StoreStock {
 export interface StoreStockWithProduct extends StoreStock {
 	product: { id: number; name: string; sku: string | null; category: string | null } | null
 	isLowStock: boolean
+	// Units owed to open orders (sold past stock) and how many orders are waiting.
+	// The frontend shows `quantity` clamped to 0 plus an "aguardando reposição" badge.
+	owed_quantity: number
+	pending_orders_count: number
 }
 
 export interface UpdateStoreStockData {

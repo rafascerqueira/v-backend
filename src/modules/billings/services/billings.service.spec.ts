@@ -255,6 +255,22 @@ describe('BillingsService', () => {
 			)
 		})
 
+		it('rejects lowering total_amount below the amount already paid (no negative remaining)', async () => {
+			// Already fully paid (1000/1000); reducing the total to 300 would leave
+			// paid > total. Must 400, not silently corrupt the record.
+			repositoryMock.findById.mockResolvedValueOnce({
+				id: 9,
+				total_amount: 1000,
+				paid_amount: 1000,
+				payment_date: new Date(),
+				order: { seller_id: 'test-seller-id' },
+			})
+			await expect(service.update(9, { total_amount: 300 } as any)).rejects.toThrow(
+				BadRequestException,
+			)
+			expect(repositoryMock.update).not.toHaveBeenCalled()
+		})
+
 		it('should auto-set payment_date when paid_amount > 0 and no existing payment_date', async () => {
 			repositoryMock.findById.mockResolvedValueOnce({
 				id: 7,

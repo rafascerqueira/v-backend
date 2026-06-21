@@ -76,7 +76,7 @@ export class BillingsService {
 		}
 
 		if (dto.paid_amount > dto.total_amount) {
-			throw new BadRequestException('paid_amount cannot exceed total_amount')
+			throw new BadRequestException('O valor pago não pode ser maior que o total da cobrança')
 		}
 
 		const { due_date, payment_date, ...rest } = dto
@@ -102,7 +102,7 @@ export class BillingsService {
 		const newPaid = dto.paid_amount ?? billing.paid_amount
 
 		if (newPaid > newTotal) {
-			throw new BadRequestException('paid_amount cannot exceed total_amount')
+			throw new BadRequestException('O valor pago não pode ser maior que o total da cobrança')
 		}
 
 		const { due_date, payment_date, ...rest } = dto
