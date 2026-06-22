@@ -7,6 +7,17 @@ import {
 	type SubscriptionRepository,
 } from '@/shared/repositories/subscription.repository'
 
+export interface ManagedStripeSubscription {
+	accountId: string
+	subscriptionId: string
+	customerId: string
+	status: Stripe.Subscription.Status
+	planType: string
+	periodStart: Date
+	periodEnd: Date
+	cancelAtPeriodEnd: boolean
+}
+
 @Injectable()
 export class StripeService {
 	private readonly logger = new Logger(StripeService.name)
@@ -77,19 +88,24 @@ export class StripeService {
 				? await this.ensurePromotionalCoupon(promo.discountPercent)
 				: null
 
-			const session = await this.stripe.checkout.sessions.create({
-				mode: 'subscription',
-				payment_method_types: ['card'],
-				line_items: [{ price: priceId, quantity: 1 }],
-				success_url: successUrl,
-				cancel_url: cancelUrl,
-				customer_email: account.email,
-				metadata: { account_id: accountId },
-				subscription_data: {
+			const session = await this.stripe.checkout.sessions.create(
+				{
+					mode: 'subscription',
+					payment_method_types: ['card'],
+					line_items: [{ price: priceId, quantity: 1 }],
+					success_url: successUrl,
+					cancel_url: cancelUrl,
+					customer_email: account.email,
 					metadata: { account_id: accountId },
+					subscription_data: {
+						metadata: { account_id: accountId },
+					},
+					...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
 				},
-				...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
-			})
+				// Idempotency: a double-submit won't create two checkout sessions; a retry
+				// within Stripe's 24h window replays the same (still-valid) session.
+				{ idempotencyKey: `checkout_${accountId}_${priceId}` },
+			)
 
 			return { url: session.url, sessionId: session.id }
 		} catch (error) {
@@ -164,6 +180,45 @@ export class StripeService {
 			this.logger.error('Failed to get subscription', error)
 			return null
 		}
+	}
+
+	/**
+	 * Lists the subscriptions we manage (active / trialing / past_due) for reconciliation,
+	 * normalized to the fields our system stores. Auto-paginates. Subscriptions without an
+	 * `account_id` in metadata are skipped — we never guess the tenant. Period fields come
+	 * from the subscription item (API 2026-02-25.clover), with a safe fallback so we never
+	 * produce an Invalid Date.
+	 */
+	async listManagedSubscriptions(): Promise<ManagedStripeSubscription[]> {
+		if (!this.stripe) return []
+
+		const statuses = ['active', 'trialing', 'past_due'] as const
+		const result: ManagedStripeSubscription[] = []
+
+		for (const status of statuses) {
+			for await (const sub of this.stripe.subscriptions.list({ status, limit: 100 })) {
+				const accountId = sub.metadata?.account_id
+				if (!accountId) continue
+
+				const item = sub.items?.data?.[0]
+				result.push({
+					accountId,
+					subscriptionId: sub.id,
+					customerId: typeof sub.customer === 'string' ? sub.customer : sub.customer.id,
+					status: sub.status,
+					planType: sub.metadata?.plan_type || 'pro',
+					periodStart: item?.current_period_start
+						? new Date(item.current_period_start * 1000)
+						: new Date(),
+					periodEnd: item?.current_period_end
+						? new Date(item.current_period_end * 1000)
+						: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+					cancelAtPeriodEnd: sub.cancel_at_period_end,
+				})
+			}
+		}
+
+		return result
 	}
 
 	constructWebhookEvent(payload: Buffer, signature: string): Stripe.Event | null {

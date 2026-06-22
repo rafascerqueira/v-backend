@@ -110,17 +110,21 @@ export class WebhookService {
 			canceled: 'canceled',
 			unpaid: 'past_due',
 			paused: 'paused',
+			incomplete: 'past_due',
+			incomplete_expired: 'canceled',
 		}
 
+		const period = this.getSubscriptionPeriod(subscription)
 		const existingSub = await this.webhookRepository.findSubscriptionByProviderId(subscription.id)
 
-		const sub = subscription as any
 		if (existingSub) {
 			await this.webhookRepository.updateSubscriptionById(existingSub.id, {
 				status: statusMap[subscription.status] || 'active',
-				current_period_start: new Date(sub.current_period_start * 1000),
-				current_period_end: new Date(sub.current_period_end * 1000),
 				cancel_at_period_end: subscription.cancel_at_period_end,
+				...(period && {
+					current_period_start: period.start,
+					current_period_end: period.end,
+				}),
 			})
 		} else {
 			await this.subscriptionService.createSubscription({
@@ -129,8 +133,8 @@ export class WebhookService {
 				paymentProvider: 'stripe',
 				providerSubscriptionId: subscription.id,
 				providerCustomerId: subscription.customer as string,
-				periodStart: new Date(sub.current_period_start * 1000),
-				periodEnd: new Date(sub.current_period_end * 1000),
+				periodStart: period?.start ?? new Date(),
+				periodEnd: period?.end ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
 			})
 		}
 
@@ -152,23 +156,50 @@ export class WebhookService {
 	}
 
 	private async handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
-		const subscriptionId = (invoice as any).subscription as string | null
+		const subscriptionId = this.getInvoiceSubscriptionId(invoice)
 		if (!subscriptionId) return
 
 		await this.webhookRepository.updateSubscriptionsByProviderId(subscriptionId, {
 			status: 'active',
-			current_period_start: new Date((invoice as any).period_start * 1000),
-			current_period_end: new Date((invoice as any).period_end * 1000),
+			current_period_start: new Date(invoice.period_start * 1000),
+			current_period_end: new Date(invoice.period_end * 1000),
 		})
 	}
 
 	private async handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
-		const subscriptionId = (invoice as any).subscription as string | null
+		const subscriptionId = this.getInvoiceSubscriptionId(invoice)
 		if (!subscriptionId) return
 
 		await this.webhookRepository.updateSubscriptionsByProviderId(subscriptionId, {
 			status: 'past_due',
 		})
+	}
+
+	/**
+	 * Stripe moved the billing period from the top of the Subscription object onto
+	 * each subscription item (API 2025-04+, incl. the pinned 2026-02-25.clover). Read
+	 * it from items.data[0] and convert UNIX seconds → Date. Returns null when
+	 * unavailable so callers never persist an Invalid Date.
+	 */
+	private getSubscriptionPeriod(
+		subscription: Stripe.Subscription,
+	): { start: Date; end: Date } | null {
+		const item = subscription.items?.data?.[0]
+		if (!item?.current_period_start || !item?.current_period_end) return null
+		return {
+			start: new Date(item.current_period_start * 1000),
+			end: new Date(item.current_period_end * 1000),
+		}
+	}
+
+	/**
+	 * Stripe moved the invoice→subscription link under parent.subscription_details
+	 * (API 2025-04+, incl. clover); the top-level invoice.subscription no longer exists.
+	 */
+	private getInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
+		const ref = invoice.parent?.subscription_details?.subscription
+		if (!ref) return null
+		return typeof ref === 'string' ? ref : ref.id
 	}
 
 	async processPagSeguroWebhook(event: PagSeguroWebhookEvent) {

@@ -178,4 +178,58 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 			data: data as any,
 		})
 	}
+
+	async upsertSubscriptionFromStripe(data: {
+		account_id: string
+		plan_type: string
+		status: string
+		provider_subscription_id: string
+		provider_customer_id: string | null
+		current_period_start: Date
+		current_period_end: Date
+		cancel_at_period_end: boolean
+	}): Promise<'created' | 'updated'> {
+		const existing = await this.prisma.subscription.findFirst({
+			where: { provider_subscription_id: data.provider_subscription_id },
+			select: { id: true },
+		})
+
+		if (existing) {
+			await this.prisma.subscription.update({
+				where: { id: existing.id },
+				data: {
+					plan_type: data.plan_type as any,
+					status: data.status as any,
+					provider_customer_id: data.provider_customer_id,
+					current_period_start: data.current_period_start,
+					current_period_end: data.current_period_end,
+					cancel_at_period_end: data.cancel_at_period_end,
+				},
+			})
+			return 'updated'
+		}
+
+		await this.prisma.subscription.create({
+			data: {
+				account_id: data.account_id,
+				plan_type: data.plan_type as any,
+				status: data.status as any,
+				payment_provider: 'stripe',
+				provider_subscription_id: data.provider_subscription_id,
+				provider_customer_id: data.provider_customer_id,
+				current_period_start: data.current_period_start,
+				current_period_end: data.current_period_end,
+				cancel_at_period_end: data.cancel_at_period_end,
+			},
+		})
+		return 'created'
+	}
+
+	async findPaidAccountIds(planTypes: string[]): Promise<string[]> {
+		const rows = await this.prisma.account.findMany({
+			where: { plan_type: { in: planTypes as any } },
+			select: { id: true },
+		})
+		return rows.map((row) => row.id)
+	}
 }

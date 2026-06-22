@@ -28,7 +28,10 @@ const subscriptionServiceMock = {
 
 const mockWebhookRecord = { id: 99, processed: false }
 
-function makeSubEvent(type: string, overrides: Record<string, unknown> = {}): Stripe.Event {
+const PERIOD_START = 1_000_000
+const PERIOD_END = 2_000_000
+
+function makeEventEnvelope(type: string, object: Record<string, unknown>): Stripe.Event {
 	return {
 		id: 'evt_test',
 		type,
@@ -38,19 +41,34 @@ function makeSubEvent(type: string, overrides: Record<string, unknown> = {}): St
 		pending_webhooks: 0,
 		request: null,
 		object: 'event',
-		data: {
-			object: {
-				id: 'sub_1',
-				customer: 'cus_1',
-				status: 'active',
-				current_period_start: 1000000,
-				current_period_end: 2000000,
-				cancel_at_period_end: false,
-				metadata: {},
-				...overrides,
-			} as any,
-		},
+		data: { object: object as any },
 	} as unknown as Stripe.Event
+}
+
+// Subscription payload as Stripe sends it on API 2026-02-25.clover: the billing
+// period lives on the subscription item, NOT at the top level of the subscription.
+function makeSubEvent(type: string, overrides: Record<string, unknown> = {}): Stripe.Event {
+	return makeEventEnvelope(type, {
+		id: 'sub_1',
+		customer: 'cus_1',
+		status: 'active',
+		cancel_at_period_end: false,
+		items: { data: [{ current_period_start: PERIOD_START, current_period_end: PERIOD_END }] },
+		metadata: {},
+		...overrides,
+	})
+}
+
+// Invoice payload on clover: the subscription link lives under
+// parent.subscription_details.subscription, NOT at the top level of the invoice.
+function makeInvoiceEvent(type: string, overrides: Record<string, unknown> = {}): Stripe.Event {
+	return makeEventEnvelope(type, {
+		object: 'invoice',
+		period_start: PERIOD_START,
+		period_end: PERIOD_END,
+		parent: { subscription_details: { subscription: 'sub_inv_1' } },
+		...overrides,
+	})
 }
 
 describe('WebhookService', () => {
@@ -127,7 +145,11 @@ describe('WebhookService', () => {
 
 			expect(webhookRepositoryMock.updateSubscriptionById).toHaveBeenCalledWith(
 				5,
-				expect.objectContaining({ status: 'active' }),
+				expect.objectContaining({
+					status: 'active',
+					current_period_start: new Date(PERIOD_START * 1000),
+					current_period_end: new Date(PERIOD_END * 1000),
+				}),
 			)
 			expect(subscriptionServiceMock.updatePlan).toHaveBeenCalledWith('acc-1', 'pro')
 		})
@@ -147,7 +169,60 @@ describe('WebhookService', () => {
 				}),
 			)
 
-			expect(subscriptionServiceMock.createSubscription).toHaveBeenCalled()
+			expect(subscriptionServiceMock.createSubscription).toHaveBeenCalledWith(
+				expect.objectContaining({
+					periodStart: new Date(PERIOD_START * 1000),
+					periodEnd: new Date(PERIOD_END * 1000),
+				}),
+			)
+		})
+
+		it('should mark subscription active and advance period on invoice.payment_succeeded', async () => {
+			webhookRepositoryMock.findWebhookEvent.mockResolvedValueOnce(null)
+			webhookRepositoryMock.upsertWebhookEvent.mockResolvedValueOnce(mockWebhookRecord as any)
+			webhookRepositoryMock.updateSubscriptionsByProviderId.mockResolvedValueOnce(undefined)
+			webhookRepositoryMock.markWebhookProcessed.mockResolvedValueOnce(undefined)
+
+			await service.processStripeWebhook(makeInvoiceEvent('invoice.payment_succeeded'))
+
+			// Reads the subscription id from parent.subscription_details, not the
+			// removed top-level invoice.subscription.
+			expect(webhookRepositoryMock.updateSubscriptionsByProviderId).toHaveBeenCalledWith(
+				'sub_inv_1',
+				{
+					status: 'active',
+					current_period_start: new Date(PERIOD_START * 1000),
+					current_period_end: new Date(PERIOD_END * 1000),
+				},
+			)
+		})
+
+		it('should mark subscription past_due on invoice.payment_failed', async () => {
+			webhookRepositoryMock.findWebhookEvent.mockResolvedValueOnce(null)
+			webhookRepositoryMock.upsertWebhookEvent.mockResolvedValueOnce(mockWebhookRecord as any)
+			webhookRepositoryMock.updateSubscriptionsByProviderId.mockResolvedValueOnce(undefined)
+			webhookRepositoryMock.markWebhookProcessed.mockResolvedValueOnce(undefined)
+
+			await service.processStripeWebhook(makeInvoiceEvent('invoice.payment_failed'))
+
+			expect(webhookRepositoryMock.updateSubscriptionsByProviderId).toHaveBeenCalledWith(
+				'sub_inv_1',
+				{
+					status: 'past_due',
+				},
+			)
+		})
+
+		it('should no-op an invoice event with no subscription link', async () => {
+			webhookRepositoryMock.findWebhookEvent.mockResolvedValueOnce(null)
+			webhookRepositoryMock.upsertWebhookEvent.mockResolvedValueOnce(mockWebhookRecord as any)
+			webhookRepositoryMock.markWebhookProcessed.mockResolvedValueOnce(undefined)
+
+			await service.processStripeWebhook(
+				makeInvoiceEvent('invoice.payment_succeeded', { parent: null }),
+			)
+
+			expect(webhookRepositoryMock.updateSubscriptionsByProviderId).not.toHaveBeenCalled()
 		})
 
 		it('should downgrade to free on customer.subscription.deleted', async () => {

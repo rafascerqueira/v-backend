@@ -12,11 +12,17 @@ import {
 	Req,
 } from '@nestjs/common'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 import type { FastifyRequest } from 'fastify'
 import { Public } from '@/modules/auth/decorators/public.decorator'
 import { StripeService } from '../services/stripe.service'
 import { WebhookService } from '../services/webhook.service'
 
+// Stripe delivers events in bursts (a single checkout fires ~10 events at once) and
+// retries aggressively. The global ThrottlerGuard's `short` limit (3 req/s) would 429
+// the critical activation events. Skip throttling here — the endpoint is already
+// protected by Stripe signature verification + webhook idempotency.
+@SkipThrottle()
 @ApiTags('webhooks')
 @Controller('webhooks')
 export class WebhookController {

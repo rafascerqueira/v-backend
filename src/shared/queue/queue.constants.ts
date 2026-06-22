@@ -4,10 +4,15 @@ export const QUEUE_NAMES = {
 	PDF: 'pdf',
 	IMAGE: 'image',
 	EXCEL: 'excel',
+	SUBSCRIPTION: 'subscription',
 	DEAD_LETTER: 'dead-letter',
 } as const
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES]
+
+export const SUBSCRIPTION_JOBS = {
+	RECONCILE: 'reconcile',
+} as const
 
 export const EMAIL_JOBS = {
 	SEND: 'send',

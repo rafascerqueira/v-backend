@@ -27,6 +27,8 @@ const repositoryMock: jest.Mocked<SubscriptionRepository> = {
 	findAccountEmailName: jest.fn(),
 	createSubscriptionFromCheckout: jest.fn(),
 	updateSubscriptionsByProviderId: jest.fn(),
+	upsertSubscriptionFromStripe: jest.fn(),
+	findPaidAccountIds: jest.fn(),
 }
 
 const mockUsageRecord = {

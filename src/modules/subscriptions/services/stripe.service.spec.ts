@@ -156,6 +156,7 @@ describe('StripeService', () => {
 
 			expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
 				expect.objectContaining({ discounts: [{ coupon: 'promo_25_off' }] }),
+				expect.objectContaining({ idempotencyKey: 'checkout_acc-1_price_1' }),
 			)
 		})
 
@@ -188,6 +189,7 @@ describe('StripeService', () => {
 			)
 			expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
 				expect.objectContaining({ discounts: [{ coupon: 'promo_30_off' }] }),
+				expect.objectContaining({ idempotencyKey: 'checkout_acc-1_price_1' }),
 			)
 		})
 

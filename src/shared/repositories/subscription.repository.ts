@@ -97,4 +97,21 @@ export interface SubscriptionRepository {
 		providerSubscriptionId: string,
 		data: Record<string, unknown>,
 	): Promise<void>
+
+	// Reconciliation: create-or-update a subscription row keyed by the Stripe
+	// subscription id (not @unique, so this is a find-then-write, not a Prisma upsert).
+	upsertSubscriptionFromStripe(data: {
+		account_id: string
+		plan_type: string
+		status: string
+		provider_subscription_id: string
+		provider_customer_id: string | null
+		current_period_start: Date
+		current_period_end: Date
+		cancel_at_period_end: boolean
+	}): Promise<'created' | 'updated'>
+
+	// Reconciliation: account ids currently sitting on a paid plan, used to detect
+	// accounts that should be downgraded because Stripe no longer has them active.
+	findPaidAccountIds(planTypes: string[]): Promise<string[]>
 }
