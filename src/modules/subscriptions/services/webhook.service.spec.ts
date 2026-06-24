@@ -35,7 +35,7 @@ function makeEventEnvelope(type: string, object: Record<string, unknown>): Strip
 	return {
 		id: 'evt_test',
 		type,
-		api_version: '2026-02-25.clover',
+		api_version: '2026-03-25.dahlia',
 		created: 0,
 		livemode: false,
 		pending_webhooks: 0,
