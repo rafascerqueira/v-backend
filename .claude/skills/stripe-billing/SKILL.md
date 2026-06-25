@@ -40,10 +40,12 @@ defer to `prisma-migrations-safe`. Do **not** edit anything under `.devin/`.
    if `existing.processed`, then `markWebhookProcessed` / `markWebhookError`. Handlers
    must be safe to re-run (upsert/`updateBy...ProviderId`, not blind insert).
 3. **Idempotency keys on subscription mutations.** Any state-changing Stripe call
-   (checkout session, subscription create/cancel) should pass
-   `{ idempotencyKey }` as the second arg so a retried request can't double-charge
-   or duplicate a subscription. (Not yet wired in `StripeService` — add it when you
-   touch those calls; key off `account_id` + intent.)
+   should pass `{ idempotencyKey }` as the second arg so a retried request can't
+   double-charge or duplicate a subscription. `createCheckoutSession` wires this as
+   `checkout_${accountId}_${priceId}_${YYYY-MM-DD}` — the day bucket lets a later
+   retry (or a re-subscribe after cancel) start a fresh session instead of replaying
+   a stale/expired one, and avoids a key collision when the promo window flips
+   between attempts. Key any new mutation off `account_id` + intent the same way.
 4. **Card-only recurring.** `mode: 'subscription'`, `payment_method_types: ['card']`.
    No boleto/Pix/one-off here.
 5. **All amounts are integer cents.** `PLAN_PRICES.pro = 1490` (R$ 14,90). Stripe
@@ -83,7 +85,10 @@ defer to `prisma-migrations-safe`. Do **not** edit anything under `.devin/`.
      `metadata.account_id`, return `{ url }`. Optional promo coupon via
      `SettingsService.getPromotionalPeriod()`.
    - `POST /subscriptions/portal` → Billing Portal session for the stored
-     `provider_customer_id` (lets the seller update card / cancel). No active sub → 400.
+     `provider_customer_id` (lets the seller update card / cancel). Resolves the sub
+     via `getManageableSubscription` — active/trialing/**past_due**/paused, NOT
+     active-only — so a seller in dunning can still reach the portal to fix their
+     card. No manageable sub → 400.
 
 4. **Plan gating**
    - Per-resource usage caps: `@UseGuards(PlanLimitsGuard)` + `@CheckPlanLimit('product'|'customer'|'order')`
@@ -130,8 +135,9 @@ defer to `prisma-migrations-safe`. Do **not** edit anything under `.devin/`.
 - **`checkout.session.completed` is not the source of truth.** It upgrades the plan
   eagerly; the full subscription row is written by the `customer.subscription.created`
   event that fires right after. Keep both idempotent.
-- **Pinned API version** `'2026-02-25.clover'` in `StripeService` — match it in the
-  Stripe Dashboard webhook config so payload shapes line up.
+- **Pinned API version** `'2026-03-25.dahlia'` in `StripeService` — match it in the
+  Stripe Dashboard webhook config so payload shapes line up (period fields on the
+  subscription item, invoice→sub link under `parent.subscription_details`).
 - **PagSeguro is dead.** `POST /webhooks/pagseguro` returns 410 Gone (it never verified
   signatures). Don't revive it; billing is Stripe-only.
 - **Don't add CORS headers in nginx** for `/webhooks/*` — NestJS owns CORS (DEPLOY.md).

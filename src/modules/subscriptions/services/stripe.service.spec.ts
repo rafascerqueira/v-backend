@@ -1,7 +1,7 @@
 /**
  * StripeService unit tests
  * Covers: isConfigured, createCustomer, createCheckoutSession, createPortalSession,
- *         cancelSubscription, constructWebhookEvent
+ *         constructWebhookEvent
  * Verifies: graceful no-op when Stripe not configured, delegation to repository,
  *           webhook event routing (checkout, subscription, invoice)
  */
@@ -25,7 +25,6 @@ jest.mock('stripe', () => jest.fn(() => stripeMock))
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const subscriptionRepositoryMock: Record<string, jest.Mock> = {
 	findAccountEmailName: jest.fn(),
-	createSubscriptionFromCheckout: jest.fn(),
 	updateAccountPlan: jest.fn(),
 	updateSubscriptionsByProviderId: jest.fn(),
 }
@@ -115,11 +114,22 @@ describe('StripeService', () => {
 				'price_123',
 				'https://success',
 				'https://cancel',
+				'pro',
 			)
 
 			expect(result).not.toBeNull()
 			expect(result?.url).toBe('https://checkout.stripe.com/session')
 			expect(result?.sessionId).toBe('cs_123')
+
+			// account_id + plan_type ride on BOTH the session and subscription_data
+			// metadata so later customer.subscription.* events can resolve tenant + tier.
+			const [params, options] = stripeMock.checkout.sessions.create.mock.calls[0]
+			expect(params.metadata).toEqual({ account_id: 'acc-1', plan_type: 'pro' })
+			expect(params.subscription_data.metadata).toEqual({
+				account_id: 'acc-1',
+				plan_type: 'pro',
+			})
+			expect(options.idempotencyKey).toMatch(/^checkout_acc-1_price_123_\d{4}-\d{2}-\d{2}$/)
 		})
 
 		it('should return null when account not found', async () => {
@@ -156,7 +166,9 @@ describe('StripeService', () => {
 
 			expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
 				expect.objectContaining({ discounts: [{ coupon: 'promo_25_off' }] }),
-				expect.objectContaining({ idempotencyKey: 'checkout_acc-1_price_1' }),
+				expect.objectContaining({
+					idempotencyKey: expect.stringMatching(/^checkout_acc-1_price_1_\d{4}-\d{2}-\d{2}$/),
+				}),
 			)
 		})
 
@@ -189,7 +201,9 @@ describe('StripeService', () => {
 			)
 			expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
 				expect.objectContaining({ discounts: [{ coupon: 'promo_30_off' }] }),
-				expect.objectContaining({ idempotencyKey: 'checkout_acc-1_price_1' }),
+				expect.objectContaining({
+					idempotencyKey: expect.stringMatching(/^checkout_acc-1_price_1_\d{4}-\d{2}-\d{2}$/),
+				}),
 			)
 		})
 
@@ -219,25 +233,6 @@ describe('StripeService', () => {
 			const result = await service.createPortalSession('cus_123', 'https://return')
 
 			expect(result).toBe('https://billing.portal')
-		})
-	})
-
-	describe('cancelSubscription', () => {
-		it('should cancel the subscription and return true', async () => {
-			stripeMock.subscriptions.cancel.mockResolvedValueOnce({})
-
-			const result = await service.cancelSubscription('sub_123')
-
-			expect(result).toBe(true)
-			expect(stripeMock.subscriptions.cancel).toHaveBeenCalledWith('sub_123')
-		})
-
-		it('should return false when Stripe throws', async () => {
-			stripeMock.subscriptions.cancel.mockRejectedValueOnce(new Error('not found'))
-
-			const result = await service.cancelSubscription('sub_bad')
-
-			expect(result).toBe(false)
 		})
 	})
 

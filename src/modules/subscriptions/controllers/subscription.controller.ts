@@ -124,6 +124,7 @@ export class SubscriptionController {
 			priceId,
 			`${frontendUrl}/plans?checkout=success`,
 			`${frontendUrl}/plans?checkout=canceled`,
+			body.planId,
 		)
 
 		if (!result?.url) {
@@ -139,7 +140,10 @@ export class SubscriptionController {
 	async createPortal(@Req() req: any) {
 		const accountId = req.user.sub
 
-		const subscription = await this.service.getActiveSubscription(accountId)
+		// Use the manageable lookup (not active-only): a past_due seller in dunning must
+		// be able to reach the portal to fix their card — the exact case where blocking
+		// them would force an avoidable churn.
+		const subscription = await this.service.getManageableSubscription(accountId)
 		if (!subscription?.provider_customer_id) {
 			throw new BadRequestException('Nenhuma assinatura ativa encontrada')
 		}

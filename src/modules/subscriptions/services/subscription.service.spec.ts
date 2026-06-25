@@ -1,8 +1,8 @@
 /**
  * SubscriptionService unit tests
- * Covers: getAccountPlan, getActiveSubscription, getCurrentUsage, refreshUsage,
- *         getSubscriptionInfo, updatePlan, createSubscription, cancelSubscription,
- *         handleSubscriptionEnded
+ * Covers: getAccountPlan, getActiveSubscription, getManageableSubscription,
+ *         getCurrentUsage, refreshUsage, getSubscriptionInfo, updatePlan,
+ *         createSubscription, handleSubscriptionEnded
  * Verifies: default free plan fallback, usage record creation/retrieval
  */
 import { Test } from '@nestjs/testing'
@@ -18,14 +18,13 @@ const repositoryMock: jest.Mocked<SubscriptionRepository> = {
 	findAccountPlan: jest.fn(),
 	updateAccountPlan: jest.fn(),
 	findActiveSubscription: jest.fn(),
+	findManageableSubscription: jest.fn(),
 	createSubscription: jest.fn(),
-	cancelSubscription: jest.fn(),
 	findUsageRecord: jest.fn(),
 	createUsageRecord: jest.fn(),
 	upsertUsageRecord: jest.fn(),
 	countResources: jest.fn(),
 	findAccountEmailName: jest.fn(),
-	createSubscriptionFromCheckout: jest.fn(),
 	updateSubscriptionsByProviderId: jest.fn(),
 	upsertSubscriptionFromStripe: jest.fn(),
 	findPaidAccountIds: jest.fn(),
@@ -180,13 +179,38 @@ describe('SubscriptionService', () => {
 		})
 	})
 
-	describe('cancelSubscription', () => {
-		it('should delegate to repository', async () => {
-			repositoryMock.cancelSubscription.mockResolvedValueOnce({ id: 1, status: 'canceled' } as any)
+	describe('getManageableSubscription', () => {
+		it('should delegate to repository (keeps past_due so dunning sellers reach the portal)', async () => {
+			repositoryMock.findManageableSubscription.mockResolvedValueOnce({
+				id: 1,
+				status: 'past_due',
+				provider_customer_id: 'cus_1',
+			} as any)
 
-			const result = await service.cancelSubscription(1, true)
+			const result = await service.getManageableSubscription('acc-1')
 
-			expect(repositoryMock.cancelSubscription).toHaveBeenCalledWith(1, true)
+			expect(repositoryMock.findManageableSubscription).toHaveBeenCalledWith('acc-1')
+			expect(result).toMatchObject({ status: 'past_due' })
+		})
+	})
+
+	describe('createSubscription', () => {
+		it('should persist an explicit provider status when given (e.g. trialing)', async () => {
+			repositoryMock.createSubscription.mockResolvedValueOnce({ id: 3 } as any)
+			repositoryMock.updateAccountPlan.mockResolvedValueOnce(undefined)
+
+			await service.createSubscription({
+				accountId: 'acc-1',
+				planType: 'pro',
+				paymentProvider: 'stripe',
+				providerSubscriptionId: 'sub_123',
+				providerCustomerId: 'cus_123',
+				periodStart: new Date(),
+				periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+				status: 'past_due',
+			})
+
+			expect(repositoryMock.createSubscription.mock.calls[0][0].status).toBe('past_due')
 		})
 	})
 

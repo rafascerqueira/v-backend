@@ -18,6 +18,7 @@ const serviceMock = {
 	getCurrentUsage: jest.fn(),
 	refreshUsage: jest.fn(),
 	getActiveSubscription: jest.fn(),
+	getManageableSubscription: jest.fn(),
 }
 
 const planLimitsServiceMock = {
@@ -187,6 +188,66 @@ describe('SubscriptionController', () => {
 
 			expect(planLimitsServiceMock.canCreateCustomer).toHaveBeenCalledWith('user-uuid-1', 'free')
 			expect(result).toEqual({ allowed: true, current: 50, limit: 100, remaining: 50 })
+		})
+	})
+
+	describe('createCheckout', () => {
+		it('should resolve the price id and forward the planId as the tier', async () => {
+			configServiceMock.get.mockImplementation((key: string) => {
+				if (key === 'stripe.priceIds.pro') return 'price_pro'
+				if (key === 'frontendUrl') return 'https://app.test'
+				return undefined
+			})
+			stripeServiceMock.createCheckoutSession.mockResolvedValueOnce({ url: 'https://pay' })
+
+			const result = await controller.createCheckout(makeRequest(), { planId: 'pro' })
+
+			expect(stripeServiceMock.createCheckoutSession).toHaveBeenCalledWith(
+				'user-uuid-1',
+				'price_pro',
+				'https://app.test/plans?checkout=success',
+				'https://app.test/plans?checkout=canceled',
+				'pro',
+			)
+			expect(result).toEqual({ url: 'https://pay' })
+		})
+
+		it('should 400 when the plan/price is not configured', async () => {
+			configServiceMock.get.mockReturnValue(undefined)
+
+			await expect(controller.createCheckout(makeRequest(), { planId: 'bogus' })).rejects.toThrow(
+				'Plano inválido ou pagamento não configurado',
+			)
+		})
+	})
+
+	describe('createPortal', () => {
+		it('should open the portal for a past_due subscription (dunning recovery)', async () => {
+			serviceMock.getManageableSubscription.mockResolvedValueOnce({
+				status: 'past_due',
+				provider_customer_id: 'cus_1',
+			})
+			configServiceMock.get.mockImplementation((key: string) =>
+				key === 'frontendUrl' ? 'https://app.test' : undefined,
+			)
+			stripeServiceMock.createPortalSession.mockResolvedValueOnce('https://portal')
+
+			const result = await controller.createPortal(makeRequest())
+
+			expect(serviceMock.getManageableSubscription).toHaveBeenCalledWith('user-uuid-1')
+			expect(stripeServiceMock.createPortalSession).toHaveBeenCalledWith(
+				'cus_1',
+				'https://app.test/plans',
+			)
+			expect(result).toEqual({ url: 'https://portal' })
+		})
+
+		it('should 400 when there is no manageable subscription', async () => {
+			serviceMock.getManageableSubscription.mockResolvedValueOnce(null)
+
+			await expect(controller.createPortal(makeRequest())).rejects.toThrow(
+				'Nenhuma assinatura ativa encontrada',
+			)
 		})
 	})
 })

@@ -36,6 +36,19 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 		}) as unknown as SubscriptionRecord | null
 	}
 
+	async findManageableSubscription(accountId: string): Promise<SubscriptionRecord | null> {
+		// Includes past_due (and paused): a seller in dunning must still reach the
+		// billing portal to update their card. Only fully canceled subs are excluded.
+		return this.prisma.subscription.findFirst({
+			where: {
+				account_id: accountId,
+				provider_customer_id: { not: null },
+				status: { in: ['active', 'trialing', 'past_due', 'paused'] },
+			},
+			orderBy: { createdAt: 'desc' },
+		}) as unknown as SubscriptionRecord | null
+	}
+
 	async createSubscription(data: {
 		account_id: string
 		plan_type: string
@@ -50,20 +63,6 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 	}): Promise<SubscriptionRecord> {
 		return this.prisma.subscription.create({
 			data: data as any,
-		}) as unknown as SubscriptionRecord
-	}
-
-	async cancelSubscription(
-		subscriptionId: number,
-		cancelAtPeriodEnd: boolean,
-	): Promise<SubscriptionRecord> {
-		return this.prisma.subscription.update({
-			where: { id: subscriptionId },
-			data: {
-				cancel_at_period_end: cancelAtPeriodEnd,
-				canceled_at: cancelAtPeriodEnd ? null : new Date(),
-				status: cancelAtPeriodEnd ? 'active' : 'canceled',
-			},
 		}) as unknown as SubscriptionRecord
 	}
 
@@ -151,21 +150,6 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 		return this.prisma.account.findUnique({
 			where: { id: accountId },
 			select: { email: true, name: true },
-		})
-	}
-
-	async createSubscriptionFromCheckout(data: {
-		account_id: string
-		payment_provider: string
-		provider_subscription_id: string
-		provider_customer_id: string
-		status: string
-		plan_type: string
-		current_period_start: Date
-		current_period_end: Date
-	}): Promise<void> {
-		await this.prisma.subscription.create({
-			data: data as any,
 		})
 	}
 

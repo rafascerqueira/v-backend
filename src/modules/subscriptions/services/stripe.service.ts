@@ -75,6 +75,7 @@ export class StripeService {
 		priceId: string,
 		successUrl: string,
 		cancelUrl: string,
+		planType = 'pro',
 	): Promise<{ url: string | null; sessionId: string } | null> {
 		if (!this.stripe) return null
 
@@ -88,6 +89,12 @@ export class StripeService {
 				? await this.ensurePromotionalCoupon(promo.discountPercent)
 				: null
 
+			// account_id rides on BOTH the session and subscription_data metadata: later
+			// customer.subscription.* events only carry the subscription's own metadata.
+			// plan_type travels the same way so the webhook activates the plan the buyer
+			// actually paid for instead of assuming 'pro' (matters once a 2nd paid tier ships).
+			const metadata = { account_id: accountId, plan_type: planType }
+
 			const session = await this.stripe.checkout.sessions.create(
 				{
 					mode: 'subscription',
@@ -96,15 +103,15 @@ export class StripeService {
 					success_url: successUrl,
 					cancel_url: cancelUrl,
 					customer_email: account.email,
-					metadata: { account_id: accountId },
-					subscription_data: {
-						metadata: { account_id: accountId },
-					},
+					metadata,
+					subscription_data: { metadata },
 					...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
 				},
-				// Idempotency: a double-submit won't create two checkout sessions; a retry
-				// within Stripe's 24h window replays the same (still-valid) session.
-				{ idempotencyKey: `checkout_${accountId}_${priceId}` },
+				// Idempotency: a double-submit on the same day won't create two checkout
+				// sessions. The date bucket lets a later retry (or a re-subscribe after
+				// cancel) start a fresh session instead of replaying a stale/expired one,
+				// and avoids a key collision when the promo window flips between attempts.
+				{ idempotencyKey: `checkout_${accountId}_${priceId}_${this.dateBucket()}` },
 			)
 
 			return { url: session.url, sessionId: session.id }
@@ -112,6 +119,11 @@ export class StripeService {
 			this.logger.error('Failed to create checkout session', error)
 			return null
 		}
+	}
+
+	/** UTC day key (YYYY-MM-DD) used to scope checkout idempotency to a single day. */
+	private dateBucket(): string {
+		return new Date().toISOString().slice(0, 10)
 	}
 
 	private async ensurePromotionalCoupon(discountPercent: number): Promise<string | null> {
@@ -159,18 +171,6 @@ export class StripeService {
 		}
 	}
 
-	async cancelSubscription(subscriptionId: string): Promise<boolean> {
-		if (!this.stripe) return false
-
-		try {
-			await this.stripe.subscriptions.cancel(subscriptionId)
-			return true
-		} catch (error) {
-			this.logger.error('Failed to cancel subscription', error)
-			return false
-		}
-	}
-
 	async getSubscription(subscriptionId: string): Promise<Stripe.Subscription | null> {
 		if (!this.stripe) return null
 
@@ -186,7 +186,7 @@ export class StripeService {
 	 * Lists the subscriptions we manage (active / trialing / past_due) for reconciliation,
 	 * normalized to the fields our system stores. Auto-paginates. Subscriptions without an
 	 * `account_id` in metadata are skipped — we never guess the tenant. Period fields come
-	 * from the subscription item (API 2026-02-25.clover), with a safe fallback so we never
+	 * from the subscription item (API 2026-03-25.dahlia), with a safe fallback so we never
 	 * produce an Invalid Date.
 	 */
 	async listManagedSubscriptions(): Promise<ManagedStripeSubscription[]> {

@@ -45,7 +45,7 @@ function makeEventEnvelope(type: string, object: Record<string, unknown>): Strip
 	} as unknown as Stripe.Event
 }
 
-// Subscription payload as Stripe sends it on API 2026-02-25.clover: the billing
+// Subscription payload as Stripe sends it on API 2026-03-25.dahlia: the billing
 // period lives on the subscription item, NOT at the top level of the subscription.
 function makeSubEvent(type: string, overrides: Record<string, unknown> = {}): Stripe.Event {
 	return makeEventEnvelope(type, {
@@ -59,7 +59,7 @@ function makeSubEvent(type: string, overrides: Record<string, unknown> = {}): St
 	})
 }
 
-// Invoice payload on clover: the subscription link lives under
+// Invoice payload on dahlia: the subscription link lives under
 // parent.subscription_details.subscription, NOT at the top level of the invoice.
 function makeInvoiceEvent(type: string, overrides: Record<string, unknown> = {}): Stripe.Event {
 	return makeEventEnvelope(type, {

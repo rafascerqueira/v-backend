@@ -90,7 +90,10 @@ export class WebhookService {
 		}
 		// customer.subscription.created fires right after and creates the full record;
 		// here we just ensure the account plan is upgraded immediately on checkout completion.
-		await this.subscriptionService.updatePlan(accountId, 'pro')
+		// Read the purchased tier from metadata (set at checkout) rather than assuming 'pro',
+		// so a future second paid tier activates the plan the buyer actually paid for.
+		const planType = (session.metadata?.plan_type || 'pro') as PlanType
+		await this.subscriptionService.updatePlan(accountId, planType)
 		this.logger.log(`✅ Plan upgraded on checkout completion for account ${accountId}`)
 	}
 
@@ -115,11 +118,12 @@ export class WebhookService {
 		}
 
 		const period = this.getSubscriptionPeriod(subscription)
+		const mappedStatus = statusMap[subscription.status] || 'active'
 		const existingSub = await this.webhookRepository.findSubscriptionByProviderId(subscription.id)
 
 		if (existingSub) {
 			await this.webhookRepository.updateSubscriptionById(existingSub.id, {
-				status: statusMap[subscription.status] || 'active',
+				status: mappedStatus,
 				cancel_at_period_end: subscription.cancel_at_period_end,
 				...(period && {
 					current_period_start: period.start,
@@ -135,6 +139,11 @@ export class WebhookService {
 				providerCustomerId: subscription.customer as string,
 				periodStart: period?.start ?? new Date(),
 				periodEnd: period?.end ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+				// Persist the real Stripe status (e.g. 'trialing'/'past_due') instead of
+				// letting it default to 'active', and carry trial_end when present so a
+				// trialing sub isn't stored as a fully active one.
+				status: mappedStatus,
+				trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : undefined,
 			})
 		}
 
@@ -177,7 +186,7 @@ export class WebhookService {
 
 	/**
 	 * Stripe moved the billing period from the top of the Subscription object onto
-	 * each subscription item (API 2025-04+, incl. the pinned 2026-02-25.clover). Read
+	 * each subscription item (API 2025-04+, incl. the pinned 2026-03-25.dahlia). Read
 	 * it from items.data[0] and convert UNIX seconds → Date. Returns null when
 	 * unavailable so callers never persist an Invalid Date.
 	 */
@@ -194,7 +203,7 @@ export class WebhookService {
 
 	/**
 	 * Stripe moved the invoice→subscription link under parent.subscription_details
-	 * (API 2025-04+, incl. clover); the top-level invoice.subscription no longer exists.
+	 * (API 2025-04+, incl. dahlia); the top-level invoice.subscription no longer exists.
 	 */
 	private getInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
 		const ref = invoice.parent?.subscription_details?.subscription

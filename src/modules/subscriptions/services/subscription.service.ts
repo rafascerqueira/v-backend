@@ -25,6 +25,16 @@ export class SubscriptionService {
 		return this.subscriptionRepository.findActiveSubscription(accountId)
 	}
 
+	/**
+	 * The subscription a seller can still manage in the billing portal — active,
+	 * trialing, past_due or paused. Unlike getActiveSubscription this keeps past_due,
+	 * so a seller whose renewal failed can update their card instead of being told
+	 * "no active subscription" and silently churning at period end.
+	 */
+	async getManageableSubscription(accountId: string) {
+		return this.subscriptionRepository.findManageableSubscription(accountId)
+	}
+
 	async getCurrentUsage(accountId: string) {
 		const now = new Date()
 		const periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -150,11 +160,14 @@ export class SubscriptionService {
 		periodStart: Date
 		periodEnd: Date
 		trialEnd?: Date
+		// Explicit lifecycle status from the provider; falls back to trial-vs-active
+		// inference when the caller doesn't know it.
+		status?: string
 	}) {
 		const subscription = await this.subscriptionRepository.createSubscription({
 			account_id: data.accountId,
 			plan_type: data.planType,
-			status: data.trialEnd ? 'trialing' : 'active',
+			status: data.status ?? (data.trialEnd ? 'trialing' : 'active'),
 			payment_provider: data.paymentProvider,
 			provider_subscription_id: data.providerSubscriptionId,
 			provider_customer_id: data.providerCustomerId,
@@ -168,10 +181,6 @@ export class SubscriptionService {
 		await this.updatePlan(data.accountId, data.planType)
 
 		return subscription
-	}
-
-	async cancelSubscription(subscriptionId: number, cancelAtPeriodEnd = true) {
-		return this.subscriptionRepository.cancelSubscription(subscriptionId, cancelAtPeriodEnd)
 	}
 
 	async handleSubscriptionEnded(accountId: string) {

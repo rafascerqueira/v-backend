@@ -37,6 +37,9 @@ export interface SubscriptionRepository {
 	updateAccountPlan(accountId: string, planType: string): Promise<void>
 
 	findActiveSubscription(accountId: string): Promise<SubscriptionRecord | null>
+	// Latest subscription a seller can still manage in the billing portal: active,
+	// trialing, past_due or paused (past_due included so dunning sellers can fix a card).
+	findManageableSubscription(accountId: string): Promise<SubscriptionRecord | null>
 	createSubscription(data: {
 		account_id: string
 		plan_type: string
@@ -49,10 +52,6 @@ export interface SubscriptionRepository {
 		trial_start: Date | null
 		trial_end: Date | null
 	}): Promise<SubscriptionRecord>
-	cancelSubscription(
-		subscriptionId: number,
-		cancelAtPeriodEnd: boolean,
-	): Promise<SubscriptionRecord>
 
 	findUsageRecord(accountId: string, periodStart: Date): Promise<UsageRecord | null>
 	createUsageRecord(data: {
@@ -81,17 +80,6 @@ export interface SubscriptionRepository {
 	): Promise<{ products: number; orders: number; customers: number }>
 
 	findAccountEmailName(accountId: string): Promise<AccountEmailName | null>
-
-	createSubscriptionFromCheckout(data: {
-		account_id: string
-		payment_provider: string
-		provider_subscription_id: string
-		provider_customer_id: string
-		status: string
-		plan_type: string
-		current_period_start: Date
-		current_period_end: Date
-	}): Promise<void>
 
 	updateSubscriptionsByProviderId(
 		providerSubscriptionId: string,
