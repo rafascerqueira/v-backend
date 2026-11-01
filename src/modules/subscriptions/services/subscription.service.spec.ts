@@ -2,7 +2,7 @@
  * SubscriptionService unit tests
  * Covers: getAccountPlan, getActiveSubscription, getManageableSubscription,
  *         getCurrentUsage, refreshUsage, getSubscriptionInfo, updatePlan,
- *         createSubscription, handleSubscriptionEnded
+ *         syncStripeSubscription, hasBlockingSubscription, handleSubscriptionEnded
  * Verifies: default free plan fallback, usage record creation/retrieval
  */
 import { Test } from '@nestjs/testing'
@@ -19,7 +19,6 @@ const repositoryMock: jest.Mocked<SubscriptionRepository> = {
 	updateAccountPlan: jest.fn(),
 	findActiveSubscription: jest.fn(),
 	findManageableSubscription: jest.fn(),
-	createSubscription: jest.fn(),
 	findUsageRecord: jest.fn(),
 	createUsageRecord: jest.fn(),
 	upsertUsageRecord: jest.fn(),
@@ -139,43 +138,45 @@ describe('SubscriptionService', () => {
 		})
 	})
 
-	describe('createSubscription', () => {
-		it('should create subscription and update account plan', async () => {
-			repositoryMock.createSubscription.mockResolvedValueOnce({ id: 1 } as any)
-			repositoryMock.updateAccountPlan.mockResolvedValueOnce(undefined)
+	describe('syncStripeSubscription', () => {
+		it('upserts via the repository and never touches the account plan', async () => {
+			repositoryMock.upsertSubscriptionFromStripe.mockResolvedValueOnce('created')
+			const data = {
+				account_id: 'acc-1',
+				plan_type: 'pro',
+				status: 'past_due',
+				provider_subscription_id: 'sub_1',
+				provider_customer_id: 'cus_1',
+				current_period_start: null,
+				current_period_end: null,
+				cancel_at_period_end: false,
+			}
 
-			const result = await service.createSubscription({
-				accountId: 'acc-1',
-				planType: 'pro',
-				paymentProvider: 'stripe',
-				providerSubscriptionId: 'sub_123',
-				providerCustomerId: 'cus_123',
-				periodStart: new Date(),
-				periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-			})
+			const op = await service.syncStripeSubscription(data)
 
-			expect(repositoryMock.createSubscription).toHaveBeenCalled()
-			expect(repositoryMock.updateAccountPlan).toHaveBeenCalledWith('acc-1', 'pro')
-			expect(result).toEqual({ id: 1 })
+			expect(op).toBe('created')
+			expect(repositoryMock.upsertSubscriptionFromStripe).toHaveBeenCalledWith(data)
+			expect(repositoryMock.updateAccountPlan).not.toHaveBeenCalled()
 		})
+	})
 
-		it('should set status to trialing when trialEnd is provided', async () => {
-			repositoryMock.createSubscription.mockResolvedValueOnce({ id: 2 } as any)
-			repositoryMock.updateAccountPlan.mockResolvedValueOnce(undefined)
+	describe('hasBlockingSubscription', () => {
+		it.each([
+			// [account plan, manageable sub status, blocks?]
+			['pro', 'active', true],
+			['pro', 'trialing', true],
+			['pro', 'past_due', true], // paying customer in dunning → fix card in the portal
+			['free', 'active', true],
+			['free', 'past_due', false], // never-paid attempt (incomplete) → may retry checkout
+			['free', null, false],
+			['pro', null, false],
+		])('plan=%s sub=%s → %s', async (plan, status, expected) => {
+			repositoryMock.findAccountPlan.mockResolvedValueOnce(plan)
+			repositoryMock.findManageableSubscription.mockResolvedValueOnce(
+				status ? ({ id: 1, status, provider_customer_id: 'cus_1' } as any) : null,
+			)
 
-			await service.createSubscription({
-				accountId: 'acc-1',
-				planType: 'pro',
-				paymentProvider: 'stripe',
-				providerSubscriptionId: 'sub_123',
-				providerCustomerId: 'cus_123',
-				periodStart: new Date(),
-				periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-				trialEnd: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-			})
-
-			const createCall = repositoryMock.createSubscription.mock.calls[0][0]
-			expect(createCall.status).toBe('trialing')
+			await expect(service.hasBlockingSubscription('acc-1')).resolves.toBe(expected)
 		})
 	})
 
@@ -194,23 +195,25 @@ describe('SubscriptionService', () => {
 		})
 	})
 
-	describe('createSubscription', () => {
-		it('should persist an explicit provider status when given (e.g. trialing)', async () => {
-			repositoryMock.createSubscription.mockResolvedValueOnce({ id: 3 } as any)
-			repositoryMock.updateAccountPlan.mockResolvedValueOnce(undefined)
-
-			await service.createSubscription({
-				accountId: 'acc-1',
-				planType: 'pro',
-				paymentProvider: 'stripe',
-				providerSubscriptionId: 'sub_123',
-				providerCustomerId: 'cus_123',
-				periodStart: new Date(),
-				periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+	describe('getSubscriptionInfo', () => {
+		it('returns a past_due subscription so the UI can show the dunning warning', async () => {
+			const pastDue = {
+				id: 9,
 				status: 'past_due',
-			})
+				plan_type: 'pro',
+				provider_customer_id: 'cus_1',
+				cancel_at_period_end: false,
+			}
+			repositoryMock.findAccountPlan.mockResolvedValueOnce('pro')
+			repositoryMock.findManageableSubscription.mockResolvedValueOnce(pastDue as any)
+			repositoryMock.findUsageRecord.mockResolvedValueOnce(mockUsageRecord as any)
 
-			expect(repositoryMock.createSubscription.mock.calls[0][0].status).toBe('past_due')
+			const info = await service.getSubscriptionInfo('acc-1')
+
+			expect(repositoryMock.findManageableSubscription).toHaveBeenCalledWith('acc-1')
+			expect(repositoryMock.findActiveSubscription).not.toHaveBeenCalled()
+			expect(info.plan).toBe('pro')
+			expect(info.subscription).toMatchObject({ status: 'past_due' })
 		})
 	})
 

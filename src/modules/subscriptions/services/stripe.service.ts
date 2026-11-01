@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Stripe from 'stripe'
@@ -6,13 +7,17 @@ import {
 	SUBSCRIPTION_REPOSITORY,
 	type SubscriptionRepository,
 } from '@/shared/repositories/subscription.repository'
+import { PAID_PLANS, type PaidPlanType, toPaidPlanType } from '../constants/plan-limits'
+
+/** Double-submit protection window for checkout session creation. */
+const CHECKOUT_IDEMPOTENCY_WINDOW_MS = 10 * 60 * 1000
 
 export interface ManagedStripeSubscription {
 	accountId: string
 	subscriptionId: string
 	customerId: string
 	status: Stripe.Subscription.Status
-	planType: string
+	planType: PaidPlanType
 	periodStart: Date
 	periodEnd: Date
 	cancelAtPeriodEnd: boolean
@@ -95,24 +100,21 @@ export class StripeService {
 			// actually paid for instead of assuming 'pro' (matters once a 2nd paid tier ships).
 			const metadata = { account_id: accountId, plan_type: planType }
 
-			const session = await this.stripe.checkout.sessions.create(
-				{
-					mode: 'subscription',
-					payment_method_types: ['card'],
-					line_items: [{ price: priceId, quantity: 1 }],
-					success_url: successUrl,
-					cancel_url: cancelUrl,
-					customer_email: account.email,
-					metadata,
-					subscription_data: { metadata },
-					...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
-				},
-				// Idempotency: a double-submit on the same day won't create two checkout
-				// sessions. The date bucket lets a later retry (or a re-subscribe after
-				// cancel) start a fresh session instead of replaying a stale/expired one,
-				// and avoids a key collision when the promo window flips between attempts.
-				{ idempotencyKey: `checkout_${accountId}_${priceId}_${this.dateBucket()}` },
-			)
+			const params: Stripe.Checkout.SessionCreateParams = {
+				mode: 'subscription',
+				payment_method_types: ['card'],
+				line_items: [{ price: priceId, quantity: 1 }],
+				success_url: successUrl,
+				cancel_url: cancelUrl,
+				customer_email: account.email,
+				metadata,
+				subscription_data: { metadata },
+				...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
+			}
+
+			const session = await this.stripe.checkout.sessions.create(params, {
+				idempotencyKey: this.checkoutIdempotencyKey(accountId, params),
+			})
 
 			return { url: session.url, sessionId: session.id }
 		} catch (error) {
@@ -121,9 +123,55 @@ export class StripeService {
 		}
 	}
 
-	/** UTC day key (YYYY-MM-DD) used to scope checkout idempotency to a single day. */
-	private dateBucket(): string {
-		return new Date().toISOString().slice(0, 10)
+	/**
+	 * Stripe rejects a reused idempotency key whose parameters differ (idempotency_error),
+	 * so the key is derived FROM the parameters: if the promo coupon, email, price or
+	 * tier changes between attempts, the key changes too. A double-submit with identical
+	 * parameters inside the same short window still replays the first session instead of
+	 * opening a second one. The window is short so that a later retry (or a re-subscribe
+	 * after a cancel) gets a fresh session rather than replaying a completed/expired one.
+	 */
+	checkoutIdempotencyKey(
+		accountId: string,
+		params: Stripe.Checkout.SessionCreateParams,
+		now: Date = new Date(),
+	): string {
+		const digest = createHash('sha256').update(JSON.stringify(params)).digest('hex').slice(0, 16)
+		const window = Math.floor(now.getTime() / CHECKOUT_IDEMPOTENCY_WINDOW_MS)
+		return `checkout_${accountId}_${digest}_${window}`
+	}
+
+	/**
+	 * The paid tier a subscription grants, resolved from what Stripe actually bills (the
+	 * item's price), not from metadata frozen at checkout: a Billing Portal plan switch
+	 * changes the price but never the metadata. Falls back to the validated metadata tier
+	 * for prices not mapped in config, then to 'pro'.
+	 */
+	resolvePlanType(input: { priceId?: string | null; metadataPlanType?: unknown }): PaidPlanType {
+		if (input.priceId) {
+			for (const plan of PAID_PLANS) {
+				if (this.configService.get<string>(`stripe.priceIds.${plan}`) === input.priceId) {
+					return plan
+				}
+			}
+		}
+		const fromMetadata = toPaidPlanType(input.metadataPlanType)
+		if (fromMetadata) return fromMetadata
+		this.logger.warn(
+			`Could not resolve plan for price ${input.priceId ?? '(none)'} / metadata ${String(input.metadataPlanType)}; using 'pro'`,
+		)
+		return 'pro'
+	}
+
+	/**
+	 * Current state of a subscription straight from Stripe. Webhook handlers use it
+	 * instead of the event payload so a delayed or out-of-order event can never roll the
+	 * stored state back. Returns null when Stripe isn't configured; API errors propagate
+	 * so the webhook is marked failed and Stripe retries it.
+	 */
+	async retrieveSubscription(subscriptionId: string): Promise<Stripe.Subscription | null> {
+		if (!this.stripe) return null
+		return this.stripe.subscriptions.retrieve(subscriptionId)
 	}
 
 	private async ensurePromotionalCoupon(discountPercent: number): Promise<string | null> {
@@ -206,7 +254,12 @@ export class StripeService {
 					subscriptionId: sub.id,
 					customerId: typeof sub.customer === 'string' ? sub.customer : sub.customer.id,
 					status: sub.status,
-					planType: sub.metadata?.plan_type || 'pro',
+					// Tier from the billed price (survives portal plan switches); dirty
+					// metadata can never reach the PlanType enum and abort the reconcile.
+					planType: this.resolvePlanType({
+						priceId: item?.price?.id,
+						metadataPlanType: sub.metadata?.plan_type,
+					}),
 					periodStart: item?.current_period_start
 						? new Date(item.current_period_start * 1000)
 						: new Date(),

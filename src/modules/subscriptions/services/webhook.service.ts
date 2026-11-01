@@ -4,8 +4,36 @@ import {
 	WEBHOOK_REPOSITORY,
 	type WebhookRepository,
 } from '@/shared/repositories/webhook.repository'
-import type { PlanType } from '../constants/plan-limits'
+import {
+	isPayingStatus,
+	type PaidPlanType,
+	type PlanType,
+	toPaidPlanType,
+} from '../constants/plan-limits'
+import { StripeService } from './stripe.service'
 import { SubscriptionService } from './subscription.service'
+
+type InternalSubscriptionStatus = 'active' | 'canceled' | 'past_due' | 'trialing' | 'paused'
+
+const STRIPE_STATUS_MAP: Record<Stripe.Subscription.Status, InternalSubscriptionStatus> = {
+	active: 'active',
+	trialing: 'trialing',
+	past_due: 'past_due',
+	canceled: 'canceled',
+	unpaid: 'past_due',
+	paused: 'paused',
+	incomplete: 'past_due',
+	incomplete_expired: 'canceled',
+}
+
+/** Stripe lifecycle status → our SubscriptionStatus enum. */
+export function mapStripeStatus(status: string): InternalSubscriptionStatus {
+	return STRIPE_STATUS_MAP[status as Stripe.Subscription.Status] ?? 'active'
+}
+
+function fromUnixSeconds(seconds: number | null | undefined): Date | null {
+	return seconds ? new Date(seconds * 1000) : null
+}
 
 interface PagSeguroWebhookEvent {
 	id: string
@@ -26,6 +54,7 @@ export class WebhookService {
 	constructor(
 		@Inject(WEBHOOK_REPOSITORY) private readonly webhookRepository: WebhookRepository,
 		private readonly subscriptionService: SubscriptionService,
+		private readonly stripeService: StripeService,
 	) {}
 
 	async processStripeWebhook(event: Stripe.Event) {
@@ -88,68 +117,96 @@ export class WebhookService {
 			this.logger.warn('checkout.session.completed: no account_id in metadata')
 			return
 		}
-		// customer.subscription.created fires right after and creates the full record;
-		// here we just ensure the account plan is upgraded immediately on checkout completion.
-		// Read the purchased tier from metadata (set at checkout) rather than assuming 'pro',
-		// so a future second paid tier activates the plan the buyer actually paid for.
-		const planType = (session.metadata?.plan_type || 'pro') as PlanType
+
+		// An async/unpaid completion (e.g. a future boleto/Pix flow) must not grant anything;
+		// the subscription events will grant it once it's actually paid.
+		if (session.payment_status === 'unpaid') {
+			this.logger.log(
+				`checkout.session.completed unpaid for account ${accountId}; plan not granted`,
+			)
+			return
+		}
+
+		// Upgrade eagerly (customer.subscription.created may lag), but from the LIVE
+		// subscription: a retried event for a subscription canceled meanwhile must not
+		// re-grant the plan. This also records the row (same upsert path, idempotent).
+		const subscriptionId =
+			typeof session.subscription === 'string' ? session.subscription : session.subscription?.id
+		const live = subscriptionId
+			? await this.stripeService.retrieveSubscription(subscriptionId)
+			: null
+		if (live) {
+			await this.applySubscriptionState(live)
+			return
+		}
+
+		// Stripe not configured / no subscription on the session: fall back to the tier
+		// validated from metadata (set server-side at checkout).
+		const planType = this.planFromMetadata(session.metadata?.plan_type)
 		await this.subscriptionService.updatePlan(accountId, planType)
 		this.logger.log(`✅ Plan upgraded on checkout completion for account ${accountId}`)
 	}
 
-	private async handleSubscriptionUpdate(subscription: Stripe.Subscription) {
+	private async handleSubscriptionUpdate(eventSubscription: Stripe.Subscription) {
+		// Re-read the live state instead of trusting the payload: Stripe doesn't guarantee
+		// event ordering, so a delayed `created` (incomplete) must not overwrite a newer
+		// `active`. Falls back to the payload only when Stripe isn't configured.
+		const subscription =
+			(await this.stripeService.retrieveSubscription(eventSubscription.id)) ?? eventSubscription
+		await this.applySubscriptionState(subscription)
+	}
+
+	/**
+	 * Persists a subscription's (live) state and grants the plan only for a paying status.
+	 * Every subscription-affecting event funnels through here.
+	 */
+	private async applySubscriptionState(subscription: Stripe.Subscription) {
 		const accountId = subscription.metadata?.account_id
 		if (!accountId) {
 			this.logger.warn('No account_id in subscription metadata')
 			return
 		}
 
-		const planType = (subscription.metadata?.plan_type || 'pro') as PlanType
-
-		const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing' | 'paused'> = {
-			active: 'active',
-			trialing: 'trialing',
-			past_due: 'past_due',
-			canceled: 'canceled',
-			unpaid: 'past_due',
-			paused: 'paused',
-			incomplete: 'past_due',
-			incomplete_expired: 'canceled',
-		}
-
+		const planType = this.stripeService.resolvePlanType({
+			priceId: subscription.items?.data?.[0]?.price?.id,
+			metadataPlanType: subscription.metadata?.plan_type,
+		})
 		const period = this.getSubscriptionPeriod(subscription)
-		const mappedStatus = statusMap[subscription.status] || 'active'
-		const existingSub = await this.webhookRepository.findSubscriptionByProviderId(subscription.id)
 
-		if (existingSub) {
-			await this.webhookRepository.updateSubscriptionById(existingSub.id, {
-				status: mappedStatus,
-				cancel_at_period_end: subscription.cancel_at_period_end,
-				...(period && {
-					current_period_start: period.start,
-					current_period_end: period.end,
-				}),
-			})
-		} else {
-			await this.subscriptionService.createSubscription({
-				accountId,
-				planType,
-				paymentProvider: 'stripe',
-				providerSubscriptionId: subscription.id,
-				providerCustomerId: subscription.customer as string,
-				periodStart: period?.start ?? new Date(),
-				periodEnd: period?.end ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-				// Persist the real Stripe status (e.g. 'trialing'/'past_due') instead of
-				// letting it default to 'active', and carry trial_end when present so a
-				// trialing sub isn't stored as a fully active one.
-				status: mappedStatus,
-				trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : undefined,
-			})
-		}
+		await this.subscriptionService.syncStripeSubscription({
+			account_id: accountId,
+			plan_type: planType,
+			status: mapStripeStatus(subscription.status),
+			provider_subscription_id: subscription.id,
+			provider_customer_id:
+				typeof subscription.customer === 'string'
+					? subscription.customer
+					: subscription.customer.id,
+			current_period_start: period?.start ?? null,
+			current_period_end: period?.end ?? null,
+			cancel_at_period_end: subscription.cancel_at_period_end,
+			trial_start: fromUnixSeconds(subscription.trial_start),
+			trial_end: fromUnixSeconds(subscription.trial_end),
+		})
 
-		if (subscription.status === 'active' || subscription.status === 'trialing') {
+		// Only a paying subscription grants the plan; past_due keeps whatever the account
+		// already had (dunning grace) and never upgrades an account that never paid.
+		if (isPayingStatus(subscription.status)) {
 			await this.subscriptionService.updatePlan(accountId, planType)
 		}
+	}
+
+	/**
+	 * Metadata is client-influenced and frozen at checkout; never let an unknown value
+	 * reach the PlanType enum (Prisma would throw and Stripe would retry for days).
+	 */
+	private planFromMetadata(value: unknown): PaidPlanType {
+		const plan = toPaidPlanType(value)
+		if (!plan) {
+			this.logger.warn(`Unknown plan_type in Stripe metadata (${String(value)}), using 'pro'`)
+			return 'pro'
+		}
+		return plan
 	}
 
 	private async handleSubscriptionDeleted(subscription: Stripe.Subscription) {
@@ -161,13 +218,33 @@ export class WebhookService {
 			canceled_at: new Date(),
 		})
 
+		// Don't downgrade if the account still has another paying subscription (e.g. an
+		// abandoned/expired first attempt ending after a successful re-subscribe).
+		const stillPaying = await this.subscriptionService.getActiveSubscription(accountId)
+		if (stillPaying) {
+			this.logger.log(
+				`Subscription ${subscription.id} ended but account ${accountId} still has an active one; plan kept`,
+			)
+			return
+		}
+
 		await this.subscriptionService.handleSubscriptionEnded(accountId)
 	}
 
+	// Invoice events re-sync from the live subscription instead of writing a status from
+	// the invoice: a late/retried payment_succeeded must not resurrect a canceled row as
+	// 'active' (which would also wrongly block a new checkout with 409).
 	private async handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
 		const subscriptionId = this.getInvoiceSubscriptionId(invoice)
 		if (!subscriptionId) return
 
+		const live = await this.stripeService.retrieveSubscription(subscriptionId)
+		if (live) {
+			await this.applySubscriptionState(live)
+			return
+		}
+
+		// Stripe not configured: best effort from the invoice payload.
 		await this.webhookRepository.updateSubscriptionsByProviderId(subscriptionId, {
 			status: 'active',
 			current_period_start: new Date(invoice.period_start * 1000),
@@ -178,6 +255,12 @@ export class WebhookService {
 	private async handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
 		const subscriptionId = this.getInvoiceSubscriptionId(invoice)
 		if (!subscriptionId) return
+
+		const live = await this.stripeService.retrieveSubscription(subscriptionId)
+		if (live) {
+			await this.applySubscriptionState(live)
+			return
+		}
 
 		await this.webhookRepository.updateSubscriptionsByProviderId(subscriptionId, {
 			status: 'past_due',

@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common'
+import { Prisma } from '@/generated/prisma/client'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	AccountEmailName,
+	StripeSubscriptionUpsert,
 	SubscriptionRecord,
 	SubscriptionRepository,
 	UsageRecord,
@@ -30,6 +32,8 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 		return this.prisma.subscription.findFirst({
 			where: {
 				account_id: accountId,
+				// Stripe rows only: a stale legacy PagSeguro row must not keep an account paid.
+				payment_provider: 'stripe',
 				status: { in: ['active', 'trialing'] },
 			},
 			orderBy: { createdAt: 'desc' },
@@ -39,31 +43,17 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 	async findManageableSubscription(accountId: string): Promise<SubscriptionRecord | null> {
 		// Includes past_due (and paused): a seller in dunning must still reach the
 		// billing portal to update their card. Only fully canceled subs are excluded.
+		// Stripe rows only: a stale legacy PagSeguro row would otherwise block checkout
+		// (409) and break the portal (its customer id isn't a Stripe customer).
 		return this.prisma.subscription.findFirst({
 			where: {
 				account_id: accountId,
+				payment_provider: 'stripe',
 				provider_customer_id: { not: null },
 				status: { in: ['active', 'trialing', 'past_due', 'paused'] },
 			},
 			orderBy: { createdAt: 'desc' },
 		}) as unknown as SubscriptionRecord | null
-	}
-
-	async createSubscription(data: {
-		account_id: string
-		plan_type: string
-		status: string
-		payment_provider: string
-		provider_subscription_id: string
-		provider_customer_id: string
-		current_period_start: Date
-		current_period_end: Date
-		trial_start: Date | null
-		trial_end: Date | null
-	}): Promise<SubscriptionRecord> {
-		return this.prisma.subscription.create({
-			data: data as any,
-		}) as unknown as SubscriptionRecord
 	}
 
 	async findUsageRecord(accountId: string, periodStart: Date): Promise<UsageRecord | null> {
@@ -163,50 +153,57 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 		})
 	}
 
-	async upsertSubscriptionFromStripe(data: {
-		account_id: string
-		plan_type: string
-		status: string
-		provider_subscription_id: string
-		provider_customer_id: string | null
-		current_period_start: Date
-		current_period_end: Date
-		cancel_at_period_end: boolean
-	}): Promise<'created' | 'updated'> {
-		const existing = await this.prisma.subscription.findFirst({
-			where: { provider_subscription_id: data.provider_subscription_id },
-			select: { id: true },
-		})
+	async upsertSubscriptionFromStripe(
+		data: StripeSubscriptionUpsert,
+	): Promise<'created' | 'updated'> {
+		const where = { provider_subscription_id: data.provider_subscription_id }
+		// Period/trial are only overwritten when Stripe actually sent them, so a payload
+		// missing the item period never clobbers good stored dates with a fallback.
+		const updateData = {
+			plan_type: data.plan_type as any,
+			status: data.status as any,
+			provider_customer_id: data.provider_customer_id,
+			cancel_at_period_end: data.cancel_at_period_end,
+			...(data.current_period_start && { current_period_start: data.current_period_start }),
+			...(data.current_period_end && { current_period_end: data.current_period_end }),
+			...(data.trial_start !== undefined && { trial_start: data.trial_start }),
+			...(data.trial_end !== undefined && { trial_end: data.trial_end }),
+		}
 
+		const existing = await this.prisma.subscription.findUnique({ where, select: { id: true } })
 		if (existing) {
-			await this.prisma.subscription.update({
-				where: { id: existing.id },
-				data: {
-					plan_type: data.plan_type as any,
-					status: data.status as any,
-					provider_customer_id: data.provider_customer_id,
-					current_period_start: data.current_period_start,
-					current_period_end: data.current_period_end,
-					cancel_at_period_end: data.cancel_at_period_end,
-				},
-			})
+			await this.prisma.subscription.update({ where, data: updateData })
 			return 'updated'
 		}
 
-		await this.prisma.subscription.create({
-			data: {
-				account_id: data.account_id,
-				plan_type: data.plan_type as any,
-				status: data.status as any,
-				payment_provider: 'stripe',
-				provider_subscription_id: data.provider_subscription_id,
-				provider_customer_id: data.provider_customer_id,
-				current_period_start: data.current_period_start,
-				current_period_end: data.current_period_end,
-				cancel_at_period_end: data.cancel_at_period_end,
-			},
-		})
-		return 'created'
+		try {
+			await this.prisma.subscription.create({
+				data: {
+					account_id: data.account_id,
+					plan_type: data.plan_type as any,
+					status: data.status as any,
+					payment_provider: 'stripe',
+					provider_subscription_id: data.provider_subscription_id,
+					provider_customer_id: data.provider_customer_id,
+					// Columns are NOT NULL: fall back only when creating.
+					current_period_start: data.current_period_start ?? new Date(),
+					current_period_end:
+						data.current_period_end ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+					cancel_at_period_end: data.cancel_at_period_end,
+					trial_start: data.trial_start ?? null,
+					trial_end: data.trial_end ?? null,
+				},
+			})
+			return 'created'
+		} catch (err) {
+			// Lost a race with a concurrent webhook/reconcile that created the same
+			// provider subscription first (unique index): apply ours as an update.
+			if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+				await this.prisma.subscription.update({ where, data: updateData })
+				return 'updated'
+			}
+			throw err
+		}
 	}
 
 	async findPaidAccountIds(planTypes: string[]): Promise<string[]> {

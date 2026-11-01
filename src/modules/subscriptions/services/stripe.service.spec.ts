@@ -34,6 +34,8 @@ const configServiceMock = {
 		const cfg: Record<string, unknown> = {
 			'stripe.secretKey': 'sk_test_fake',
 			'stripe.webhookSecret': 'whsec_fake',
+			'stripe.priceIds.pro': 'price_pro_cfg',
+			'stripe.priceIds.enterprise': 'price_ent_cfg',
 		}
 		return cfg[key] ?? def
 	}),
@@ -129,7 +131,7 @@ describe('StripeService', () => {
 				account_id: 'acc-1',
 				plan_type: 'pro',
 			})
-			expect(options.idempotencyKey).toMatch(/^checkout_acc-1_price_123_\d{4}-\d{2}-\d{2}$/)
+			expect(options.idempotencyKey).toMatch(/^checkout_acc-1_[0-9a-f]{16}_\d+$/)
 		})
 
 		it('should return null when account not found', async () => {
@@ -167,7 +169,7 @@ describe('StripeService', () => {
 			expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
 				expect.objectContaining({ discounts: [{ coupon: 'promo_25_off' }] }),
 				expect.objectContaining({
-					idempotencyKey: expect.stringMatching(/^checkout_acc-1_price_1_\d{4}-\d{2}-\d{2}$/),
+					idempotencyKey: expect.stringMatching(/^checkout_acc-1_[0-9a-f]{16}_\d+$/),
 				}),
 			)
 		})
@@ -202,7 +204,7 @@ describe('StripeService', () => {
 			expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
 				expect.objectContaining({ discounts: [{ coupon: 'promo_30_off' }] }),
 				expect.objectContaining({
-					idempotencyKey: expect.stringMatching(/^checkout_acc-1_price_1_\d{4}-\d{2}-\d{2}$/),
+					idempotencyKey: expect.stringMatching(/^checkout_acc-1_[0-9a-f]{16}_\d+$/),
 				}),
 			)
 		})
@@ -221,6 +223,103 @@ describe('StripeService', () => {
 
 			const call = stripeMock.checkout.sessions.create.mock.calls[0][0]
 			expect(call.discounts).toBeUndefined()
+		})
+	})
+
+	// Stripe answers idempotency_error when a key is reused with different parameters,
+	// so the key must follow the parameters (promo flip, email change, tier change).
+	describe('checkoutIdempotencyKey', () => {
+		const base = {
+			mode: 'subscription' as const,
+			line_items: [{ price: 'price_pro', quantity: 1 }],
+			customer_email: 'a@b.com',
+			metadata: { account_id: 'acc-1', plan_type: 'pro' },
+		}
+		const t0 = new Date('2026-07-15T10:00:00Z')
+
+		it('is stable for identical parameters inside the same window (double-submit)', () => {
+			const later = new Date(t0.getTime() + 60_000)
+			expect(service.checkoutIdempotencyKey('acc-1', base, t0)).toBe(
+				service.checkoutIdempotencyKey('acc-1', { ...base }, later),
+			)
+		})
+
+		it('changes when the promo coupon appears between attempts', () => {
+			const withCoupon = { ...base, discounts: [{ coupon: 'promo_20_off' }] }
+			expect(service.checkoutIdempotencyKey('acc-1', base, t0)).not.toBe(
+				service.checkoutIdempotencyKey('acc-1', withCoupon, t0),
+			)
+		})
+
+		it('changes when the email or the price changes', () => {
+			const key = service.checkoutIdempotencyKey('acc-1', base, t0)
+			expect(
+				service.checkoutIdempotencyKey('acc-1', { ...base, customer_email: 'x@y.com' }, t0),
+			).not.toBe(key)
+			expect(
+				service.checkoutIdempotencyKey(
+					'acc-1',
+					{ ...base, line_items: [{ price: 'price_ent', quantity: 1 }] },
+					t0,
+				),
+			).not.toBe(key)
+		})
+
+		it('changes in the next window, so a later retry gets a fresh session', () => {
+			const nextWindow = new Date(t0.getTime() + 11 * 60_000)
+			expect(service.checkoutIdempotencyKey('acc-1', base, t0)).not.toBe(
+				service.checkoutIdempotencyKey('acc-1', base, nextWindow),
+			)
+		})
+
+		it('is scoped per account', () => {
+			expect(service.checkoutIdempotencyKey('acc-1', base, t0)).not.toBe(
+				service.checkoutIdempotencyKey('acc-2', base, t0),
+			)
+		})
+	})
+
+	describe('resolvePlanType', () => {
+		it('resolves the tier from the billed price (survives a portal plan switch)', () => {
+			expect(
+				service.resolvePlanType({ priceId: 'price_pro_cfg', metadataPlanType: 'enterprise' }),
+			).toBe('pro')
+			expect(service.resolvePlanType({ priceId: 'price_ent_cfg', metadataPlanType: 'pro' })).toBe(
+				'enterprise',
+			)
+		})
+
+		it('falls back to a validated metadata tier for an unmapped price', () => {
+			expect(
+				service.resolvePlanType({ priceId: 'price_legacy', metadataPlanType: 'enterprise' }),
+			).toBe('enterprise')
+		})
+
+		it.each([
+			['[pro]'],
+			['free'],
+			['__proto__'],
+			[undefined],
+			[42],
+		])('never lets dirty metadata %p through: falls back to pro', (metadataPlanType) => {
+			expect(service.resolvePlanType({ priceId: null, metadataPlanType })).toBe('pro')
+		})
+	})
+
+	describe('retrieveSubscription', () => {
+		it('reads the live subscription from Stripe', async () => {
+			stripeMock.subscriptions.retrieve.mockResolvedValueOnce({ id: 'sub_1', status: 'active' })
+
+			await expect(service.retrieveSubscription('sub_1')).resolves.toMatchObject({
+				status: 'active',
+			})
+			expect(stripeMock.subscriptions.retrieve).toHaveBeenCalledWith('sub_1')
+		})
+
+		it('propagates Stripe API errors so the webhook is retried', async () => {
+			stripeMock.subscriptions.retrieve.mockRejectedValueOnce(new Error('api down'))
+
+			await expect(service.retrieveSubscription('sub_1')).rejects.toThrow('api down')
 		})
 	})
 

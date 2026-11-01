@@ -5,9 +5,12 @@
  * Guards mocked: JwtAuthGuard
  */
 
+import { BadRequestException, ConflictException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Test } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
+import { checkoutSchema } from '../dto/checkout.dto'
 import { PlanLimitsService } from '../services/plan-limits.service'
 import { StripeService } from '../services/stripe.service'
 import { SubscriptionService } from '../services/subscription.service'
@@ -19,6 +22,7 @@ const serviceMock = {
 	refreshUsage: jest.fn(),
 	getActiveSubscription: jest.fn(),
 	getManageableSubscription: jest.fn(),
+	hasBlockingSubscription: jest.fn(),
 }
 
 const planLimitsServiceMock = {
@@ -212,12 +216,51 @@ describe('SubscriptionController', () => {
 			expect(result).toEqual({ url: 'https://pay' })
 		})
 
+		it('should 409 and not open a checkout when the account already has a subscription', async () => {
+			serviceMock.hasBlockingSubscription.mockResolvedValueOnce(true)
+
+			const call = controller.createCheckout(makeRequest(), { planId: 'enterprise' })
+
+			await expect(call).rejects.toBeInstanceOf(ConflictException)
+			await expect(call).rejects.toThrow('Gerenciar assinatura')
+			expect(serviceMock.hasBlockingSubscription).toHaveBeenCalledWith('user-uuid-1')
+			expect(stripeServiceMock.createCheckoutSession).not.toHaveBeenCalled()
+		})
+
 		it('should 400 when the plan/price is not configured', async () => {
 			configServiceMock.get.mockReturnValue(undefined)
 
-			await expect(controller.createCheckout(makeRequest(), { planId: 'bogus' })).rejects.toThrow(
-				'Plano inválido ou pagamento não configurado',
-			)
+			await expect(
+				controller.createCheckout(makeRequest(), { planId: 'enterprise' }),
+			).rejects.toThrow('Plano inválido ou pagamento não configurado')
+		})
+	})
+
+	// The pipe runs before the handler, so the body schema is exercised directly.
+	// planId doubles as a ConfigService path resolved with lodash `get`: '[pro]' or
+	// '["pro"]' would still find the Pro price while persisting an invalid plan_type.
+	describe('checkout body validation', () => {
+		const pipe = new ZodValidationPipe(checkoutSchema)
+
+		it.each(['pro', 'enterprise'])('accepts the paid tier %s', (planId) => {
+			expect(pipe.transform({ planId })).toEqual({ planId })
+		})
+
+		it.each([
+			['[pro]'],
+			['["pro"]'],
+			['pro.'],
+			['free'],
+			['__proto__'],
+			[''],
+			[undefined],
+			[['pro']],
+		])('rejects planId %p with 400', (planId) => {
+			expect(() => pipe.transform({ planId })).toThrow(BadRequestException)
+		})
+
+		it('rejects a missing body', () => {
+			expect(() => pipe.transform(undefined)).toThrow(BadRequestException)
 		})
 	})
 

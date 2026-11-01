@@ -439,7 +439,9 @@ model Subscription {
   plan_type                PlanType
   status                   SubscriptionStatus @default(active)
   payment_provider         String?            @db.VarChar(50) // stripe, pagseguro
-  provider_subscription_id String?            @db.VarChar(255)
+  // One row per provider subscription: concurrent/out-of-order webhooks upsert on it.
+  // NULLs stay allowed (and distinct) for rows without a provider id.
+  provider_subscription_id String?            @unique(map: "uq_subscriptions_provider_subscription_id") @db.VarChar(255)
   provider_customer_id     String?            @db.VarChar(255)
   current_period_start     DateTime           @db.Timestamptz()
   current_period_end       DateTime           @db.Timestamptz()
@@ -452,7 +454,6 @@ model Subscription {
   updatedAt                DateTime           @updatedAt @db.Timestamptz()
 
   @@index([account_id], name: "idx_subscriptions_account")
-  @@index([provider_subscription_id], name: "idx_subscriptions_provider")
   @@index([status], name: "idx_subscriptions_status")
   @@map("subscriptions")
 }

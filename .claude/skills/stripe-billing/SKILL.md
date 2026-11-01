@@ -41,11 +41,14 @@ defer to `prisma-migrations-safe`. Do **not** edit anything under `.devin/`.
    must be safe to re-run (upsert/`updateBy...ProviderId`, not blind insert).
 3. **Idempotency keys on subscription mutations.** Any state-changing Stripe call
    should pass `{ idempotencyKey }` as the second arg so a retried request can't
-   double-charge or duplicate a subscription. `createCheckoutSession` wires this as
-   `checkout_${accountId}_${priceId}_${YYYY-MM-DD}` — the day bucket lets a later
-   retry (or a re-subscribe after cancel) start a fresh session instead of replaying
-   a stale/expired one, and avoids a key collision when the promo window flips
-   between attempts. Key any new mutation off `account_id` + intent the same way.
+   double-charge or duplicate a subscription. `createCheckoutSession` wires this via
+   `checkoutIdempotencyKey`: `checkout_${accountId}_${sha256(params)[0..16]}_${10-min window}`.
+   Stripe answers `idempotency_error` when a key is reused with **different**
+   parameters, so the key must be derived from the parameters (promo coupon, email,
+   price, tier): a changed request gets a new key, an identical double-submit inside
+   the window replays the first session, and a later retry gets a fresh one. A
+   time-only bucket (e.g. per day) is NOT enough. Key any new mutation off
+   `account_id` + a hash of its parameters the same way.
 4. **Card-only recurring.** `mode: 'subscription'`, `payment_method_types: ['card']`.
    No boleto/Pix/one-off here.
 5. **All amounts are integer cents.** `PLAN_PRICES.pro = 1490` (R$ 14,90). Stripe
@@ -71,17 +74,33 @@ defer to `prisma-migrations-safe`. Do **not** edit anything under `.devin/`.
 
    | Stripe status | internal status | account `plan_type` |
    |---|---|---|
-   | `active` / `trialing` | `active` / `trialing` | `pro` (from `metadata.plan_type`) |
-   | `past_due` / `unpaid` / `incomplete` | `past_due` | unchanged (keep access during dunning) |
-   | `canceled` / `incomplete_expired` | `canceled` | `free` (`handleSubscriptionEnded`) |
+   | `active` / `trialing` | `active` / `trialing` | paid tier from the **billed price** (`StripeService.resolvePlanType`) |
+   | `past_due` / `unpaid` / `incomplete` | `past_due` | unchanged: keeps a plan already held (dunning), **never grants** one |
+   | `canceled` / `incomplete_expired` | `canceled` | `free` on `subscription.deleted` (`handleSubscriptionEnded`), unless another active sub exists |
    | `paused` | `paused` | per product call |
+
+   - **Grant only on a paying status** (`isPayingStatus` in `constants/plan-limits.ts`)
+     — in the webhook and the reconcile. Persisting a row never upgrades by itself.
+   - **Tier = price, not metadata.** `items.data[0].price.id` is reverse-mapped through
+     `stripe.priceIds.*`; a Billing Portal plan switch changes the price, never the
+     metadata. Metadata is only a fallback and always goes through `toPaidPlanType`
+     (an unknown string reaching the `PlanType` enum throws and wedges the webhook).
+   - **Live state, not the payload.** `customer.subscription.*` handlers re-read the
+     subscription (`StripeService.retrieveSubscription`) before writing, so a delayed
+     or out-of-order event can't roll the status back. Writes go through
+     `upsertSubscriptionFromStripe` (unique `provider_subscription_id`, race-safe on
+     P2002) — the same path the reconcile uses.
 
    `account_id` rides on `metadata.account_id` (set at checkout + on `subscription_data`).
    No metadata → log and return; never guess the tenant.
 
 3. **Checkout & portal** (`StripeService` + `SubscriptionController`)
-   - `POST /subscriptions/checkout { planId }` → resolve `stripe.priceIds.<planId>`
-     (invalid → 400), create a card-only subscription Checkout session with
+   - `POST /subscriptions/checkout { planId }` → body validated by `checkoutSchema`
+     (`z.enum(PAID_PLANS)`: `planId` doubles as a ConfigService path resolved with
+     lodash `get`, so `'[pro]'` would otherwise find the Pro price) → 409 when
+     `hasBlockingSubscription` (one paid subscription per account; tier switches go
+     through the portal) → resolve `stripe.priceIds.<planId>` (unconfigured → 400),
+     create a card-only subscription Checkout session with
      `metadata.account_id`, return `{ url }`. Optional promo coupon via
      `SettingsService.getPromotionalPeriod()`.
    - `POST /subscriptions/portal` → Billing Portal session for the stored
