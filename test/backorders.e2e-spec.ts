@@ -35,8 +35,10 @@ describe('Backorders / oversell → restock (e2e)', () => {
 			.send({
 				name: 'Cliente',
 				email: `c-${Date.now()}-${Math.random()}@example.com`,
-				phone: `11${Math.floor(Math.random() * 1e9)}`,
-				document: `${Math.floor(Math.random() * 1e11)}`,
+				// Zero-padded: an unpadded random number is sometimes shorter than the DTO's
+				// minimum (phone >= 10, document >= 11 chars) and the create 400s (~19% flake).
+				phone: `11${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}`,
+				document: String(Math.floor(Math.random() * 1e11)).padStart(11, '0'),
 				address: { street: 'A' },
 				city: 'Sao Paulo',
 				state: 'SP',
