@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Injectable, type OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis, { type Redis as RedisClient } from 'ioredis'
@@ -44,4 +45,36 @@ export class RedisService implements OnModuleDestroy {
 	async setWithExpiry(key: string, value: string, expirySeconds: number): Promise<void> {
 		await this.client.setex(key, expirySeconds, value)
 	}
+
+	/**
+	 * Best-effort mutual exclusion (single Redis node): SET NX PX with a random token.
+	 * Returns the token when acquired, null when someone else holds the lock. The TTL
+	 * bounds how long a crashed holder can block others.
+	 */
+	async acquireLock(key: string, ttlMs: number): Promise<string | null> {
+		const token = randomUUID()
+		const result = await this.client.set(key, token, 'PX', ttlMs, 'NX')
+		return result === 'OK' ? token : null
+	}
+
+	/** Whether the lock is still held with this token (it may have expired by TTL). */
+	async isLockHeld(key: string, token: string): Promise<boolean> {
+		return (await this.client.get(key)) === token
+	}
+
+	/**
+	 * Releases the lock only if it's still ours (compare-and-delete), so a holder whose
+	 * TTL expired can't delete a lock that another request has since acquired.
+	 */
+	async releaseLock(key: string, token: string): Promise<boolean> {
+		const deleted = await this.client.eval(RELEASE_LOCK_SCRIPT, 1, key, token)
+		return deleted === 1
+	}
 }
+
+const RELEASE_LOCK_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+	return redis.call("del", KEYS[1])
+else
+	return 0
+end`

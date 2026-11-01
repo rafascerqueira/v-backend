@@ -4,7 +4,7 @@ import {
 	type SubscriptionRepository,
 } from '@/shared/repositories/subscription.repository'
 import { isPayingStatus, PAID_PLANS } from '../constants/plan-limits'
-import { StripeService } from './stripe.service'
+import { type ManagedStripeSubscription, StripeService } from './stripe.service'
 
 export interface ReconcileResult {
 	configured: boolean
@@ -15,6 +15,8 @@ export interface ReconcileResult {
 	accountsDowngraded: number
 	/** Subscriptions whose local upsert/plan update threw (logged, run continued). */
 	failures: number
+	/** Accounts with more than one live Stripe subscription (double billing, logged). */
+	duplicateSubscriptionAccounts: number
 }
 
 @Injectable()
@@ -47,6 +49,7 @@ export class SubscriptionReconcileService {
 				accountsKeptPaid: 0,
 				accountsDowngraded: 0,
 				failures: 0,
+				duplicateSubscriptionAccounts: 0,
 			}
 		}
 
@@ -97,6 +100,10 @@ export class SubscriptionReconcileService {
 			}
 		}
 
+		// AUDIT-001 backstop: more than one live (active/trialing/past_due) subscription on
+		// one account means it is being double-billed. Flag it for manual cancel/refund.
+		const duplicateSubscriptionAccounts = this.flagDuplicateSubscriptions(subscriptions)
+
 		// Reverse direction: a locally-paid account that Stripe no longer reports as paid
 		// is stale (e.g. a missed subscription.deleted) → downgrade to free.
 		const localPaid = await this.subscriptionRepository.findPaidAccountIds([...PAID_PLANS])
@@ -116,8 +123,30 @@ export class SubscriptionReconcileService {
 			accountsKeptPaid: paidAccounts.size,
 			accountsDowngraded: downgraded,
 			failures,
+			duplicateSubscriptionAccounts,
 		}
 		this.logger.log(`Reconcile done: ${JSON.stringify(result)}`)
 		return result
+	}
+
+	/** Logs every account with more than one live subscription; returns how many. */
+	private flagDuplicateSubscriptions(subscriptions: ManagedStripeSubscription[]): number {
+		const byAccount = new Map<string, string[]>()
+		for (const sub of subscriptions) {
+			const ids = byAccount.get(sub.accountId) ?? []
+			ids.push(sub.subscriptionId)
+			byAccount.set(sub.accountId, ids)
+		}
+
+		let duplicates = 0
+		for (const [accountId, ids] of byAccount) {
+			if (ids.length > 1) {
+				duplicates++
+				this.logger.error(
+					`[DUPLICATE_SUBSCRIPTION] account ${accountId} has ${ids.length} live Stripe subscriptions: ${ids.join(', ')}`,
+				)
+			}
+		}
+		return duplicates
 	}
 }

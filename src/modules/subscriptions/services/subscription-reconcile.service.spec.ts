@@ -4,6 +4,7 @@
  *           past_due keeps access (no plan change, no downgrade); bidirectional downgrade
  *           of locally-paid accounts that Stripe no longer reports as paid.
  */
+import { Logger } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { SUBSCRIPTION_REPOSITORY } from '@/shared/repositories/subscription.repository'
 import type { ManagedStripeSubscription } from './stripe.service'
@@ -89,7 +90,28 @@ describe('SubscriptionReconcileService', () => {
 			accountsKeptPaid: 2,
 			accountsDowngraded: 1,
 			failures: 0,
+			duplicateSubscriptionAccounts: 0,
 		})
+	})
+
+	it('flags accounts with more than one live Stripe subscription (double billing)', async () => {
+		const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+		stripeServiceMock.isConfigured.mockReturnValue(true)
+		stripeServiceMock.listManagedSubscriptions.mockResolvedValue([
+			managedSub({ accountId: 'acc-dup', subscriptionId: 'sub_1', status: 'active' }),
+			managedSub({ accountId: 'acc-dup', subscriptionId: 'sub_2', status: 'past_due' }),
+			managedSub({ accountId: 'acc-ok', subscriptionId: 'sub_3', status: 'active' }),
+		])
+		repoMock.upsertSubscriptionFromStripe.mockResolvedValue('updated')
+		repoMock.findPaidAccountIds.mockResolvedValue([])
+
+		const result = await service.reconcile()
+
+		expect(result.duplicateSubscriptionAccounts).toBe(1)
+		expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[DUPLICATE_SUBSCRIPTION]'))
+		expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('acc-dup'))
+		expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('acc-ok'))
+		errorSpy.mockRestore()
 	})
 
 	it('keeps going when one subscription fails, and never downgrades a paying account whose write failed', async () => {

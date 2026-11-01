@@ -27,6 +27,11 @@ const repositoryMock: jest.Mocked<SubscriptionRepository> = {
 	updateSubscriptionsByProviderId: jest.fn(),
 	upsertSubscriptionFromStripe: jest.fn(),
 	findPaidAccountIds: jest.fn(),
+	findStripeCustomerId: jest.fn(),
+	setStripeCustomerIdIfMissing: jest.fn(),
+	replaceStripeCustomerId: jest.fn(),
+	findProviderCustomerIds: jest.fn(),
+	findPayingProviderSubscriptionIds: jest.fn(),
 }
 
 const mockUsageRecord = {
@@ -177,6 +182,33 @@ describe('SubscriptionService', () => {
 			)
 
 			await expect(service.hasBlockingSubscription('acc-1')).resolves.toBe(expected)
+		})
+	})
+
+	describe('getPortalCustomerId', () => {
+		// AUDIT-014: a legacy account may own several Customers; the portal must open the
+		// one holding the live subscription, not merely the stored/newest one.
+		it('prefers the Customer of the manageable (live) subscription', async () => {
+			repositoryMock.findManageableSubscription.mockResolvedValueOnce({
+				provider_customer_id: 'cus_live',
+			} as any)
+
+			await expect(service.getPortalCustomerId('acc-1')).resolves.toBe('cus_live')
+			expect(repositoryMock.findStripeCustomerId).not.toHaveBeenCalled()
+		})
+
+		it("falls back to the account's own Customer (e.g. before any webhook landed)", async () => {
+			repositoryMock.findManageableSubscription.mockResolvedValueOnce(null)
+			repositoryMock.findStripeCustomerId.mockResolvedValueOnce('cus_account')
+
+			await expect(service.getPortalCustomerId('acc-1')).resolves.toBe('cus_account')
+		})
+
+		it('returns null when the account has neither', async () => {
+			repositoryMock.findManageableSubscription.mockResolvedValueOnce(null)
+			repositoryMock.findStripeCustomerId.mockResolvedValueOnce(null)
+
+			await expect(service.getPortalCustomerId('acc-1')).resolves.toBeNull()
 		})
 	})
 

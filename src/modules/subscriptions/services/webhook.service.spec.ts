@@ -4,6 +4,7 @@
  * Verifies: idempotency (already processed), error recording, subscription creation/update,
  *           plan downgrade on cancellation
  */
+import { Logger } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import type Stripe from 'stripe'
 import { WEBHOOK_REPOSITORY } from '@/shared/repositories/webhook.repository'
@@ -26,6 +27,7 @@ const subscriptionServiceMock = {
 	updatePlan: jest.fn(),
 	handleSubscriptionEnded: jest.fn(),
 	getActiveSubscription: jest.fn(),
+	getPayingProviderSubscriptionIds: jest.fn(),
 }
 
 // resolvePlanType's own price→tier logic is covered in stripe.service.spec; here we
@@ -100,6 +102,7 @@ describe('WebhookService', () => {
 		stripeServiceMock.retrieveSubscription.mockResolvedValue(null)
 		stripeServiceMock.resolvePlanType.mockReturnValue('pro')
 		subscriptionServiceMock.getActiveSubscription.mockResolvedValue(null)
+		subscriptionServiceMock.getPayingProviderSubscriptionIds.mockResolvedValue([])
 	})
 
 	describe('processStripeWebhook', () => {
@@ -438,6 +441,61 @@ describe('WebhookService', () => {
 				expect.objectContaining({ status: 'canceled' }),
 			)
 			expect(subscriptionServiceMock.updatePlan).not.toHaveBeenCalled()
+		})
+	})
+
+	// AUDIT-001 backstop: a second paying subscription on the same account is surfaced.
+	describe('duplicate paying subscription detection', () => {
+		it('logs [DUPLICATE_SUBSCRIPTION] when another paying subscription exists', async () => {
+			const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+			freshEvent()
+			stripeServiceMock.retrieveSubscription.mockResolvedValueOnce(liveSub({ id: 'sub_new' }))
+			subscriptionServiceMock.getPayingProviderSubscriptionIds.mockResolvedValueOnce([
+				'sub_old',
+				'sub_new',
+			])
+
+			await service.processStripeWebhook(makeSubEvent('customer.subscription.created'))
+
+			expect(subscriptionServiceMock.getPayingProviderSubscriptionIds).toHaveBeenCalledWith('acc-1')
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[DUPLICATE_SUBSCRIPTION]'))
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('sub_old'))
+			errorSpy.mockRestore()
+		})
+
+		it('stays quiet when this is the only paying subscription', async () => {
+			const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+			freshEvent()
+			stripeServiceMock.retrieveSubscription.mockResolvedValueOnce(liveSub({ id: 'sub_only' }))
+			subscriptionServiceMock.getPayingProviderSubscriptionIds.mockResolvedValueOnce(['sub_only'])
+
+			await service.processStripeWebhook(makeSubEvent('customer.subscription.updated'))
+
+			expect(errorSpy).not.toHaveBeenCalled()
+			errorSpy.mockRestore()
+		})
+
+		it('a failing duplicate check never fails the (already written) webhook', async () => {
+			freshEvent()
+			stripeServiceMock.retrieveSubscription.mockResolvedValueOnce(liveSub())
+			subscriptionServiceMock.getPayingProviderSubscriptionIds.mockRejectedValueOnce(
+				new Error('db blip'),
+			)
+
+			await expect(
+				service.processStripeWebhook(makeSubEvent('customer.subscription.updated')),
+			).resolves.toEqual({ success: true })
+			expect(webhookRepositoryMock.markWebhookProcessed).toHaveBeenCalledWith(99)
+			expect(webhookRepositoryMock.markWebhookError).not.toHaveBeenCalled()
+		})
+
+		it('does not check for duplicates on a non-paying status', async () => {
+			freshEvent()
+			stripeServiceMock.retrieveSubscription.mockResolvedValueOnce(liveSub({ status: 'past_due' }))
+
+			await service.processStripeWebhook(makeSubEvent('customer.subscription.updated'))
+
+			expect(subscriptionServiceMock.getPayingProviderSubscriptionIds).not.toHaveBeenCalled()
 		})
 	})
 

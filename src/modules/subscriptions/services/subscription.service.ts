@@ -178,6 +178,23 @@ export class SubscriptionService {
 		return isPayingStatus(subscription.status) || plan !== 'free'
 	}
 
+	/**
+	 * The Stripe Customer the Billing Portal should open: the one that owns the account's
+	 * manageable (live) subscription, so a legacy account with several Customers lands on
+	 * the subscription it can actually manage; else the account's own Customer (works
+	 * before any webhook landed, e.g. a free account still owing an unpaid invoice).
+	 */
+	async getPortalCustomerId(accountId: string): Promise<string | null> {
+		const subscription = await this.getManageableSubscription(accountId)
+		if (subscription?.provider_customer_id) return subscription.provider_customer_id
+		return this.subscriptionRepository.findStripeCustomerId(accountId)
+	}
+
+	/** provider_subscription_id of every active/trialing Stripe row of the account. */
+	async getPayingProviderSubscriptionIds(accountId: string): Promise<string[]> {
+		return this.subscriptionRepository.findPayingProviderSubscriptionIds(accountId)
+	}
+
 	async handleSubscriptionEnded(accountId: string) {
 		// Downgrade to free plan
 		await this.updatePlan(accountId, 'free')

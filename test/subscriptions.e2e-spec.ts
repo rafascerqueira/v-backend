@@ -70,6 +70,8 @@ describe('Subscriptions (e2e)', () => {
 			.expect(409)
 
 		expect(res.body.message).toContain('Gerenciar assinatura')
+		// Machine-readable reason (forwarded by GlobalExceptionFilter) the UI branches on.
+		expect(res.body.code).toBe('SUBSCRIPTION_EXISTS')
 	})
 
 	it('the DB rejects a second row for the same provider subscription id', async () => {

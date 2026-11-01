@@ -1,7 +1,6 @@
 import {
 	BadRequestException,
 	Body,
-	ConflictException,
 	Controller,
 	Get,
 	InternalServerErrorException,
@@ -13,6 +12,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { PLAN_LIMITS, PLAN_NAMES, PLAN_PRICES } from '../constants/plan-limits'
 import { type CheckoutDto, checkoutSchema } from '../dto/checkout.dto'
+import { CheckoutService } from '../services/checkout.service'
 import { type LimitCheckResult, PlanLimitsService } from '../services/plan-limits.service'
 import { StripeService } from '../services/stripe.service'
 import { SubscriptionService } from '../services/subscription.service'
@@ -35,6 +35,7 @@ export class SubscriptionController {
 		private readonly planLimitsService: PlanLimitsService,
 		private readonly stripeService: StripeService,
 		private readonly configService: ConfigService,
+		private readonly checkoutService: CheckoutService,
 	) {}
 
 	@Get('info')
@@ -117,35 +118,8 @@ export class SubscriptionController {
 		@Req() req: any,
 		@Body(new ZodValidationPipe(checkoutSchema)) body: CheckoutDto,
 	) {
-		const accountId = req.user.sub
-
-		// One paid subscription per account: switching tier, reactivating or fixing the
-		// card goes through the Billing Portal, never a second checkout.
-		if (await this.service.hasBlockingSubscription(accountId)) {
-			throw new ConflictException(
-				'Você já tem uma assinatura. Use "Gerenciar assinatura" para trocar de plano ou atualizar o pagamento.',
-			)
-		}
-
-		const priceId = this.configService.get<string>(`stripe.priceIds.${body.planId}`)
-		if (!priceId) {
-			throw new BadRequestException('Plano inválido ou pagamento não configurado')
-		}
-
-		const frontendUrl = this.configService.get<string>('frontendUrl')
-		const result = await this.stripeService.createCheckoutSession(
-			accountId,
-			priceId,
-			`${frontendUrl}/plans?checkout=success`,
-			`${frontendUrl}/plans?checkout=canceled`,
-			body.planId,
-		)
-
-		if (!result?.url) {
-			throw new InternalServerErrorException('Falha ao criar sessão de pagamento')
-		}
-
-		return { url: result.url }
+		// One paid subscription per account (lock + live Stripe check): see CheckoutService.
+		return this.checkoutService.startCheckout(req.user.sub, body.planId)
 	}
 
 	@Post('portal')
@@ -154,19 +128,16 @@ export class SubscriptionController {
 	async createPortal(@Req() req: any) {
 		const accountId = req.user.sub
 
-		// Use the manageable lookup (not active-only): a past_due seller in dunning must
-		// be able to reach the portal to fix their card — the exact case where blocking
-		// them would force an avoidable churn.
-		const subscription = await this.service.getManageableSubscription(accountId)
-		if (!subscription?.provider_customer_id) {
+		// The account's own Stripe Customer first, so a seller in dunning (or a free
+		// account still owing an unpaid invoice) can always reach the portal to fix it,
+		// even before any webhook has created a local row.
+		const customerId = await this.service.getPortalCustomerId(accountId)
+		if (!customerId) {
 			throw new BadRequestException('Nenhuma assinatura ativa encontrada')
 		}
 
 		const frontendUrl = this.configService.get<string>('frontendUrl')
-		const url = await this.stripeService.createPortalSession(
-			subscription.provider_customer_id,
-			`${frontendUrl}/plans`,
-		)
+		const url = await this.stripeService.createPortalSession(customerId, `${frontendUrl}/plans`)
 
 		if (!url) {
 			throw new InternalServerErrorException('Falha ao criar sessão do portal de pagamentos')

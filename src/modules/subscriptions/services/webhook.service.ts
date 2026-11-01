@@ -193,6 +193,30 @@ export class WebhookService {
 		// already had (dunning grace) and never upgrades an account that never paid.
 		if (isPayingStatus(subscription.status)) {
 			await this.subscriptionService.updatePlan(accountId, planType)
+			await this.flagDuplicatePayingSubscription(accountId, subscription.id)
+		}
+	}
+
+	/**
+	 * Backstop for AUDIT-001: checkout prevents a second paid subscription, but if one
+	 * slips through anyway the account is being double-billed. Surface it loudly so it
+	 * can be canceled/refunded in the Stripe Dashboard (no automatic action, by design).
+	 */
+	private async flagDuplicatePayingSubscription(accountId: string, subscriptionId: string) {
+		// Detection only: a failure here must never fail (and make Stripe retry) a webhook
+		// whose state was already written.
+		try {
+			const paying = await this.subscriptionService.getPayingProviderSubscriptionIds(accountId)
+			const others = paying.filter((id) => id !== subscriptionId)
+			if (others.length > 0) {
+				this.logger.error(
+					`[DUPLICATE_SUBSCRIPTION] account ${accountId} has multiple paying Stripe subscriptions: ${[subscriptionId, ...others].join(', ')}`,
+				)
+			}
+		} catch (error) {
+			this.logger.warn(
+				`Duplicate-subscription check failed for account ${accountId}: ${String(error)}`,
+			)
 		}
 	}
 

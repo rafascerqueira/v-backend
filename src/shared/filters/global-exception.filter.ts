@@ -8,6 +8,13 @@ import {
 } from '@nestjs/common'
 import type { FastifyReply } from 'fastify'
 
+/**
+ * Client-facing error codes are SCREAMING_SNAKE_CASE identifiers (e.g.
+ * SUBSCRIPTION_EXISTS). Anything else is dropped, so free text or internal details put
+ * in `code` by mistake never reach the client.
+ */
+const ERROR_CODE_FORMAT = /^[A-Z][A-Z0-9_]{1,63}$/
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
 	private readonly logger = new Logger(GlobalExceptionFilter.name)
@@ -20,6 +27,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 		let message = 'Internal server error'
 		let error = 'Internal Server Error'
 		let details: any
+		// Optional machine-readable reason the client can branch on (e.g. 409
+		// SUBSCRIPTION_EXISTS vs CHECKOUT_IN_PROGRESS). Only sent when an exception sets it.
+		let code: string | undefined
 
 		if (exception instanceof HttpException) {
 			status = exception.getStatus()
@@ -29,6 +39,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 				message = (exceptionResponse as any).message || exception.message
 				error = (exceptionResponse as any).error || exception.name
 				details = (exceptionResponse as any).details
+				const rawCode = (exceptionResponse as any).code
+				if (typeof rawCode === 'string' && ERROR_CODE_FORMAT.test(rawCode)) code = rawCode
 			} else {
 				message = exceptionResponse
 			}
@@ -62,6 +74,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 			path: ctx.getRequest().url,
 			error,
 			message,
+			...(code && { code }),
 			...(details && { details }),
 		}
 

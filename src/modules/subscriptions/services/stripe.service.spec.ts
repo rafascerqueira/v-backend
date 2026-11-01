@@ -13,20 +13,32 @@ import { StripeService } from './stripe.service'
 
 // Mock the Stripe library
 const stripeMock = {
-	customers: { create: jest.fn() },
-	checkout: { sessions: { create: jest.fn() } },
+	customers: { create: jest.fn(), retrieve: jest.fn() },
+	checkout: { sessions: { create: jest.fn(), list: jest.fn(), expire: jest.fn() } },
 	billingPortal: { sessions: { create: jest.fn() } },
-	subscriptions: { cancel: jest.fn(), retrieve: jest.fn() },
+	subscriptions: { cancel: jest.fn(), retrieve: jest.fn(), list: jest.fn() },
 	coupons: { retrieve: jest.fn(), create: jest.fn() },
 	webhooks: { constructEvent: jest.fn() },
 }
 jest.mock('stripe', () => jest.fn(() => stripeMock))
+
+/** Mimics the SDK's auto-paginating list result (consumed with `for await`). */
+function asyncList<T>(items: T[]) {
+	return {
+		async *[Symbol.asyncIterator]() {
+			for (const item of items) yield item
+		},
+	}
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const subscriptionRepositoryMock: Record<string, jest.Mock> = {
 	findAccountEmailName: jest.fn(),
 	updateAccountPlan: jest.fn(),
 	updateSubscriptionsByProviderId: jest.fn(),
+	findStripeCustomerId: jest.fn(),
+	setStripeCustomerIdIfMissing: jest.fn(),
+	replaceStripeCustomerId: jest.fn(),
 }
 
 const configServiceMock = {
@@ -79,44 +91,202 @@ describe('StripeService', () => {
 		})
 	})
 
-	describe('createCustomer', () => {
-		it('should create a Stripe customer and return the customer ID', async () => {
-			stripeMock.customers.create.mockResolvedValueOnce({ id: 'cus_123' })
+	// One Stripe Customer per account (AUDIT-001): reused on every checkout.
+	describe('getOrCreateCustomer', () => {
+		it('reuses the Customer already stored on the account when it still exists', async () => {
+			subscriptionRepositoryMock.findStripeCustomerId.mockResolvedValueOnce('cus_stored')
+			stripeMock.customers.retrieve.mockResolvedValueOnce({ id: 'cus_stored' })
 
-			const result = await service.createCustomer('user@test.com', 'Alice', 'acc-1')
-
-			expect(stripeMock.customers.create).toHaveBeenCalledWith(
-				expect.objectContaining({ email: 'user@test.com', name: 'Alice' }),
-			)
-			expect(result).toBe('cus_123')
+			await expect(service.getOrCreateCustomer('acc-1')).resolves.toBe('cus_stored')
+			expect(stripeMock.customers.retrieve).toHaveBeenCalledWith('cus_stored')
+			expect(stripeMock.customers.create).not.toHaveBeenCalled()
 		})
 
-		it('should return null when Stripe throws an error', async () => {
-			stripeMock.customers.create.mockRejectedValueOnce(new Error('Stripe error'))
+		// AUDIT-011: a stored Customer deleted in Stripe (or from the other Stripe mode)
+		// must not break checkout and the portal forever.
+		it.each([
+			['deleted in Stripe', () => Promise.resolve({ id: 'cus_stored', deleted: true })],
+			['missing (other mode)', () => Promise.reject({ code: 'resource_missing' })],
+		])('replaces a stored Customer that is %s, with a fresh idempotency key', async (_label, retrieve) => {
+			subscriptionRepositoryMock.findStripeCustomerId.mockResolvedValueOnce('cus_stored')
+			stripeMock.customers.retrieve.mockImplementationOnce(retrieve)
+			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce({
+				email: 'user@test.com',
+				name: 'Alice',
+			})
+			stripeMock.customers.create.mockResolvedValueOnce({ id: 'cus_replacement' })
+			subscriptionRepositoryMock.replaceStripeCustomerId.mockResolvedValueOnce('cus_replacement')
 
-			const result = await service.createCustomer('user@test.com', 'Alice', 'acc-1')
+			await expect(service.getOrCreateCustomer('acc-1')).resolves.toBe('cus_replacement')
 
-			expect(result).toBeNull()
+			// Not the original key, which would replay the deleted Customer for 24h.
+			const [, options] = stripeMock.customers.create.mock.calls[0]
+			expect(options.idempotencyKey).toMatch(/^customer_acc-1_replace_cus_stored_[0-9a-f]{16}$/)
+			// Compare-and-swap on the stale value; never the "only if missing" write.
+			expect(subscriptionRepositoryMock.replaceStripeCustomerId).toHaveBeenCalledWith(
+				'acc-1',
+				'cus_stored',
+				'cus_replacement',
+			)
+			expect(subscriptionRepositoryMock.setStripeCustomerIdIfMissing).not.toHaveBeenCalled()
+		})
+
+		it('fails closed when verifying the stored Customer errors for another reason', async () => {
+			subscriptionRepositoryMock.findStripeCustomerId.mockResolvedValueOnce('cus_stored')
+			stripeMock.customers.retrieve.mockRejectedValueOnce(new Error('api down'))
+
+			await expect(service.getOrCreateCustomer('acc-1')).rejects.toThrow('api down')
+			expect(stripeMock.customers.create).not.toHaveBeenCalled()
+		})
+
+		it('creates the Customer once (idempotent) and stores it on the account', async () => {
+			subscriptionRepositoryMock.findStripeCustomerId.mockResolvedValueOnce(null)
+			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce({
+				email: 'user@test.com',
+				name: 'Alice',
+			})
+			stripeMock.customers.create.mockResolvedValueOnce({ id: 'cus_new' })
+			subscriptionRepositoryMock.setStripeCustomerIdIfMissing.mockResolvedValueOnce('cus_new')
+
+			await expect(service.getOrCreateCustomer('acc-1')).resolves.toBe('cus_new')
+
+			const [params, options] = stripeMock.customers.create.mock.calls[0]
+			expect(params).toEqual({
+				email: 'user@test.com',
+				name: 'Alice',
+				metadata: { account_id: 'acc-1' },
+			})
+			expect(options.idempotencyKey).toMatch(/^customer_acc-1_initial_[0-9a-f]{16}$/)
+			expect(subscriptionRepositoryMock.setStripeCustomerIdIfMissing).toHaveBeenCalledWith(
+				'acc-1',
+				'cus_new',
+			)
+		})
+
+		it('converges on the Customer a concurrent request stored first', async () => {
+			subscriptionRepositoryMock.findStripeCustomerId.mockResolvedValueOnce(null)
+			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce({
+				email: 'user@test.com',
+				name: 'Alice',
+			})
+			stripeMock.customers.create.mockResolvedValueOnce({ id: 'cus_mine' })
+			subscriptionRepositoryMock.setStripeCustomerIdIfMissing.mockResolvedValueOnce('cus_winner')
+
+			await expect(service.getOrCreateCustomer('acc-1')).resolves.toBe('cus_winner')
+		})
+
+		it('fails closed when Stripe errors (checkout must not proceed)', async () => {
+			subscriptionRepositoryMock.findStripeCustomerId.mockResolvedValueOnce(null)
+			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce({
+				email: 'user@test.com',
+				name: 'Alice',
+			})
+			stripeMock.customers.create.mockRejectedValueOnce(new Error('stripe down'))
+
+			await expect(service.getOrCreateCustomer('acc-1')).rejects.toThrow('stripe down')
+			expect(subscriptionRepositoryMock.setStripeCustomerIdIfMissing).not.toHaveBeenCalled()
+		})
+	})
+
+	describe('listLiveSubscriptions', () => {
+		it('returns every non-ended subscription across the Customers (deduplicated)', async () => {
+			stripeMock.subscriptions.list
+				.mockReturnValueOnce(
+					asyncList([
+						{ id: 'sub_active', status: 'active' },
+						{ id: 'sub_old', status: 'canceled' },
+						{ id: 'sub_inc', status: 'incomplete' },
+					]),
+				)
+				.mockReturnValueOnce(
+					asyncList([
+						{ id: 'sub_unpaid', status: 'unpaid' },
+						{ id: 'sub_exp', status: 'incomplete_expired' },
+					]),
+				)
+
+			const live = await service.listLiveSubscriptions(['cus_a', 'cus_b', 'cus_a'])
+
+			expect(live.map((s) => s.id)).toEqual(['sub_active', 'sub_inc', 'sub_unpaid'])
+			expect(stripeMock.subscriptions.list).toHaveBeenCalledTimes(2)
+			expect(stripeMock.subscriptions.list).toHaveBeenCalledWith({
+				customer: 'cus_a',
+				status: 'all',
+				limit: 100,
+			})
+		})
+
+		it('skips a Customer that no longer exists in Stripe', async () => {
+			stripeMock.subscriptions.list.mockImplementationOnce(() => {
+				throw { code: 'resource_missing' }
+			})
+
+			await expect(service.listLiveSubscriptions(['cus_gone'])).resolves.toEqual([])
+		})
+
+		it('propagates other Stripe errors (fail closed)', async () => {
+			stripeMock.subscriptions.list.mockImplementationOnce(() => {
+				throw new Error('api down')
+			})
+
+			await expect(service.listLiveSubscriptions(['cus_a'])).rejects.toThrow('api down')
+		})
+	})
+
+	describe('expireOpenCheckoutSessions', () => {
+		it('expires every open session of the Customer', async () => {
+			stripeMock.checkout.sessions.list.mockReturnValueOnce(
+				asyncList([{ id: 'cs_1' }, { id: 'cs_2' }]),
+			)
+			stripeMock.checkout.sessions.expire.mockResolvedValue({})
+
+			await expect(service.expireOpenCheckoutSessions('cus_1')).resolves.toBe(2)
+			expect(stripeMock.checkout.sessions.list).toHaveBeenCalledWith({
+				customer: 'cus_1',
+				status: 'open',
+				limit: 100,
+			})
+			expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_1')
+			expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_2')
+		})
+	})
+
+	describe('expireCheckoutSession', () => {
+		it('expires the given session', async () => {
+			stripeMock.checkout.sessions.expire.mockResolvedValueOnce({})
+
+			await service.expireCheckoutSession('cs_9')
+
+			expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_9')
+		})
+	})
+
+	describe('cancelSubscription', () => {
+		it('cancels in Stripe', async () => {
+			stripeMock.subscriptions.cancel.mockResolvedValueOnce({})
+
+			await service.cancelSubscription('sub_inc')
+
+			expect(stripeMock.subscriptions.cancel).toHaveBeenCalledWith('sub_inc')
 		})
 	})
 
 	describe('createCheckoutSession', () => {
 		it('should create a checkout session and return url and sessionId', async () => {
-			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce({
-				email: 'user@test.com',
-				name: 'Alice',
-			})
 			stripeMock.checkout.sessions.create.mockResolvedValueOnce({
 				url: 'https://checkout.stripe.com/session',
 				id: 'cs_123',
 			})
+			const before = Math.floor(Date.now() / 1000)
 
 			const result = await service.createCheckoutSession(
 				'acc-1',
+				'cus_1',
 				'price_123',
 				'https://success',
 				'https://cancel',
 				'pro',
+				'attempt-1',
 			)
 
 			expect(result).not.toBeNull()
@@ -131,27 +301,64 @@ describe('StripeService', () => {
 				account_id: 'acc-1',
 				plan_type: 'pro',
 			})
-			expect(options.idempotencyKey).toMatch(/^checkout_acc-1_[0-9a-f]{16}_\d+$/)
+			// The account's own Customer, never customer_email (which spawned a new
+			// Customer per session and hid existing subscriptions from Stripe).
+			expect(params.customer).toBe('cus_1')
+			expect(params.customer_email).toBeUndefined()
+			// Short-lived session: 30 minutes (Stripe's minimum).
+			expect(params.expires_at).toBeGreaterThanOrEqual(before + 35 * 60)
+			expect(params.expires_at).toBeLessThanOrEqual(before + 35 * 60 + 5)
+			// Per-attempt key: only dedupes the SDK's own retries of THIS request.
+			expect(options.idempotencyKey).toBe('checkout_acc-1_attempt-1')
 		})
 
-		it('should return null when account not found', async () => {
-			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce(null)
+		it('should return null when Stripe rejects the session', async () => {
+			stripeMock.checkout.sessions.create.mockRejectedValueOnce(new Error('No such customer'))
 
 			const result = await service.createCheckoutSession(
-				'unknown',
+				'acc-1',
+				'cus_gone',
 				'price_123',
 				'https://s',
 				'https://c',
+				'pro',
+				'attempt-1',
 			)
 
 			expect(result).toBeNull()
 		})
 
+		// AUDIT-010: a retry is a new attempt with a new key, so it never collides with the
+		// previous attempt's key (whose body differed, at least in expires_at).
+		it('uses a different idempotency key per attempt', async () => {
+			stripeMock.checkout.sessions.create.mockResolvedValue({ url: 'https://c', id: 'cs_1' })
+
+			await service.createCheckoutSession(
+				'acc-1',
+				'cus_1',
+				'price_1',
+				'https://s',
+				'https://c',
+				'pro',
+				'attempt-1',
+			)
+			await service.createCheckoutSession(
+				'acc-1',
+				'cus_1',
+				'price_1',
+				'https://s',
+				'https://c',
+				'pro',
+				'attempt-2',
+			)
+
+			const keys = stripeMock.checkout.sessions.create.mock.calls.map(
+				([, options]) => options.idempotencyKey,
+			)
+			expect(keys).toEqual(['checkout_acc-1_attempt-1', 'checkout_acc-1_attempt-2'])
+		})
+
 		it('should attach a promotional coupon when promo period is active', async () => {
-			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce({
-				email: 'a@b.com',
-				name: 'A',
-			})
 			settingsServiceMock.getPromotionalPeriod.mockResolvedValueOnce({
 				startDate: new Date(),
 				endDate: new Date(Date.now() + 86400000),
@@ -164,21 +371,25 @@ describe('StripeService', () => {
 				id: 'cs_1',
 			})
 
-			await service.createCheckoutSession('acc-1', 'price_1', 'https://s', 'https://c')
+			await service.createCheckoutSession(
+				'acc-1',
+				'cus_1',
+				'price_1',
+				'https://s',
+				'https://c',
+				'pro',
+				'attempt-1',
+			)
 
 			expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
 				expect.objectContaining({ discounts: [{ coupon: 'promo_25_off' }] }),
 				expect.objectContaining({
-					idempotencyKey: expect.stringMatching(/^checkout_acc-1_[0-9a-f]{16}_\d+$/),
+					idempotencyKey: 'checkout_acc-1_attempt-1',
 				}),
 			)
 		})
 
 		it('should create the coupon when missing and attach it', async () => {
-			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce({
-				email: 'a@b.com',
-				name: 'A',
-			})
 			settingsServiceMock.getPromotionalPeriod.mockResolvedValueOnce({
 				startDate: new Date(),
 				endDate: new Date(Date.now() + 86400000),
@@ -192,7 +403,15 @@ describe('StripeService', () => {
 				id: 'cs_1',
 			})
 
-			await service.createCheckoutSession('acc-1', 'price_1', 'https://s', 'https://c')
+			await service.createCheckoutSession(
+				'acc-1',
+				'cus_1',
+				'price_1',
+				'https://s',
+				'https://c',
+				'pro',
+				'attempt-1',
+			)
 
 			expect(stripeMock.coupons.create).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -204,78 +423,29 @@ describe('StripeService', () => {
 			expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
 				expect.objectContaining({ discounts: [{ coupon: 'promo_30_off' }] }),
 				expect.objectContaining({
-					idempotencyKey: expect.stringMatching(/^checkout_acc-1_[0-9a-f]{16}_\d+$/),
+					idempotencyKey: 'checkout_acc-1_attempt-1',
 				}),
 			)
 		})
 
 		it('should omit discounts when promo not active', async () => {
-			subscriptionRepositoryMock.findAccountEmailName.mockResolvedValueOnce({
-				email: 'a@b.com',
-				name: 'A',
-			})
 			stripeMock.checkout.sessions.create.mockResolvedValueOnce({
 				url: 'https://checkout',
 				id: 'cs_1',
 			})
 
-			await service.createCheckoutSession('acc-1', 'price_1', 'https://s', 'https://c')
+			await service.createCheckoutSession(
+				'acc-1',
+				'cus_1',
+				'price_1',
+				'https://s',
+				'https://c',
+				'pro',
+				'attempt-1',
+			)
 
 			const call = stripeMock.checkout.sessions.create.mock.calls[0][0]
 			expect(call.discounts).toBeUndefined()
-		})
-	})
-
-	// Stripe answers idempotency_error when a key is reused with different parameters,
-	// so the key must follow the parameters (promo flip, email change, tier change).
-	describe('checkoutIdempotencyKey', () => {
-		const base = {
-			mode: 'subscription' as const,
-			line_items: [{ price: 'price_pro', quantity: 1 }],
-			customer_email: 'a@b.com',
-			metadata: { account_id: 'acc-1', plan_type: 'pro' },
-		}
-		const t0 = new Date('2026-07-15T10:00:00Z')
-
-		it('is stable for identical parameters inside the same window (double-submit)', () => {
-			const later = new Date(t0.getTime() + 60_000)
-			expect(service.checkoutIdempotencyKey('acc-1', base, t0)).toBe(
-				service.checkoutIdempotencyKey('acc-1', { ...base }, later),
-			)
-		})
-
-		it('changes when the promo coupon appears between attempts', () => {
-			const withCoupon = { ...base, discounts: [{ coupon: 'promo_20_off' }] }
-			expect(service.checkoutIdempotencyKey('acc-1', base, t0)).not.toBe(
-				service.checkoutIdempotencyKey('acc-1', withCoupon, t0),
-			)
-		})
-
-		it('changes when the email or the price changes', () => {
-			const key = service.checkoutIdempotencyKey('acc-1', base, t0)
-			expect(
-				service.checkoutIdempotencyKey('acc-1', { ...base, customer_email: 'x@y.com' }, t0),
-			).not.toBe(key)
-			expect(
-				service.checkoutIdempotencyKey(
-					'acc-1',
-					{ ...base, line_items: [{ price: 'price_ent', quantity: 1 }] },
-					t0,
-				),
-			).not.toBe(key)
-		})
-
-		it('changes in the next window, so a later retry gets a fresh session', () => {
-			const nextWindow = new Date(t0.getTime() + 11 * 60_000)
-			expect(service.checkoutIdempotencyKey('acc-1', base, t0)).not.toBe(
-				service.checkoutIdempotencyKey('acc-1', base, nextWindow),
-			)
-		})
-
-		it('is scoped per account', () => {
-			expect(service.checkoutIdempotencyKey('acc-1', base, t0)).not.toBe(
-				service.checkoutIdempotencyKey('acc-2', base, t0),
-			)
 		})
 	})
 
