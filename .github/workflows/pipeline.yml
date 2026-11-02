@@ -3,8 +3,9 @@ name: Pipeline
 on:
   push:
     branches: [ main ]
+  # Every PR, including stacked ones (base = another feature branch), so each step of
+  # a stack gets lint/build/test/e2e before it lands. Deploy stays main-push only.
   pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 concurrency:
