@@ -1,10 +1,12 @@
 /**
  * TwoFactorController unit tests
- * Covers: POST /auth/2fa/generate, enable, disable, verify, GET status,
- *         POST backup-codes, POST verify-backup
+ * Covers: POST /auth/2fa/generate, setup, enable, backup-codes (enrollment
+ *         closed → 404), disable (requires code), verify, GET status,
+ *         POST verify-backup
  * Guards mocked: JwtAuthGuard
  */
 
+import { NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { TwoFactorService } from '../services/two-factor.service'
@@ -14,7 +16,6 @@ const twoFactorServiceMock = {
 	generateSecret: jest.fn(),
 	enableTwoFactor: jest.fn(),
 	disableTwoFactor: jest.fn(),
-	disableTwoFactorWithoutCode: jest.fn(),
 	verifyToken: jest.fn(),
 	isTwoFactorEnabled: jest.fn(),
 	getRemainingBackupCodesCount: jest.fn(),
@@ -42,63 +43,40 @@ describe('TwoFactorController', () => {
 		jest.clearAllMocks()
 	})
 
-	describe('generateSecret', () => {
-		it('should call service.generateSecret with user sub', async () => {
-			const secretData = { secret: 'BASE32SECRET', qrCode: 'data:image/png;base64,...' }
-			twoFactorServiceMock.generateSecret.mockResolvedValueOnce(secretData)
-
-			const result = await controller.generateSecret(makeRequest())
-
-			expect(twoFactorServiceMock.generateSecret).toHaveBeenCalledWith('user-uuid-1')
-			expect(result).toEqual(secretData)
-		})
-	})
-
-	describe('setup', () => {
-		it('should call service.generateSecret with user sub (alias for generate)', async () => {
-			const secretData = { secret: 'BASE32SECRET', qrCode: 'data:image/png;base64,...' }
-			twoFactorServiceMock.generateSecret.mockResolvedValueOnce(secretData)
-
-			const result = await controller.setup(makeRequest())
-
-			expect(twoFactorServiceMock.generateSecret).toHaveBeenCalledWith('user-uuid-1')
-			expect(result).toEqual(secretData)
-		})
-
-		it('should propagate errors from the service', async () => {
-			twoFactorServiceMock.generateSecret.mockRejectedValueOnce(new Error('Service unavailable'))
-
-			await expect(controller.setup(makeRequest())).rejects.toThrow('Service unavailable')
-		})
-	})
-
-	describe('enable', () => {
-		it('should enable 2FA when valid token provided', async () => {
-			twoFactorServiceMock.enableTwoFactor.mockResolvedValueOnce({ enabled: true })
-
-			const result = await controller.enable(makeRequest(), '123456')
-
-			expect(twoFactorServiceMock.enableTwoFactor).toHaveBeenCalledWith('user-uuid-1', '123456')
-			expect(result).toEqual({ enabled: true })
-		})
-
-		it('should propagate error from service when token is invalid', async () => {
-			twoFactorServiceMock.enableTwoFactor.mockRejectedValueOnce(new Error('Invalid token'))
-
-			await expect(controller.enable(makeRequest(), '000000')).rejects.toThrow('Invalid token')
+	describe('enrollment (closed until the full 2FA flow ships)', () => {
+		it.each([
+			['generateSecret', () => controller.generateSecret(makeRequest())],
+			['setup', () => controller.setup(makeRequest())],
+			['enable', () => controller.enable(makeRequest(), '123456')],
+			['generateBackupCodes', () => controller.generateBackupCodes(makeRequest())],
+		])('%s responds 404 and never touches the service', async (_name, call) => {
+			await expect(call()).rejects.toBeInstanceOf(NotFoundException)
+			expect(twoFactorServiceMock.generateSecret).not.toHaveBeenCalled()
+			expect(twoFactorServiceMock.enableTwoFactor).not.toHaveBeenCalled()
+			expect(twoFactorServiceMock.generateBackupCodes).not.toHaveBeenCalled()
 		})
 	})
 
 	describe('disable', () => {
-		it('should disable 2FA for the authenticated user', async () => {
-			twoFactorServiceMock.disableTwoFactorWithoutCode.mockResolvedValueOnce({
+		it('should disable 2FA only through the code-checking service path', async () => {
+			twoFactorServiceMock.disableTwoFactor.mockResolvedValueOnce({
 				message: '2FA disabled successfully',
 			})
 
-			const result = await controller.disable(makeRequest())
+			const result = await controller.disable(makeRequest(), { code: '123456' })
 
-			expect(twoFactorServiceMock.disableTwoFactorWithoutCode).toHaveBeenCalledWith('user-uuid-1')
+			expect(twoFactorServiceMock.disableTwoFactor).toHaveBeenCalledWith('user-uuid-1', '123456')
 			expect(result).toMatchObject({ message: expect.any(String) })
+		})
+
+		it('should propagate the service error when the code is invalid', async () => {
+			twoFactorServiceMock.disableTwoFactor.mockRejectedValueOnce(
+				new Error('Invalid verification code'),
+			)
+
+			await expect(controller.disable(makeRequest(), { code: '000000' })).rejects.toThrow(
+				'Invalid verification code',
+			)
 		})
 	})
 
@@ -131,19 +109,6 @@ describe('TwoFactorController', () => {
 			expect(twoFactorServiceMock.isTwoFactorEnabled).toHaveBeenCalledWith('user-uuid-1')
 			expect(twoFactorServiceMock.getRemainingBackupCodesCount).toHaveBeenCalledWith('user-uuid-1')
 			expect(result).toEqual({ enabled: true, backupCodesRemaining: 8 })
-		})
-	})
-
-	describe('generateBackupCodes', () => {
-		it('should return new backup codes with instructions message', async () => {
-			const codes = ['ABCD-1234', 'EFGH-5678']
-			twoFactorServiceMock.generateBackupCodes.mockResolvedValueOnce(codes)
-
-			const result = await controller.generateBackupCodes(makeRequest())
-
-			expect(twoFactorServiceMock.generateBackupCodes).toHaveBeenCalledWith('user-uuid-1')
-			expect(result).toMatchObject({ codes })
-			expect(typeof result.message).toBe('string')
 		})
 	})
 
