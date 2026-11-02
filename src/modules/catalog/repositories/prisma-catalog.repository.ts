@@ -203,9 +203,16 @@ export class PrismaCatalogRepository implements CatalogRepository {
 		})
 	}
 
-	async findOrderByNumber(orderNumber: string): Promise<CatalogOrderTracking | null> {
+	async findOrderByNumber(
+		sellerId: string,
+		orderNumber: string,
+	): Promise<CatalogOrderTracking | null> {
 		const order = await this.prisma.order.findFirst({
-			where: { order_number: orderNumber },
+			where: {
+				seller_id: sellerId,
+				order_number: orderNumber,
+				metadata: { path: ['source'], equals: 'catalog' },
+			},
 			select: {
 				id: true,
 				order_number: true,

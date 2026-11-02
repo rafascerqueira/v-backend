@@ -18,6 +18,17 @@ here is some gaps found on frontend debug
 - [x] Supplier management
   Implemented: `GET/POST /suppliers`, `PATCH/DELETE /suppliers/:id`, `GET /suppliers/:id/debts`, `POST /suppliers/:id/debts`, `POST /suppliers/debts/:debtId/pay`. Debt status auto-advances (pending → partial → paid).
 
+- [ ] Complete 2FA (TOTP) flow
+  Enrollment is **closed** today (`TWO_FACTOR_ENROLLMENT_OPEN = false` in `two-factor.controller.ts`: `generate`/`setup`/`enable`/`backup-codes` → 404) and the settings card is hidden in the frontend, because the login page ignores `requiresTwoFactor` and enrolling locked accounts out (ARCHITECTURE_REVIEW P0 #4). To reopen it, ship together:
+  - frontend login: second step that posts `twoFactorToken` when `/auth/login` answers `requiresTwoFactor`, plus backup-code recovery;
+  - frontend settings: enroll via `POST /auth/2fa/enable` (not `/verify`), show backup codes once, disable asks for the code (`POST /auth/2fa/disable` already requires it);
+  - **OAuth login must honor 2FA** (pre-existing gap, P1): the Google/Facebook callbacks (`oauth.controller.ts`) issue full session tokens right after `findOrCreateOAuthAccount` without checking `two_factor_enabled`, and Google auto-links by verified email. Issue a short-lived signed "2fa pending" cookie instead and finish the login only after a TOTP/backup code;
+  - per-account (not per-IP) attempt budget + lockout on `verify`/`disable`/`verify-backup`, and TOTP replay protection (store the last accepted time-step);
+  - Zod-validate `verify` and `verify-backup` bodies (a non-string `code` currently 500s), and keep `verify` behind the enrollment switch or drop it;
+  - re-authentication (password) before enrolling, so a stolen session can't enroll its own secret;
+  - encrypt `two_factor_secret` at rest (today it is plaintext; backup codes are already hashed);
+  - then flip `TWO_FACTOR_ENROLLMENT_OPEN` and restore the release note.
+
 
 ## Improvements 
 

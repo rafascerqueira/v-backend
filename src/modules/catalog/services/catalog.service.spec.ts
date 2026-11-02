@@ -101,6 +101,54 @@ describe('CatalogService', () => {
 		repositoryMock.findStocks.mockResolvedValue([])
 	})
 
+	describe('trackOrder', () => {
+		const trackedOrder = {
+			id: 1,
+			order_number: 'PED-ABC123',
+			status: 'pending',
+			payment_status: 'pending',
+			total: 4990,
+			subtotal: 4990,
+			discount: 0,
+			delivery_date: null,
+			createdAt: new Date('2026-11-01T10:00:00Z'),
+			updatedAt: new Date('2026-11-01T10:00:00Z'),
+			store: { name: 'Maria Souza', store_name: null },
+			items: [{ product: { id: 7, name: 'Bolo' }, quantity: 1, unit_price: 4990, total: 4990 }],
+		}
+
+		it('looks the order up inside the store resolved from the slug', async () => {
+			repositoryMock.findStoreBySlug.mockResolvedValueOnce({ id: 'seller-1' } as any)
+			repositoryMock.findOrderByNumber.mockResolvedValueOnce(trackedOrder as any)
+
+			const result = await service.trackOrder('minha-loja', 'PED-ABC123')
+
+			expect(repositoryMock.findStoreBySlug).toHaveBeenCalledWith('minha-loja')
+			expect(repositoryMock.findOrderByNumber).toHaveBeenCalledWith('seller-1', 'PED-ABC123')
+			expect(result.order_number).toBe('PED-ABC123')
+			expect(result.total).toBe(4990)
+			expect(result.store_name).toBe('Loja de Maria')
+		})
+
+		it('returns the same 404 for an unknown store without querying orders', async () => {
+			repositoryMock.findStoreBySlug.mockResolvedValueOnce(null)
+
+			await expect(service.trackOrder('nao-existe', 'PED-ABC123')).rejects.toThrow(
+				new NotFoundException('Pedido não encontrado'),
+			)
+			expect(repositoryMock.findOrderByNumber).not.toHaveBeenCalled()
+		})
+
+		it('returns 404 when the order is not a storefront order of that store', async () => {
+			repositoryMock.findStoreBySlug.mockResolvedValueOnce({ id: 'seller-1' } as any)
+			repositoryMock.findOrderByNumber.mockResolvedValueOnce(null)
+
+			await expect(service.trackOrder('minha-loja', 'PED-202611-0001')).rejects.toThrow(
+				new NotFoundException('Pedido não encontrado'),
+			)
+		})
+	})
+
 	describe('getStoreBySlug', () => {
 		it('should return store info when store exists', async () => {
 			repositoryMock.findStoreBySlug.mockResolvedValueOnce({
