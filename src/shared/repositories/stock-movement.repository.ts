@@ -36,7 +36,20 @@ export interface CreateStockMovementResult {
 
 export const STOCK_MOVEMENT_REPOSITORY = Symbol('STOCK_MOVEMENT_REPOSITORY')
 
+/**
+ * Every stock change is a movement applied under the stock row lock (FOR UPDATE)
+ * with an atomic increment/decrement, plus a stock.moved event in the same
+ * transaction (side effects such as the "reposição alocada" notification come from
+ * it). Tenant-scoped through the product.
+ */
 export interface StockMovementRepository {
 	findByProduct(productId: number): Promise<StockMovement[]>
 	create(data: CreateStockMovementData): Promise<CreateStockMovementResult>
+	/**
+	 * Sets the on-hand quantity (PATCH /store-stock) by recording an `adjustment`
+	 * movement of the difference, computed under the lock, so the movement history
+	 * always adds up to the stock. Null when the quantity is already `target`.
+	 * 404 for another seller's product.
+	 */
+	adjustTo(productId: number, target: number): Promise<CreateStockMovementResult | null>
 }

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { PrismaModule } from '@/shared/prisma/prisma.module'
 import { STOCK_MOVEMENT_REPOSITORY } from '@/shared/repositories/stock-movement.repository'
 import { StockMovementsController } from './controllers/stock-movements.controller'
+import { StockNotificationsHandler } from './handlers/stock-notifications.handler'
 import { PrismaStockMovementRepository } from './repositories/prisma-stock-movement.repository'
 import { StockMovementsService } from './services/stock-movements.service'
 
@@ -10,6 +11,7 @@ import { StockMovementsService } from './services/stock-movements.service'
 	controllers: [StockMovementsController],
 	providers: [
 		StockMovementsService,
+		StockNotificationsHandler,
 		{
 			provide: STOCK_MOVEMENT_REPOSITORY,
 			useClass: PrismaStockMovementRepository,
