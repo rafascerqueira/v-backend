@@ -635,8 +635,15 @@ export class CatalogService {
 		}
 	}
 
-	async trackOrder(orderNumber: string) {
-		const order = await this.catalogRepository.findOrderByNumber(orderNumber)
+	/**
+	 * Public order tracking, scoped to the store the link belongs to. An unknown
+	 * store and an unknown order return the same 404 so neither leaks existence.
+	 */
+	async trackOrder(slug: string, orderNumber: string) {
+		const store = await this.catalogRepository.findStoreBySlug(slug)
+		const order = store
+			? await this.catalogRepository.findOrderByNumber(store.id, orderNumber)
+			: null
 		if (!order) throw new NotFoundException('Pedido não encontrado')
 
 		const sellerFirstName = order.store?.name?.trim().split(/\s+/)[0]

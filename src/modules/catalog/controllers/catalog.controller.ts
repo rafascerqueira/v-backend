@@ -1,4 +1,13 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common'
+import {
+	Body,
+	Controller,
+	Get,
+	GoneException,
+	HttpCode,
+	HttpStatus,
+	Param,
+	Post,
+} from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { Public } from '@/modules/auth/decorators/public.decorator'
@@ -24,6 +33,13 @@ const CUSTOMER_AUTH_THROTTLE = {
 	short: { ttl: 1000, limit: 1 },
 	medium: { ttl: 60000, limit: 5 },
 	long: { ttl: 3600000, limit: 20 },
+}
+
+/** Per-IP limits for public order tracking: room for a customer refreshing, not for enumeration. */
+const ORDER_TRACKING_THROTTLE = {
+	short: { ttl: 1000, limit: 2 },
+	medium: { ttl: 60000, limit: 20 },
+	long: { ttl: 3600000, limit: 200 },
 }
 
 @ApiTags('catalog')
@@ -154,13 +170,27 @@ export class CatalogController {
 	}
 
 	@Public()
-	@Get('orders/:orderNumber/track')
-	@ApiOperation({ summary: 'Track order status by order number (public)' })
+	@Throttle(ORDER_TRACKING_THROTTLE)
+	@Get('loja/:slug/orders/:orderNumber/track')
+	@ApiOperation({ summary: 'Track a storefront order of a specific store (public)' })
+	@ApiParam({ name: 'slug', type: String, description: 'Store slug' })
 	@ApiParam({ name: 'orderNumber', type: String, description: 'Order number (e.g. PED-LK3X4ABC)' })
 	@ApiResponse({ status: 200, description: 'Order tracking info' })
-	@ApiResponse({ status: 404, description: 'Order not found' })
-	async trackOrder(@Param('orderNumber') orderNumber: string) {
-		return this.service.trackOrder(orderNumber)
+	@ApiResponse({ status: 404, description: 'Store or order not found' })
+	async trackOrder(@Param('slug') slug: string, @Param('orderNumber') orderNumber: string) {
+		return this.service.trackOrder(slug, orderNumber)
+	}
+
+	/**
+	 * Retired: looked orders up by number alone across every store. Kept as an
+	 * explicit 410 so stale links fail clearly instead of looking like a 404.
+	 */
+	@Public()
+	@Get('orders/:orderNumber/track')
+	@ApiOperation({ summary: 'Retired — use /catalog/loja/:slug/orders/:orderNumber/track' })
+	@ApiResponse({ status: 410, description: 'Endpoint retired' })
+	legacyTrackOrder(): never {
+		throw new GoneException('Este link de acompanhamento não está mais disponível')
 	}
 
 	@Public()

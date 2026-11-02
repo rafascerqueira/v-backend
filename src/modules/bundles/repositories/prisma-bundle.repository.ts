@@ -30,6 +30,7 @@ export class PrismaBundleRepository implements BundleRepository {
 				product: {
 					select: {
 						id: true,
+						seller_id: true,
 						name: true,
 						prices: {
 							where: { active: true, price_type: 'sale' },
@@ -55,9 +56,36 @@ export class PrismaBundleRepository implements BundleRepository {
 		return { total_price, discounted_price }
 	}
 
+	/**
+	 * Every bundle item must reference a live product of the bundle's own seller.
+	 * Product ids are sequential, so without this a seller could attach another
+	 * tenant's product and read its name/price back. Foreign or missing ids get
+	 * the same 404 so existence isn't leaked.
+	 */
+	private async assertProductsOwnedBy(
+		sellerId: string,
+		items: Array<{ product_id: number }>,
+	): Promise<void> {
+		const productIds = [...new Set(items.map((item) => item.product_id))]
+		const owned = await this.prisma.product.count({
+			where: { id: { in: productIds }, seller_id: sellerId, deletedAt: null },
+		})
+		if (owned !== productIds.length) {
+			throw new NotFoundException('Produto não encontrado')
+		}
+	}
+
 	private toBundle(row: any): Bundle {
-		const { total_price, discounted_price } = this.computeTotals(row.items, row.discount_percent)
-		return { ...row, total_price, discounted_price } as Bundle
+		// Read-side guard for rows written before the ownership check existed:
+		// never serialize (or price) a product that belongs to another seller.
+		const items = row.items
+			.filter((item: any) => item.product?.seller_id === row.seller_id)
+			.map(({ product: { seller_id: _sellerId, ...product }, ...item }: any) => ({
+				...item,
+				product,
+			}))
+		const { total_price, discounted_price } = this.computeTotals(items, row.discount_percent)
+		return { ...row, items, total_price, discounted_price } as Bundle
 	}
 
 	async findAll(): Promise<Bundle[]> {
@@ -78,6 +106,8 @@ export class PrismaBundleRepository implements BundleRepository {
 	}
 
 	async create(data: CreateBundleData): Promise<Bundle> {
+		await this.assertProductsOwnedBy(data.seller_id, data.items)
+
 		const row = await this.prisma.bundle.create({
 			data: {
 				seller_id: data.seller_id,
@@ -104,6 +134,12 @@ export class PrismaBundleRepository implements BundleRepository {
 		if (!existing) throw new NotFoundException('Bundle not found')
 
 		const { items, ...fields } = data
+
+		// Validate against the bundle owner's seller (not the caller), so an admin
+		// editing a seller's bundle can't mix in another tenant's products either.
+		if (items !== undefined) {
+			await this.assertProductsOwnedBy(existing.seller_id, items)
+		}
 
 		const row = await this.prisma.$transaction(async (tx) => {
 			if (items !== undefined) {
