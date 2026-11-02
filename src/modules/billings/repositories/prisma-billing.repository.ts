@@ -165,11 +165,11 @@ export class PrismaBillingRepository implements BillingRepository {
 	 * canceled, not deleted (409 HAS_PAYMENTS). The row lock keeps a payment from
 	 * landing between the check and the delete; the ledger FK is the DB backstop.
 	 */
-	async delete(id: number): Promise<void> {
-		await this.prisma.$transaction(async (tx) => {
+	async delete(id: number): Promise<{ sellerId: string }> {
+		return this.prisma.$transaction(async (tx) => {
 			const sellerId = this.tenantContext.isAdmin() ? null : this.tenantContext.requireSellerId()
-			const [row] = await tx.$queryRaw<{ id: number }[]>`
-				SELECT id FROM billings
+			const [row] = await tx.$queryRaw<{ id: number; seller_id: string }[]>`
+				SELECT id, seller_id FROM billings
 				WHERE id = ${id} AND (${sellerId}::text IS NULL OR seller_id = ${sellerId}::text)
 				FOR UPDATE`
 			if (!row) throw new NotFoundException('Cobrança não encontrada')
@@ -184,6 +184,7 @@ export class PrismaBillingRepository implements BillingRepository {
 				})
 			}
 			await tx.billing.delete({ where: { id } })
+			return { sellerId: row.seller_id }
 		})
 	}
 

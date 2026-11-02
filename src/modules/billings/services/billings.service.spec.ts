@@ -19,7 +19,13 @@ const repositoryMock = {
 	verifyOrderAccess: jest.fn(),
 }
 
-const paymentsMock = { record: jest.fn(), reverse: jest.fn(), list: jest.fn() }
+const paymentsMock = {
+	record: jest.fn(),
+	reverse: jest.fn(),
+	list: jest.fn(),
+	updateCharge: jest.fn(),
+	openCharge: jest.fn(),
+}
 const outboxMock = { kick: jest.fn(), relayPending: jest.fn() }
 
 const tenantContextMock = {
@@ -33,6 +39,7 @@ const redisMock = { delete: jest.fn() }
 const billing = (over: Record<string, unknown> = {}) => ({
 	id: 1,
 	order_id: 2,
+	seller_id: 'owner-seller',
 	billing_number: 'COB-000001',
 	total_amount: 10000,
 	paid_amount: 4000,
@@ -51,10 +58,11 @@ describe('BillingsService', () => {
 
 	beforeEach(async () => {
 		jest.resetAllMocks()
-		tenantContextMock.getSellerId.mockReturnValue('test-seller-id')
-		tenantContextMock.requireSellerId.mockReturnValue('test-seller-id')
+		tenantContextMock.getSellerId.mockReturnValue('caller-id')
+		tenantContextMock.requireSellerId.mockReturnValue('caller-id')
 		tenantContextMock.isAdmin.mockReturnValue(false)
 		redisMock.delete.mockResolvedValue(undefined)
+		repositoryMock.findById.mockResolvedValue(billing())
 
 		const module = await Test.createTestingModule({
 			providers: [
@@ -85,137 +93,100 @@ describe('BillingsService', () => {
 			due_date: '2026-11-30T00:00:00.000Z',
 		}
 
-		it('creates an unpaid charge, status derived from the amounts', async () => {
-			repositoryMock.verifyOrderAccess.mockResolvedValueOnce({ id: 2, seller_id: 'test-seller-id' })
-			repositoryMock.create.mockResolvedValueOnce({ id: 1 })
-
-			const res = await service.create(2, dto)
-
-			expect(repositoryMock.create).toHaveBeenCalledWith({
-				order_id: 2,
-				billing_number: 'B-1',
-				total_amount: 10000,
-				paid_amount: 0,
-				payment_method: 'cash',
-				status: 'pending',
-				payment_status: 'pending',
-				due_date: new Date('2026-11-30T00:00:00.000Z'),
-			})
-			expect(paymentsMock.record).not.toHaveBeenCalled()
-			expect(res).toEqual({ id: 1 })
+		beforeEach(() => {
+			repositoryMock.verifyOrderAccess.mockResolvedValue({ id: 2, seller_id: 'owner-seller' })
+			paymentsMock.openCharge.mockResolvedValue({ billingId: 1, sellerId: 'owner-seller' })
 		})
 
-		it('turns an amount already paid into the first ledger entry', async () => {
-			repositoryMock.verifyOrderAccess.mockResolvedValueOnce({ id: 2, seller_id: 'test-seller-id' })
-			repositoryMock.create.mockResolvedValueOnce({ id: 1 })
-			repositoryMock.findById.mockResolvedValueOnce(billing({ paid_amount: 2500 }))
-			paymentsMock.record.mockResolvedValueOnce({ entry, replayed: false })
+		it('opens an unpaid charge through the ledger repository', async () => {
+			const res = await service.create(2, dto)
 
-			const res = await service.create(2, {
+			expect(paymentsMock.openCharge).toHaveBeenCalledWith({
+				orderId: 2,
+				billingNumber: 'B-1',
+				totalAmount: 10000,
+				paymentMethod: 'cash',
+				dueDate: new Date('2026-11-30T00:00:00.000Z'),
+				notes: undefined,
+				initialPayment: undefined,
+			})
+			expect(res).toEqual(billing())
+			expect(outboxMock.kick).not.toHaveBeenCalled()
+		})
+
+		it('turns an amount already paid into the first entry, in the same transaction', async () => {
+			await service.create(2, {
 				...dto,
 				paid_amount: 2500,
 				payment_date: '2026-11-01T12:00:00.000Z',
 			} as any)
 
-			// The charge itself starts at zero: money only enters through the ledger.
-			expect(repositoryMock.create.mock.calls[0][0]).toMatchObject({ paid_amount: 0 })
-			expect(paymentsMock.record).toHaveBeenCalledWith({
-				billingId: 1,
+			expect(paymentsMock.openCharge.mock.calls[0][0].initialPayment).toEqual({
 				amount: 2500,
-				method: 'cash',
 				paidAt: new Date('2026-11-01T12:00:00.000Z'),
 				note: LEGACY_PAYMENT_NOTES.create,
-				createdBy: 'test-seller-id',
+				createdBy: 'caller-id',
 			})
-			expect(res).toMatchObject({ paid_amount: 2500 })
+			expect(redisMock.delete).toHaveBeenCalledWith('dashboard:stats:owner-seller')
 		})
 
 		it('404s when the order is not the tenant’s', async () => {
 			repositoryMock.verifyOrderAccess.mockResolvedValueOnce(null)
 			await expect(service.create(2, dto)).rejects.toBeInstanceOf(NotFoundException)
+			expect(paymentsMock.openCharge).not.toHaveBeenCalled()
 		})
 
 		it('400s when paid_amount exceeds total_amount', async () => {
-			repositoryMock.verifyOrderAccess.mockResolvedValueOnce({ id: 2, seller_id: 'test-seller-id' })
 			await expect(service.create(2, { ...dto, paid_amount: 20000 })).rejects.toBeInstanceOf(
 				BadRequestException,
 			)
 		})
 	})
 
-	describe('update (PATCH, paid_amount deprecated)', () => {
+	describe('update (PATCH, applied under the charge lock)', () => {
 		beforeEach(() => {
-			repositoryMock.findById.mockResolvedValue(billing())
-			paymentsMock.record.mockResolvedValue({ entry, replayed: false })
+			paymentsMock.updateCharge.mockResolvedValue({ recorded: null, sellerId: 'owner-seller' })
 		})
 
-		it('404s for a missing/cross-tenant billing (findById is tenant-scoped)', async () => {
-			repositoryMock.findById.mockResolvedValueOnce(null)
-			await expect(service.update(1, {})).rejects.toBeInstanceOf(NotFoundException)
-			expect(repositoryMock.update).not.toHaveBeenCalled()
-		})
-
-		it('records a higher paid_amount as a ledger payment of the difference', async () => {
+		it('hands every field to the locked repository path (paid_amount as an absolute target)', async () => {
 			await service.update(1, {
+				total_amount: 9000,
 				paid_amount: 6500,
+				payment_method: 'pix',
 				payment_date: '2026-11-02T10:00:00.000Z',
+				due_date: null,
+				notes: 'x',
 			})
 
-			expect(paymentsMock.record).toHaveBeenCalledWith({
+			expect(paymentsMock.updateCharge).toHaveBeenCalledWith({
 				billingId: 1,
-				amount: 2500,
-				method: 'pix',
+				totalAmount: 9000,
+				paidAmountTarget: 6500,
+				paymentMethod: 'pix',
+				fallbackMethod: 'cash',
 				paidAt: new Date('2026-11-02T10:00:00.000Z'),
-				note: LEGACY_PAYMENT_NOTES.patch,
-				createdBy: 'test-seller-id',
+				dueDate: null,
+				notes: 'x',
+				legacyNote: LEGACY_PAYMENT_NOTES.patch,
+				createdBy: 'caller-id',
 			})
-			// paid_amount is never written directly anymore.
-			expect(repositoryMock.update.mock.calls[0][1]).not.toHaveProperty('paid_amount')
-			expect(repositoryMock.update.mock.calls[0][1]).not.toHaveProperty('payment_date')
-			expect(outboxMock.kick).toHaveBeenCalled()
-		})
-
-		it('refuses a lower paid_amount: money only goes back through a reversal', async () => {
-			await expect(service.update(1, { paid_amount: 1000 })).rejects.toThrow(/estorne/)
 			expect(repositoryMock.update).not.toHaveBeenCalled()
-			expect(paymentsMock.record).not.toHaveBeenCalled()
 		})
 
-		it('refuses paid above the total, and a total below what was already paid', async () => {
-			await expect(service.update(1, { paid_amount: 12000 })).rejects.toBeInstanceOf(
+		it('kicks the relay only when a payment was recorded, invalidating the owner’s stats', async () => {
+			paymentsMock.updateCharge.mockResolvedValueOnce({ recorded: entry, sellerId: 'owner-seller' })
+
+			await service.update(1, { paid_amount: 6500 })
+
+			expect(outboxMock.kick).toHaveBeenCalled()
+			expect(redisMock.delete).toHaveBeenCalledWith('dashboard:stats:owner-seller')
+		})
+
+		it('propagates the repository’s rules (e.g. lowering paid_amount)', async () => {
+			paymentsMock.updateCharge.mockRejectedValueOnce(new BadRequestException('estorne'))
+			await expect(service.update(1, { paid_amount: 1 })).rejects.toBeInstanceOf(
 				BadRequestException,
 			)
-			await expect(service.update(1, { total_amount: 3000 })).rejects.toThrow(
-				/abaixo do valor já pago/,
-			)
-			expect(repositoryMock.update).not.toHaveBeenCalled()
-		})
-
-		it('refuses a payment on a canceled charge', async () => {
-			repositoryMock.findById.mockResolvedValue(billing({ status: 'canceled' }))
-			await expect(service.update(1, { paid_amount: 5000 })).rejects.toThrow(/cancelada/)
-			expect(repositoryMock.update).not.toHaveBeenCalled()
-		})
-
-		it('edits the other fields, re-deriving status from paid vs the new total', async () => {
-			await service.update(1, { total_amount: 4000, due_date: null, notes: 'x' })
-
-			expect(repositoryMock.update).toHaveBeenCalledWith(1, {
-				total_amount: 4000,
-				notes: 'x',
-				status: 'paid',
-				payment_status: 'confirmed',
-				due_date: null,
-			})
-			expect(paymentsMock.record).not.toHaveBeenCalled()
-		})
-
-		it('keeps a canceled charge canceled when editing other fields', async () => {
-			repositoryMock.findById.mockResolvedValue(billing({ status: 'canceled' }))
-
-			await service.update(1, { notes: 'x' })
-
-			expect(repositoryMock.update.mock.calls[0][1]).not.toHaveProperty('status')
 		})
 	})
 
@@ -257,8 +228,7 @@ describe('BillingsService', () => {
 	})
 
 	describe('cancel', () => {
-		it('voids a billing the tenant owns', async () => {
-			repositoryMock.findById.mockResolvedValueOnce(billing())
+		it('voids a billing the tenant owns and invalidates the owner’s stats', async () => {
 			repositoryMock.update.mockResolvedValueOnce(billing({ status: 'canceled' }))
 
 			await service.cancel(1)
@@ -267,6 +237,7 @@ describe('BillingsService', () => {
 				status: 'canceled',
 				payment_status: 'canceled',
 			})
+			expect(redisMock.delete).toHaveBeenCalledWith('dashboard:stats:owner-seller')
 		})
 
 		it('404s for a missing/cross-tenant billing and never writes', async () => {
@@ -277,23 +248,23 @@ describe('BillingsService', () => {
 	})
 
 	describe('delete', () => {
-		it('delegates to the repository (404 / 409 HAS_PAYMENTS enforced there)', async () => {
-			repositoryMock.delete.mockResolvedValueOnce(undefined)
+		it('delegates to the repository (404 / 409 HAS_PAYMENTS there) and invalidates the owner', async () => {
+			repositoryMock.delete.mockResolvedValueOnce({ sellerId: 'owner-seller' })
 
 			await service.delete(1)
 
 			expect(repositoryMock.delete).toHaveBeenCalledWith(1)
-			expect(redisMock.delete).toHaveBeenCalledWith('dashboard:stats:test-seller-id')
+			expect(redisMock.delete).toHaveBeenCalledWith('dashboard:stats:owner-seller')
 		})
 	})
 
 	describe('ledger endpoints', () => {
-		beforeEach(() => {
-			repositoryMock.findById.mockResolvedValue(billing({ paid_amount: 5500 }))
-		})
-
 		it('recordPayment: the caller is the author, paid_at defaults to now', async () => {
-			paymentsMock.record.mockResolvedValueOnce({ entry, replayed: false })
+			paymentsMock.record.mockResolvedValueOnce({
+				entry,
+				sellerId: 'owner-seller',
+				replayed: false,
+			})
 			const before = Date.now()
 
 			const res = await service.recordPayment(1, { amount: 1500, method: 'pix' })
@@ -303,28 +274,18 @@ describe('BillingsService', () => {
 				billingId: 1,
 				amount: 1500,
 				method: 'pix',
-				createdBy: 'test-seller-id',
+				createdBy: 'caller-id',
 			})
 			expect(input.paidAt.getTime()).toBeGreaterThanOrEqual(before)
 			expect(input.idempotency).toBeUndefined()
-			expect(res).toEqual({ payment: entry, billing: billing({ paid_amount: 5500 }) })
-			expect(redisMock.delete).toHaveBeenCalled()
+			expect(res).toEqual({ payment: entry, billing: billing() })
+			// An admin acting on a seller's charge refreshes the SELLER's dashboard.
+			expect(redisMock.delete).toHaveBeenCalledWith('dashboard:stats:owner-seller')
 			expect(outboxMock.kick).toHaveBeenCalled()
 		})
 
-		it('recordPayment: refuses a paid_at in the future', async () => {
-			await expect(
-				service.recordPayment(1, {
-					amount: 1500,
-					method: 'pix',
-					paid_at: new Date(Date.now() + 86_400_000).toISOString(),
-				}),
-			).rejects.toThrow(/futuro/)
-			expect(paymentsMock.record).not.toHaveBeenCalled()
-		})
-
 		it('recordPayment: forwards the Idempotency-Key; a replay has no side effects', async () => {
-			paymentsMock.record.mockResolvedValueOnce({ entry, replayed: true })
+			paymentsMock.record.mockResolvedValueOnce({ entry, sellerId: 'owner-seller', replayed: true })
 			const dto = { amount: 1500, method: 'pix' as const }
 
 			await service.recordPayment(1, dto, 'key-1234567890abcdef')
@@ -340,7 +301,11 @@ describe('BillingsService', () => {
 
 		it('reversePayment: returns the reversal and the updated charge', async () => {
 			const reversal = { ...entry, id: 10, kind: 'reversal', reversal_of_id: 9 }
-			paymentsMock.reverse.mockResolvedValueOnce({ entry: reversal, replayed: false })
+			paymentsMock.reverse.mockResolvedValueOnce({
+				entry: reversal,
+				sellerId: 'owner-seller',
+				replayed: false,
+			})
 
 			const res = await service.reversePayment(1, 9, { reason: 'Lançado em duplicidade' })
 
@@ -348,10 +313,10 @@ describe('BillingsService', () => {
 				billingId: 1,
 				paymentId: 9,
 				reason: 'Lançado em duplicidade',
-				createdBy: 'test-seller-id',
+				createdBy: 'caller-id',
 				idempotency: undefined,
 			})
-			expect(res).toEqual({ reversal, billing: billing({ paid_amount: 5500 }) })
+			expect(res).toEqual({ reversal, billing: billing() })
 		})
 
 		it('listPayments: 404 for a missing/cross-tenant charge', async () => {

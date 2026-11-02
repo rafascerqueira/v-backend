@@ -30,7 +30,10 @@ describe('PrismaCustomerRepository', () => {
 				delete: jest.fn().mockResolvedValue({ id: 'c1' }),
 			},
 			billingPayment: { count: jest.fn().mockResolvedValue(0) },
+			// delete() locks the customer's charges in a transaction; the mock is its own tx.
+			$queryRaw: jest.fn().mockResolvedValue([]),
 		}
+		prisma.$transaction = jest.fn((cb: any) => cb(prisma))
 
 		const module = await Test.createTestingModule({
 			providers: [
@@ -87,6 +90,7 @@ describe('PrismaCustomerRepository', () => {
 			expect(prisma.billingPayment.count).toHaveBeenCalledWith({
 				where: { billing: { order: { customer_id: 'c1' } } },
 			})
+			expect(prisma.$queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE')
 			expect(prisma.customer.delete).not.toHaveBeenCalled()
 		})
 

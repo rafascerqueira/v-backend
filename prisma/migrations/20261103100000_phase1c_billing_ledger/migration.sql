@@ -38,8 +38,9 @@ ALTER TABLE "billings"
 DROP INDEX "idx_billings_order_id";
 CREATE UNIQUE INDEX "uq_billings_order_id" ON "billings"("order_id");
 
--- 3. Money invariants on billings. NOT VALID + VALIDATE: validation takes a weaker
---    lock than adding a validated constraint in one step.
+-- 3. Money invariants on billings. (This file runs as one transaction, so the
+--    ACCESS EXCLUSIVE lock from step 1 is held until the end anyway; the pre-check
+--    above already guarantees validation passes. Deploy in a quiet window.)
 ALTER TABLE "billings" ADD CONSTRAINT "chk_billings_total_nonneg" CHECK ("total_amount" >= 0) NOT VALID;
 ALTER TABLE "billings" ADD CONSTRAINT "chk_billings_paid_nonneg" CHECK ("paid_amount" >= 0) NOT VALID;
 ALTER TABLE "billings" ADD CONSTRAINT "chk_billings_paid_le_total" CHECK ("paid_amount" <= "total_amount") NOT VALID;

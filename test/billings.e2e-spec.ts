@@ -1,7 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import request from 'supertest'
 import type { PrismaService } from '../src/shared/prisma/prisma.service'
-import { createE2EApp, seedTestSeller } from './helpers/e2e'
+import { createE2EApp, deleteLedgerEntries, seedTestSeller } from './helpers/e2e'
 
 const OTHER_SELLER = 'e2e-other-seller-00000000001'
 
@@ -16,7 +16,7 @@ describe('Billings (e2e)', () => {
 
 	afterEach(async () => {
 		// Ledger entries first: their FK refuses to drop charges that still have them.
-		await prisma.billingPayment.deleteMany()
+		await deleteLedgerEntries(prisma)
 		await prisma.billing.deleteMany()
 		await prisma.order_item.deleteMany()
 		await prisma.order.deleteMany()

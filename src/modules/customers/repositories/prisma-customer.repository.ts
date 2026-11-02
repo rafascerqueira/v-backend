@@ -124,20 +124,25 @@ export class PrismaCustomerRepository implements CustomerRepository {
 			throw new NotFoundException('Customer not found or access denied')
 		}
 		// Financial history is never erased (D2): deleting the customer would cascade
-		// to orders and charges that have ledger entries (the ledger FK also refuses).
-		const entries = await this.prisma.billingPayment.count({
-			where: { billing: { order: { customer_id: id } } },
-		})
-		if (entries > 0) {
-			throw new ConflictException({
-				message:
-					'Este cliente tem pagamentos registrados e não pode ser excluído. Marque o cliente como inativo em vez de excluí-lo.',
-				error: 'Conflict',
-				code: 'HAS_PAYMENTS',
+		// to orders and charges that have ledger entries. The charges are locked so a
+		// payment can't land between the check and the delete (the ledger FK would
+		// still refuse it, but as a 409 here rather than an error there).
+		return this.prisma.$transaction(async (tx) => {
+			await tx.$queryRaw`
+				SELECT b.id FROM billings b JOIN orders o ON o.id = b.order_id
+				WHERE o.customer_id = ${id} FOR UPDATE OF b`
+			const entries = await tx.billingPayment.count({
+				where: { billing: { order: { customer_id: id } } },
 			})
-		}
-		return this.prisma.customer.delete({
-			where: { id },
-		}) as unknown as Customer
+			if (entries > 0) {
+				throw new ConflictException({
+					message:
+						'Este cliente tem pagamentos registrados e não pode ser excluído. Marque o cliente como inativo em vez de excluí-lo.',
+					error: 'Conflict',
+					code: 'HAS_PAYMENTS',
+				})
+			}
+			return tx.customer.delete({ where: { id } }) as unknown as Customer
+		})
 	}
 }

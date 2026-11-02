@@ -1,7 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import request from 'supertest'
 import type { PrismaService } from '../src/shared/prisma/prisma.service'
-import { createE2EApp, seedTestSeller, TEST_SELLER } from './helpers/e2e'
+import { createE2EApp, deleteLedgerEntries, seedTestSeller, TEST_SELLER } from './helpers/e2e'
 
 /**
  * Phase 1C (e2e): the append-only payment ledger. Real Postgres; requests are
@@ -19,7 +19,7 @@ describe('Billing ledger — Phase 1C (e2e)', () => {
 		await prisma.domainEvent.deleteMany({ where: { seller_id: { in: SELLERS } } })
 		await prisma.idempotencyKey.deleteMany({ where: { seller_id: { in: SELLERS } } })
 		// Entries first: the ledger FK refuses to drop charges that still have them.
-		await prisma.billingPayment.deleteMany({ where: { seller_id: { in: SELLERS } } })
+		await deleteLedgerEntries(prisma, { seller_id: { in: SELLERS } })
 		await prisma.order.deleteMany({ where: { seller_id: { in: SELLERS } } })
 		await prisma.sellerSequence.deleteMany({ where: { seller_id: { in: SELLERS } } })
 		await prisma.product.deleteMany({ where: { seller_id: { in: SELLERS } } })
@@ -266,5 +266,94 @@ describe('Billing ledger — Phase 1C (e2e)', () => {
 			.send({ reason: 'Tentativa' })
 			.expect(404)
 		expect(await prisma.billingPayment.count({ where: { billing_id: foreign.id } })).toBe(1)
+	})
+
+	describe('security review fixes (database guards and atomic PATCH)', () => {
+		it('the database refuses paid_amount writes outside the ledger, and edits/deletes of entries', async () => {
+			const { billing } = await chargeOf(10000)
+			const { body } = await pay(billing.id, 1000).expect(201)
+
+			await expect(
+				prisma.billing.update({ where: { id: billing.id }, data: { paid_amount: 9999 } }),
+			).rejects.toThrow(/only changes through the payment ledger/)
+			await expect(
+				prisma.billingPayment.update({ where: { id: body.payment.id }, data: { amount: 1 } }),
+			).rejects.toThrow(/append-only/)
+			await expect(
+				prisma.billingPayment.delete({ where: { id: body.payment.id } }),
+			).rejects.toThrow(/append-only/)
+			expect((await stored(billing.id)).paid_amount).toBe(1000)
+		})
+
+		it('a legacy PATCH saved twice at once records the payment once (absolute target)', async () => {
+			const { billing } = await chargeOf(10000)
+
+			const responses = await Promise.all([
+				http().patch(`/billings/${billing.id}`).send({ paid_amount: 5000 }),
+				http().patch(`/billings/${billing.id}`).send({ paid_amount: 5000 }),
+			])
+
+			expect(responses.map((r) => r.status)).toEqual([200, 200])
+			expect((await stored(billing.id)).paid_amount).toBe(5000)
+			expect(await prisma.billingPayment.count({ where: { billing_id: billing.id } })).toBe(1)
+		})
+
+		it('deleting a seller account still cascades through its payment history', async () => {
+			const seller = 'e2e-seller-ledger-gone'
+			await prisma.account.create({
+				data: {
+					id: seller,
+					name: 'Some',
+					email: 'e2e-ledger-gone@example.com',
+					role: 'seller',
+					plan_type: 'free',
+				},
+			})
+			const customer = await prisma.customer.create({
+				data: { seller_id: seller, name: 'C', phone: '11966665555', city: 'SP', state: 'SP' },
+			})
+			const order = await prisma.order.create({
+				data: {
+					seller_id: seller,
+					customer_id: customer.id,
+					order_number: 'PED-GONE-1',
+					total: 1000,
+				},
+			})
+			const charge = await prisma.billing.create({
+				data: {
+					order_id: order.id,
+					seller_id: seller,
+					billing_number: 'COB-GONE-1',
+					total_amount: 1000,
+				},
+			})
+			const payment = await prisma.billingPayment.create({
+				data: {
+					billing_id: charge.id,
+					seller_id: seller,
+					kind: 'payment',
+					amount: 500,
+					method: 'pix',
+					paid_at: new Date(),
+				},
+			})
+			await prisma.billingPayment.create({
+				data: {
+					billing_id: charge.id,
+					seller_id: seller,
+					kind: 'reversal',
+					amount: 500,
+					method: 'pix',
+					paid_at: new Date(),
+					reversal_of_id: payment.id,
+				},
+			})
+
+			await prisma.account.delete({ where: { id: seller } })
+
+			expect(await prisma.billingPayment.count({ where: { seller_id: seller } })).toBe(0)
+			expect(await prisma.billing.count({ where: { id: charge.id } })).toBe(0)
+		})
 	})
 })

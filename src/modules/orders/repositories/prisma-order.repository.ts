@@ -423,8 +423,6 @@ export class PrismaOrderRepository implements OrderRepository {
 		billingUpdate?: {
 			status: string
 			payment_status: string
-			payment_date?: Date
-			paid_amount?: number
 		},
 	): Promise<Order> {
 		return this.prisma.$transaction(async (tx) => {
@@ -464,12 +462,6 @@ export class PrismaOrderRepository implements OrderRepository {
 					data: {
 						status: billingUpdate.status as any,
 						payment_status: billingUpdate.payment_status as any,
-						...(billingUpdate.payment_date
-							? {
-									payment_date: billingUpdate.payment_date,
-									paid_amount: billingUpdate.paid_amount,
-								}
-							: {}),
 					},
 				})
 			}

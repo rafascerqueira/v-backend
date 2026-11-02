@@ -12,7 +12,6 @@ import {
 import {
 	BILLING_PAYMENT_REPOSITORY,
 	type BillingPaymentRepository,
-	type PaymentMethod,
 } from '@/shared/repositories/billing-payment.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import type { RecordPaymentDto, ReversePaymentDto } from '../dto/billing-payment.dto'
@@ -29,9 +28,6 @@ export const LEGACY_PAYMENT_NOTES = {
 	patch: 'Registrado pela edição da cobrança',
 	create: 'Registrado na criação da cobrança',
 } as const
-
-/** Clock skew allowed for a client-sent paid_at; anything later is "in the future". */
-const PAID_AT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000
 
 @Injectable()
 export class BillingsService {
@@ -104,28 +100,27 @@ export class BillingsService {
 			throw new BadRequestException('O valor pago não pode ser maior que o total da cobrança')
 		}
 
-		const { due_date, payment_date, paid_amount, ...rest } = dto
-		// The charge starts unpaid; money only enters through the ledger, so an
-		// amount already paid becomes its first entry (paid_amount = ledger balance).
-		const billing = await this.billingRepository.create({
-			order_id: orderId,
-			...rest,
-			paid_amount: 0,
-			...deriveBillingStatus(0, dto.total_amount),
-			due_date: due_date ? new Date(due_date) : undefined,
+		// The charge starts unpaid; money only enters through the ledger, so an amount
+		// already paid becomes its first entry — created in the same transaction.
+		const { billingId, sellerId } = await this.payments.openCharge({
+			orderId,
+			billingNumber: dto.billing_number,
+			totalAmount: dto.total_amount,
+			paymentMethod: dto.payment_method,
+			dueDate: dto.due_date ? new Date(dto.due_date) : undefined,
+			notes: dto.notes,
+			initialPayment:
+				dto.paid_amount > 0
+					? {
+							amount: dto.paid_amount,
+							paidAt: dto.payment_date ? new Date(dto.payment_date) : new Date(),
+							note: LEGACY_PAYMENT_NOTES.create,
+							createdBy: this.tenantContext.requireSellerId(),
+						}
+					: undefined,
 		})
-		if (paid_amount <= 0) return billing
-
-		await this.payments.record({
-			billingId: billing.id,
-			amount: paid_amount,
-			method: rest.payment_method,
-			paidAt: payment_date ? new Date(payment_date) : new Date(),
-			note: LEGACY_PAYMENT_NOTES.create,
-			createdBy: this.tenantContext.requireSellerId(),
-		})
-		await this.afterMoneyChange()
-		return this.requireBilling(billing.id)
+		if (dto.paid_amount > 0) await this.afterMoneyChange(sellerId)
+		return this.requireBilling(billingId)
 	}
 
 	/**
@@ -135,63 +130,22 @@ export class BillingsService {
 	 * (money only goes back through a reversal).
 	 */
 	async update(id: number, dto: UpdateBillingDto) {
-		// findById is tenant-scoped: a foreign or missing billing returns null → 404.
-		// We deliberately don't 403 here (that would leak that the id exists).
-		const billing = await this.billingRepository.findById(id)
-		if (!billing) {
-			throw new NotFoundException('Cobrança não encontrada')
-		}
-
-		const newTotal = dto.total_amount ?? billing.total_amount
-		const delta = dto.paid_amount === undefined ? 0 : dto.paid_amount - billing.paid_amount
-
-		if (newTotal < billing.paid_amount) {
-			throw new BadRequestException(
-				'O total não pode ficar abaixo do valor já pago. Estorne um pagamento antes de reduzir o total.',
-			)
-		}
-		if (delta < 0) {
-			throw new BadRequestException(
-				'Para reduzir o valor pago, estorne o pagamento no histórico da cobrança.',
-			)
-		}
-		if (billing.paid_amount + delta > newTotal) {
-			throw new BadRequestException('O valor pago não pode ser maior que o total da cobrança')
-		}
-		if (delta > 0 && billing.status === 'canceled') {
-			throw new BadRequestException(
-				'Cobrança cancelada não aceita pagamento. Estornos continuam permitidos.',
-			)
-		}
-
-		const { due_date, payment_date, paid_amount: _paid, ...rest } = dto
-
-		// Re-derive status/payment_status from the money, except for a canceled
-		// billing: cancellation is a terminal state owned by order cancellation, so
-		// editing it must not resurrect it as pending/paid.
-		const derived =
-			billing.status === 'canceled' ? {} : deriveBillingStatus(billing.paid_amount, newTotal)
-		await this.billingRepository.update(id, {
-			...rest,
-			...derived,
-			due_date: due_date ? new Date(due_date) : due_date === null ? null : undefined,
+		// Validated and applied under the charge lock (tenant-scoped: a foreign or
+		// missing charge is a 404, never a 403 that would leak that the id exists).
+		const { recorded, sellerId } = await this.payments.updateCharge({
+			billingId: id,
+			totalAmount: dto.total_amount,
+			paidAmountTarget: dto.paid_amount,
+			paymentMethod: dto.payment_method,
+			fallbackMethod: 'cash',
+			paidAt: dto.payment_date ? new Date(dto.payment_date) : undefined,
+			dueDate: dto.due_date ? new Date(dto.due_date) : dto.due_date === null ? null : undefined,
+			notes: dto.notes,
+			legacyNote: LEGACY_PAYMENT_NOTES.patch,
+			createdBy: this.tenantContext.requireSellerId(),
 		})
 
-		if (delta > 0) {
-			this.logger.warn(
-				`[LEGACY_PAID_AMOUNT] PATCH /billings/${id} raised paid_amount by ${delta}; recorded as a ledger payment`,
-			)
-			await this.payments.record({
-				billingId: id,
-				amount: delta,
-				method: (rest.payment_method ?? billing.payment_method) as PaymentMethod,
-				paidAt: payment_date ? new Date(payment_date) : new Date(),
-				note: LEGACY_PAYMENT_NOTES.patch,
-				createdBy: this.tenantContext.requireSellerId(),
-			})
-		}
-
-		await this.afterMoneyChange(delta > 0)
+		await this.afterMoneyChange(sellerId, recorded !== null)
 		return this.requireBilling(id)
 	}
 
@@ -213,14 +167,14 @@ export class BillingsService {
 			payment_status: 'canceled',
 		})
 
-		await this.invalidateStats()
+		await this.invalidateStats(billing.seller_id)
 		return result
 	}
 
 	/** 404 for a missing/foreign charge; 409 HAS_PAYMENTS when it has ledger entries. */
 	async delete(id: number) {
-		await this.billingRepository.delete(id)
-		await this.invalidateStats()
+		const { sellerId } = await this.billingRepository.delete(id)
+		await this.invalidateStats(sellerId)
 	}
 
 	async listPayments(billingId: number) {
@@ -230,16 +184,13 @@ export class BillingsService {
 	}
 
 	async recordPayment(billingId: number, dto: RecordPaymentDto, idempotencyKey?: string) {
-		const paidAt = dto.paid_at ? new Date(dto.paid_at) : new Date()
-		if (paidAt.getTime() > Date.now() + PAID_AT_FUTURE_TOLERANCE_MS) {
-			throw new BadRequestException('A data do pagamento não pode estar no futuro.')
-		}
-
-		const { entry, replayed } = await this.payments.record({
+		// paid_at bounds (not in the future, not before 2000) are enforced by the
+		// repository, on every path that records money.
+		const { entry, sellerId, replayed } = await this.payments.record({
 			billingId,
 			amount: dto.amount,
 			method: dto.method,
-			paidAt,
+			paidAt: dto.paid_at ? new Date(dto.paid_at) : new Date(),
 			note: dto.note,
 			createdBy: this.tenantContext.requireSellerId(),
 			idempotency: idempotencyKey
@@ -250,7 +201,7 @@ export class BillingsService {
 					}
 				: undefined,
 		})
-		if (!replayed) await this.afterMoneyChange()
+		if (!replayed) await this.afterMoneyChange(sellerId)
 		return { payment: entry, billing: await this.requireBilling(billingId) }
 	}
 
@@ -260,7 +211,7 @@ export class BillingsService {
 		dto: ReversePaymentDto,
 		idempotencyKey?: string,
 	) {
-		const { entry, replayed } = await this.payments.reverse({
+		const { entry, sellerId, replayed } = await this.payments.reverse({
 			billingId,
 			paymentId,
 			reason: dto.reason,
@@ -273,7 +224,7 @@ export class BillingsService {
 					}
 				: undefined,
 		})
-		if (!replayed) await this.afterMoneyChange()
+		if (!replayed) await this.afterMoneyChange(sellerId)
 		return { reversal: entry, billing: await this.requireBilling(billingId) }
 	}
 
@@ -284,17 +235,15 @@ export class BillingsService {
 	}
 
 	/** Dashboard KPIs read paid amounts; a recorded entry also emitted an event. */
-	private async afterMoneyChange(ledgerWritten = true): Promise<void> {
-		await this.invalidateStats()
+	private async afterMoneyChange(sellerId: string, ledgerWritten = true): Promise<void> {
+		await this.invalidateStats(sellerId)
 		// Not awaited: kick() never throws, but a degraded Redis would delay the response.
 		if (ledgerWritten) void this.outboxRelay.kick()
 	}
 
-	private async invalidateStats(): Promise<void> {
-		const sellerId = this.tenantContext.getSellerId()
-		if (sellerId) {
-			await this.redis.delete(`dashboard:stats:${sellerId}`)
-		}
+	/** The charge OWNER's cache — not the caller's, which differs when an admin acts. */
+	private async invalidateStats(sellerId: string): Promise<void> {
+		await this.redis.delete(`dashboard:stats:${sellerId}`)
 	}
 }
 

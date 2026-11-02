@@ -6,7 +6,7 @@ import {
 	CATALOG_REPOSITORY,
 	type CatalogRepository,
 } from '../src/shared/repositories/catalog.repository'
-import { createE2EApp, seedTestSeller, TEST_SELLER } from './helpers/e2e'
+import { createE2EApp, deleteLedgerEntries, seedTestSeller, TEST_SELLER } from './helpers/e2e'
 
 /**
  * Phase 1A (e2e): server-side numbering, Idempotency-Key, the single order path for
@@ -87,6 +87,7 @@ describe('Orders — Phase 1A (e2e)', () => {
 		await prisma.notification.deleteMany({ where: { user_id: { in: SELLERS } } })
 		await prisma.idempotencyKey.deleteMany({ where: { seller_id: { in: SELLERS } } })
 		await prisma.sellerSequence.deleteMany({ where: { seller_id: { in: SELLERS } } })
+		await deleteLedgerEntries(prisma, { seller_id: { in: SELLERS } })
 		await prisma.order.deleteMany({ where: { seller_id: { in: SELLERS } } })
 		await prisma.store_stock.deleteMany({ where: { seller_id: { in: SELLERS } } })
 		await prisma.product.deleteMany({ where: { seller_id: { in: SELLERS } } })
@@ -367,7 +368,12 @@ describe('Orders — Phase 1A (e2e)', () => {
 					items: [{ product_id: product.id, quantity: 1, unit_price: 1500 }],
 				})
 				.expect(201)
-			await prisma.billing.updateMany({ where: { order_id: order.id }, data: { paid_amount: 500 } })
+			// Money only moves through the ledger (the database refuses direct writes).
+			const charge = await prisma.billing.findFirstOrThrow({ where: { order_id: order.id } })
+			await http()
+				.post(`/billings/${charge.id}/payments`)
+				.send({ amount: 500, method: 'pix' })
+				.expect(201)
 
 			const res = await http().delete(`/orders/${order.id}`).expect(409)
 
