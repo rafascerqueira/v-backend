@@ -111,6 +111,8 @@ model Account {
   promotions                Promotion[]
   backorders                Backorder[]
   domain_events             DomainEvent[]
+  seller_sequences          SellerSequence[]
+  billings                  Billing[]
   idempotency_keys          IdempotencyKey[]
   exceptions                AccountException[]         @relation("AccountExceptions")
   exceptions_created        AccountException[]         @relation("AccountExceptionsCreated")
@@ -291,6 +293,9 @@ model Order {
   total          Int           @default(0)
   notes          String?
   metadata       Json?         @db.JsonB()
+  // Storefront orders only: the unguessable handle in the public tracking link
+  // (order numbers are sequential per seller since Phase 1A, so not secret).
+  tracking_token String?       @unique(map: "uq_orders_tracking_token") @db.VarChar(32)
 
   createdAt  DateTime     @default(now()) @db.Timestamptz()
   updatedAt  DateTime     @updatedAt @db.Timestamptz()
@@ -299,6 +304,7 @@ model Order {
   Backorder  Backorder[]
 
   @@unique([seller_id, order_number])
+  @@index([customer_id], name: "idx_orders_customer")
   @@index([seller_id], name: "idx_orders_seller")
   @@index([seller_id, createdAt], name: "idx_orders_seller_date")
   @@map("orders")
@@ -315,8 +321,8 @@ model Order_item {
   discount   Int     @default(0)
   total      Int     @default(0)
 
-  createdAt DateTime @default(now()) @db.Timestamptz()
-  updatedAt DateTime @updatedAt @db.Timestamptz()
+  createdAt DateTime   @default(now()) @db.Timestamptz()
+  updatedAt DateTime   @updatedAt @db.Timestamptz()
   backorder Backorder?
 
   @@index([order_id], name: "idx_order_items_order_id")
@@ -336,7 +342,10 @@ model Billing {
   id             Int           @id @default(autoincrement())
   order_id       Int
   order          Order         @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  billing_number String        @unique @db.VarChar(50)
+  // Denormalised from the order: billing numbers are unique per seller, not globally.
+  seller_id      String
+  seller         Account       @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  billing_number String        @db.VarChar(50)
   status         BillingStatus @default(pending)
   total_amount   Int           @default(0)
   paid_amount    Int           @default(0)
@@ -349,6 +358,7 @@ model Billing {
   createdAt DateTime @default(now()) @db.Timestamptz()
   updatedAt DateTime @updatedAt @db.Timestamptz()
 
+  @@unique([seller_id, billing_number], map: "uq_billings_seller_number")
   @@index([order_id], name: "idx_billings_order_id")
   @@map("billings")
 }
@@ -682,4 +692,17 @@ model IdempotencyKey {
   @@id([seller_id, scope, key])
   @@index([created_at], name: "idx_idempotency_keys_created")
   @@map("idempotency_keys")
+}
+
+// Per-seller counters (Phase 1A). `order` numbers orders PED-000123 and their
+// per-sale charge COB-000123. Bumped with INSERT ... ON CONFLICT DO UPDATE inside
+// the order's transaction, so numbers are gap-free per seller under concurrency.
+model SellerSequence {
+  seller_id String
+  seller    Account @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  name      String  @db.VarChar(30)
+  value     Int     @default(0)
+
+  @@id([seller_id, name])
+  @@map("seller_sequences")
 }

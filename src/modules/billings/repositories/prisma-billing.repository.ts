@@ -115,9 +115,18 @@ export class PrismaBillingRepository implements BillingRepository {
 	}
 
 	async create(data: CreateBillingData): Promise<BillingRecord> {
+		// The charge belongs to its order's seller — derived here, never taken from the
+		// caller, so billing numbers (unique per seller) stay scoped to the right tenant.
+		const order = await this.prisma.order.findUnique({
+			where: { id: data.order_id },
+			select: { seller_id: true },
+		})
+		if (!order) throw new NotFoundException('Pedido não encontrado')
+
 		const row = await this.prisma.billing.create({
 			data: {
 				order_id: data.order_id,
+				seller_id: order.seller_id,
 				billing_number: data.billing_number,
 				total_amount: data.total_amount,
 				paid_amount: data.paid_amount,

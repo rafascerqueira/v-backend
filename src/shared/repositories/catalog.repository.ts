@@ -78,9 +78,6 @@ export interface CatalogOrderTracking {
 	}>
 }
 
-export type CatalogOrderStatus = 'pending' | 'confirmed' | 'shipping' | 'delivered' | 'canceled'
-export type CatalogPaymentStatus = 'pending' | 'confirmed' | 'canceled'
-
 export const CATALOG_REPOSITORY = Symbol('CATALOG_REPOSITORY')
 
 export interface CatalogRepository {
@@ -124,42 +121,13 @@ export interface CatalogRepository {
 	}): Promise<CatalogCustomer>
 
 	/**
-	 * Public tracking lookup: only storefront (`metadata.source = 'catalog'`)
-	 * orders of the given store. Dashboard order numbers are predictable, so they
-	 * are never exposed through the public tracking page.
+	 * Public tracking lookups: only storefront (`metadata.source = 'catalog'`) orders
+	 * of the given store. Storefront orders are created via OrdersService.place.
+	 */
+	findOrderByTrackingToken(sellerId: string, token: string): Promise<CatalogOrderTracking | null>
+	/**
+	 * Legacy links (pre-Phase 1A) carry the order number, which was random then.
+	 * The caller must never pass a sequential number (they are guessable).
 	 */
 	findOrderByNumber(sellerId: string, orderNumber: string): Promise<CatalogOrderTracking | null>
-
-	findLastOrderId(): Promise<number | null>
-	createOrderWithItems(data: {
-		seller_id: string
-		order_number: string
-		customer_id: string
-		status: CatalogOrderStatus
-		payment_status: CatalogPaymentStatus
-		subtotal: number
-		discount: number
-		total: number
-		notes: string
-		metadata: unknown
-		items: Array<{
-			product_id: number
-			quantity: number
-			unit_price: number
-			discount: number
-			total: number
-		}>
-	}): Promise<{
-		id: number
-		order_number: string
-		status: string
-		total: number
-		customer: { id: string; name: string; email: string; phone: string | null } | null
-		Order_item: Array<{
-			product: { id: number; name: string } | null
-			quantity: number
-			unit_price: number
-			total: number
-		}>
-	}>
 }
