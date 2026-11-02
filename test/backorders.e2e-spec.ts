@@ -20,6 +20,8 @@ describe('Backorders / oversell → restock (e2e)', () => {
 	afterEach(async () => {
 		await prisma.backorder.deleteMany()
 		await prisma.stock_movement.deleteMany()
+		// Ledger entries first: their FK refuses to drop charges that still have them.
+		await prisma.billingPayment.deleteMany()
 		await prisma.billing.deleteMany()
 		await prisma.order_item.deleteMany()
 		await prisma.order.deleteMany()

@@ -13,6 +13,8 @@ describe('Orders + Billings + StoreStock (e2e)', () => {
 	})
 
 	afterEach(async () => {
+		// Ledger entries first: their FK refuses to drop charges that still have them.
+		await prisma.billingPayment.deleteMany()
 		await prisma.billing.deleteMany()
 		await prisma.order_item.deleteMany()
 		await prisma.order.deleteMany()
@@ -33,6 +35,10 @@ describe('Orders + Billings + StoreStock (e2e)', () => {
 			city: 'Sao Paulo',
 			state: 'SP',
 			zip_code: '01234000',
+			// Monthly billing: no automatic per-sale charge, so the test can attach
+			// one by hand (one charge per order since Phase 1C).
+			billing_mode: 'monthly',
+			billing_day: 10,
 		}
 		const customerRes = await request(app.getHttpServer())
 			.post('/customers')

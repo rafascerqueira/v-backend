@@ -38,6 +38,8 @@ export async function cleanupTestDatabase() {
 	try {
 		// Deletar todos os dados em ordem respeitando as foreign keys
 		await prisma.order_item.deleteMany()
+		// Ledger entries first: their FK refuses to drop charges that still have them.
+		await prisma.billingPayment.deleteMany()
 		await prisma.billing.deleteMany()
 		await prisma.order.deleteMany()
 		await prisma.stock_movement.deleteMany()
