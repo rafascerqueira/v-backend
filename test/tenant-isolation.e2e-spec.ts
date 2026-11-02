@@ -50,6 +50,8 @@ describe('Tenant isolation (e2e)', () => {
 	})
 
 	afterEach(async () => {
+		await prisma.bundle_item.deleteMany()
+		await prisma.bundle.deleteMany()
 		await prisma.supplier_debt.deleteMany()
 		await prisma.supplier.deleteMany()
 		await prisma.store_stock.deleteMany()
@@ -145,6 +147,79 @@ describe('Tenant isolation (e2e)', () => {
 			// No order leaked into the attacker's tenant either.
 			const orders = await prisma.order.count({ where: { seller_id: TEST_SELLER.id } })
 			expect(orders).toBe(0)
+		})
+	})
+
+	describe('P0-6a — bundle items must be the seller’s own products', () => {
+		it("returns 404 on create with another seller's product and writes no bundle", async () => {
+			const own = await prisma.product.create({
+				data: { seller_id: TEST_SELLER.id, name: 'Produto A' },
+			})
+			const foreign = await prisma.product.create({
+				data: { seller_id: OTHER_SELLER.id, name: 'Produto secreto B' },
+			})
+
+			const res = await request(app.getHttpServer())
+				.post('/bundles')
+				.send({
+					name: 'Kit invasor',
+					items: [
+						{ product_id: own.id, quantity: 1 },
+						{ product_id: foreign.id, quantity: 1 },
+					],
+				})
+				.expect(404)
+
+			expect(JSON.stringify(res.body)).not.toContain('Produto secreto B')
+			expect(await prisma.bundle.count()).toBe(0)
+		})
+
+		it("returns 404 on update that swaps in another seller's product and keeps the items", async () => {
+			const own = await prisma.product.create({
+				data: { seller_id: TEST_SELLER.id, name: 'Produto A' },
+			})
+			const foreign = await prisma.product.create({
+				data: { seller_id: OTHER_SELLER.id, name: 'Produto secreto B' },
+			})
+			const created = await request(app.getHttpServer())
+				.post('/bundles')
+				.send({ name: 'Kit', items: [{ product_id: own.id, quantity: 1 }] })
+				.expect(201)
+
+			await request(app.getHttpServer())
+				.patch(`/bundles/${created.body.id}`)
+				.send({ items: [{ product_id: foreign.id, quantity: 1 }] })
+				.expect(404)
+
+			const items = await prisma.bundle_item.findMany({ where: { bundle_id: created.body.id } })
+			expect(items.map((i) => i.product_id)).toEqual([own.id])
+		})
+
+		it('never serializes a foreign product already stored in a bundle', async () => {
+			const own = await prisma.product.create({
+				data: { seller_id: TEST_SELLER.id, name: 'Produto A' },
+			})
+			const foreign = await prisma.product.create({
+				data: { seller_id: OTHER_SELLER.id, name: 'Produto secreto B' },
+			})
+			// Simulates a row written before the ownership check existed.
+			const bundle = await prisma.bundle.create({
+				data: {
+					seller_id: TEST_SELLER.id,
+					name: 'Kit legado',
+					items: {
+						create: [
+							{ product_id: own.id, quantity: 1 },
+							{ product_id: foreign.id, quantity: 1 },
+						],
+					},
+				},
+			})
+
+			const res = await request(app.getHttpServer()).get(`/bundles/${bundle.id}`).expect(200)
+
+			expect(res.body.items.map((i: { product_id: number }) => i.product_id)).toEqual([own.id])
+			expect(JSON.stringify(res.body)).not.toContain('Produto secreto B')
 		})
 	})
 
