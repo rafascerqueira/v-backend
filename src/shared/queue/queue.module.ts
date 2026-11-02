@@ -54,6 +54,6 @@ import { QueueProducer } from './queue.producer'
 		ExcelProcessor,
 		DeadLetterProcessor,
 	],
-	exports: [QueueProducer],
+	exports: [QueueProducer, DlqService],
 })
 export class QueueModule {}

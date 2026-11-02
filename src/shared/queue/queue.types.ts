@@ -34,6 +34,8 @@ export interface NotificationJobData {
 	data?: Record<string, unknown>
 	sendEmail?: boolean
 	emailSubject?: string
+	/** See CreateNotificationOptions.dedupeKey. */
+	dedupeKey?: string
 }
 
 // ─── PDF ──────────────────────────────────────────────────────────────────────
