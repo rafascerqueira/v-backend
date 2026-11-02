@@ -1,5 +1,8 @@
+import { ConfigService } from '@nestjs/config'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
+import type { TestingModule } from '@nestjs/testing'
 import request from 'supertest'
+import { StripeService } from '../src/modules/subscriptions/services/stripe.service'
 import type { PrismaService } from '../src/shared/prisma/prisma.service'
 import { createE2EApp, seedTestSeller, TEST_SELLER } from './helpers/e2e'
 
@@ -11,6 +14,7 @@ import { createE2EApp, seedTestSeller, TEST_SELLER } from './helpers/e2e'
 describe('Subscriptions (e2e)', () => {
 	let app: NestFastifyApplication
 	let prisma: PrismaService
+	let module: TestingModule
 
 	const pastDueRow = (providerId: string) => ({
 		account_id: TEST_SELLER.id,
@@ -24,7 +28,7 @@ describe('Subscriptions (e2e)', () => {
 	})
 
 	beforeEach(async () => {
-		;({ app, prisma } = await createE2EApp({ planType: 'pro' }))
+		;({ app, prisma, module } = await createE2EApp({ planType: 'pro' }))
 		await seedTestSeller(prisma)
 		await prisma.subscription.deleteMany({ where: { account_id: TEST_SELLER.id } })
 		await prisma.account.update({ where: { id: TEST_SELLER.id }, data: { plan_type: 'pro' } })
@@ -62,6 +66,17 @@ describe('Subscriptions (e2e)', () => {
 	})
 
 	it('POST /subscriptions/checkout returns 409 when the account already has a subscription', async () => {
+		// CI has no Stripe credentials, and without them checkout stops at the 400 guard.
+		// The local row answers before any Stripe call, so a configured client and a
+		// placeholder price are enough; the test no longer depends on the developer's .env.
+		jest.spyOn(module.get(StripeService), 'isConfigured').mockReturnValue(true)
+		const config = module.get(ConfigService)
+		const realGet = config.get.bind(config)
+		jest
+			.spyOn(config, 'get')
+			.mockImplementation(((key: string) =>
+				key === 'stripe.priceIds.pro' ? 'price_e2e_pro' : realGet(key)) as never)
+
 		await prisma.subscription.create({ data: pastDueRow('sub_e2e_blocking') })
 
 		const res = await request(app.getHttpServer())
