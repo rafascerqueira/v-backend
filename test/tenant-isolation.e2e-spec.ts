@@ -223,6 +223,69 @@ describe('Tenant isolation (e2e)', () => {
 		})
 	})
 
+	describe('P0-6b — public order tracking scoped to the store slug', () => {
+		const createOrder = async (sellerId: string, orderNumber: string, source?: string) => {
+			const customer = await prisma.customer.create({
+				data: {
+					seller_id: sellerId,
+					name: 'Cliente',
+					phone: `119${Math.floor(Math.random() * 1e8)}`,
+					city: 'São Paulo',
+					state: 'SP',
+				},
+			})
+			return prisma.order.create({
+				data: {
+					seller_id: sellerId,
+					order_number: orderNumber,
+					customer_id: customer.id,
+					subtotal: 4990,
+					total: 4990,
+					...(source ? { metadata: { source } } : {}),
+				},
+			})
+		}
+
+		it("tracks a storefront order only under its own store's slug", async () => {
+			await createOrder(OTHER_SELLER.id, 'PED-OTHERSHOP1', 'catalog')
+
+			await request(app.getHttpServer())
+				.get(`/catalog/loja/${TEST_SELLER_SLUG}/orders/PED-OTHERSHOP1/track`)
+				.expect(404)
+
+			const res = await request(app.getHttpServer())
+				.get(`/catalog/loja/${OTHER_SELLER.store_slug}/orders/PED-OTHERSHOP1/track`)
+				.expect(200)
+			expect(res.body.order_number).toBe('PED-OTHERSHOP1')
+			expect(res.body.total).toBe(4990)
+		})
+
+		it('returns 404 for an unknown store slug', async () => {
+			await createOrder(OTHER_SELLER.id, 'PED-OTHERSHOP2', 'catalog')
+
+			await request(app.getHttpServer())
+				.get('/catalog/loja/does-not-exist/orders/PED-OTHERSHOP2/track')
+				.expect(404)
+		})
+
+		it('never exposes dashboard orders (predictable numbers) through public tracking', async () => {
+			await createOrder(OTHER_SELLER.id, 'PED-202611-0001')
+
+			await request(app.getHttpServer())
+				.get(`/catalog/loja/${OTHER_SELLER.store_slug}/orders/PED-202611-0001/track`)
+				.expect(404)
+		})
+
+		it('retires the unscoped tracking route with 410 and leaks nothing', async () => {
+			await createOrder(OTHER_SELLER.id, 'PED-OTHERSHOP3', 'catalog')
+
+			const res = await request(app.getHttpServer())
+				.get('/catalog/orders/PED-OTHERSHOP3/track')
+				.expect(410)
+			expect(JSON.stringify(res.body)).not.toContain('4990')
+		})
+	})
+
 	describe('H4 — public checkout scoped to the store slug', () => {
 		it('returns 400 when ordering a product that belongs to a different store', async () => {
 			const foreignProduct = await prisma.product.create({

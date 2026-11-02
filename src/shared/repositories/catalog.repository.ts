@@ -123,7 +123,12 @@ export interface CatalogRepository {
 		zip_code: string | null
 	}): Promise<CatalogCustomer>
 
-	findOrderByNumber(orderNumber: string): Promise<CatalogOrderTracking | null>
+	/**
+	 * Public tracking lookup: only storefront (`metadata.source = 'catalog'`)
+	 * orders of the given store. Dashboard order numbers are predictable, so they
+	 * are never exposed through the public tracking page.
+	 */
+	findOrderByNumber(sellerId: string, orderNumber: string): Promise<CatalogOrderTracking | null>
 
 	findLastOrderId(): Promise<number | null>
 	createOrderWithItems(data: {
