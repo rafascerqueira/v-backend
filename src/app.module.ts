@@ -30,6 +30,7 @@ import { AuditInterceptor } from './shared/audit/audit.interceptor'
 import { AuditModule } from './shared/audit/audit.module'
 import { CryptoModule } from './shared/crypto/crypto.module'
 import { EmailModule } from './shared/email/email.module'
+import { EventsModule } from './shared/events/events.module'
 import { ExportModule } from './shared/export/export.module'
 import { PrismaModule } from './shared/prisma/prisma.module'
 import { QueueModule } from './shared/queue/queue.module'
@@ -49,6 +50,7 @@ import { WebSocketModule } from './shared/websocket/websocket.module'
 		CryptoModule,
 		EmailModule,
 		QueueModule,
+		EventsModule,
 		AuthModule,
 		UsersModule,
 		ProductsModule,

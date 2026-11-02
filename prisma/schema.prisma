@@ -110,6 +110,8 @@ model Account {
   suppliers                 Supplier[]
   promotions                Promotion[]
   backorders                Backorder[]
+  domain_events             DomainEvent[]
+  idempotency_keys          IdempotencyKey[]
   exceptions                AccountException[]         @relation("AccountExceptions")
   exceptions_created        AccountException[]         @relation("AccountExceptionsCreated")
 
@@ -627,9 +629,57 @@ model Notification {
   read       Boolean   @default(false)
   read_at    DateTime? @db.Timestamptz()
   email_sent Boolean   @default(false)
+  // Set by domain-event consumers (`<eventId>:<handler>[:<n>]`) so a redelivered
+  // effect job can't notify twice. NULL for ad-hoc notifications (UNIQUE allows many).
+  dedupe_key String?   @unique(map: "uq_notifications_dedupe_key") @db.VarChar(150)
   createdAt  DateTime  @default(now()) @db.Timestamptz()
 
   @@index([user_id, read], name: "idx_notifications_user_read")
   @@index([user_id, createdAt], name: "idx_notifications_user_date")
   @@map("notifications")
+}
+
+// Transactional outbox / event log (Phase 1B). Repositories append rows inside the
+// same $transaction as the business write, so an event exists iff the write
+// committed. The outbox relay publishes unpublished rows to BullMQ (at-least-once);
+// consumers dedupe. Rows are history and are kept (no deletion, D7).
+// Payloads carry ids/numbers/amounts only — no customer PII.
+model DomainEvent {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seller_id      String?
+  seller         Account?  @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  aggregate_type String    @db.VarChar(50)
+  aggregate_id   String    @db.VarChar(64)
+  event_type     String    @db.VarChar(100)
+  payload        Json      @db.JsonB()
+  occurred_at    DateTime  @default(now()) @db.Timestamptz()
+  published_at   DateTime? @db.Timestamptz()
+  attempts       Int       @default(0)
+  last_error     String?   @db.Text
+
+  // The relay scans `published_at IS NULL ORDER BY occurred_at`. A partial index
+  // would be smaller, but Prisma can't express one and a hand-written one shows up
+  // as drift in every later `migrate dev`.
+  @@index([published_at, occurred_at], name: "idx_domain_events_unpublished")
+  @@index([aggregate_type, aggregate_id, occurred_at], name: "idx_domain_events_aggregate")
+  @@index([seller_id], name: "idx_domain_events_seller")
+  @@map("domain_events")
+}
+
+// Idempotency-Key ledger for retried POSTs (used from Phase 1A). Written in the
+// same transaction as the resource; a daily job deletes rows older than 7 days.
+model IdempotencyKey {
+  seller_id     String
+  seller        Account  @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  scope         String   @db.VarChar(50)
+  key           String   @db.VarChar(64)
+  request_hash  String   @db.VarChar(64)
+  resource_type String   @db.VarChar(50)
+  resource_id   String   @db.VarChar(64)
+  status_code   Int      @db.SmallInt
+  created_at    DateTime @default(now()) @db.Timestamptz()
+
+  @@id([seller_id, scope, key])
+  @@index([created_at], name: "idx_idempotency_keys_created")
+  @@map("idempotency_keys")
 }
