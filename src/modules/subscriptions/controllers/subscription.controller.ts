@@ -1,6 +1,7 @@
 import {
 	BadRequestException,
 	Body,
+	ConflictException,
 	Controller,
 	Get,
 	InternalServerErrorException,
@@ -9,7 +10,9 @@ import {
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { PLAN_LIMITS, PLAN_NAMES, PLAN_PRICES } from '../constants/plan-limits'
+import { type CheckoutDto, checkoutSchema } from '../dto/checkout.dto'
 import { type LimitCheckResult, PlanLimitsService } from '../services/plan-limits.service'
 import { StripeService } from '../services/stripe.service'
 import { SubscriptionService } from '../services/subscription.service'
@@ -110,8 +113,19 @@ export class SubscriptionController {
 	@Post('checkout')
 	@ApiOperation({ summary: 'Create a Stripe Checkout session for plan upgrade' })
 	@ApiResponse({ status: 201, description: 'Checkout URL returned' })
-	async createCheckout(@Req() req: any, @Body() body: { planId: string }) {
+	async createCheckout(
+		@Req() req: any,
+		@Body(new ZodValidationPipe(checkoutSchema)) body: CheckoutDto,
+	) {
 		const accountId = req.user.sub
+
+		// One paid subscription per account: switching tier, reactivating or fixing the
+		// card goes through the Billing Portal, never a second checkout.
+		if (await this.service.hasBlockingSubscription(accountId)) {
+			throw new ConflictException(
+				'Você já tem uma assinatura. Use "Gerenciar assinatura" para trocar de plano ou atualizar o pagamento.',
+			)
+		}
 
 		const priceId = this.configService.get<string>(`stripe.priceIds.${body.planId}`)
 		if (!priceId) {

@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { SettingsService } from '@/modules/admin/services/settings.service'
 import {
+	type StripeSubscriptionUpsert,
 	SUBSCRIPTION_REPOSITORY,
 	type SubscriptionRepository,
 } from '@/shared/repositories/subscription.repository'
-import { PLAN_LIMITS, type PlanType } from '../constants/plan-limits'
+import { isPayingStatus, PLAN_LIMITS, type PlanType } from '../constants/plan-limits'
 import { PlanLimitsService } from './plan-limits.service'
 
 @Injectable()
@@ -84,7 +85,9 @@ export class SubscriptionService {
 	async getSubscriptionInfo(accountId: string) {
 		const [plan, subscription, usage, unlimitedWindow] = await Promise.all([
 			this.getAccountPlan(accountId),
-			this.getActiveSubscription(accountId),
+			// Manageable, not active-only: the UI must see a past_due subscription to warn
+			// the seller that the renewal failed (the dunning banner/bell notice).
+			this.getManageableSubscription(accountId),
 			this.getCurrentUsage(accountId),
 			this.settingsService.getUnlimitedPeriodWindow(),
 		])
@@ -151,36 +154,28 @@ export class SubscriptionService {
 		await this.subscriptionRepository.updateAccountPlan(accountId, newPlan)
 	}
 
-	async createSubscription(data: {
-		accountId: string
-		planType: PlanType
-		paymentProvider: string
-		providerSubscriptionId: string
-		providerCustomerId: string
-		periodStart: Date
-		periodEnd: Date
-		trialEnd?: Date
-		// Explicit lifecycle status from the provider; falls back to trial-vs-active
-		// inference when the caller doesn't know it.
-		status?: string
-	}) {
-		const subscription = await this.subscriptionRepository.createSubscription({
-			account_id: data.accountId,
-			plan_type: data.planType,
-			status: data.status ?? (data.trialEnd ? 'trialing' : 'active'),
-			payment_provider: data.paymentProvider,
-			provider_subscription_id: data.providerSubscriptionId,
-			provider_customer_id: data.providerCustomerId,
-			current_period_start: data.periodStart,
-			current_period_end: data.periodEnd,
-			trial_start: data.trialEnd ? new Date() : null,
-			trial_end: data.trialEnd ?? null,
-		})
+	/**
+	 * Persists a Stripe subscription's state (create-or-update on the unique provider id).
+	 * Deliberately does NOT touch the account plan: the caller grants it only for a paying
+	 * status (see isPayingStatus), so a row recorded as past_due/canceled never upgrades.
+	 */
+	async syncStripeSubscription(data: StripeSubscriptionUpsert) {
+		return this.subscriptionRepository.upsertSubscriptionFromStripe(data)
+	}
 
-		// Update account plan
-		await this.updatePlan(data.accountId, data.planType)
-
-		return subscription
+	/**
+	 * Whether the account must be refused a new checkout (409): it already has a
+	 * manageable subscription AND is actually paying or on a paid plan. A free account
+	 * whose only row is a never-paid attempt (incomplete → stored as past_due) may retry
+	 * checkout; otherwise it would be stuck, with no "manage" action available to it.
+	 */
+	async hasBlockingSubscription(accountId: string): Promise<boolean> {
+		const [plan, subscription] = await Promise.all([
+			this.getAccountPlan(accountId),
+			this.getManageableSubscription(accountId),
+		])
+		if (!subscription) return false
+		return isPayingStatus(subscription.status) || plan !== 'free'
 	}
 
 	async handleSubscriptionEnded(accountId: string) {

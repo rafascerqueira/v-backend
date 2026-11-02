@@ -2,7 +2,9 @@
 
 ## Current Status
 
-The billing module has structural bugs and missing features that prevent it from being usable. This document tracks everything that needs to be fixed or built.
+_Last reconciled against the code: 2026-10-31._
+
+Structural bugs (BIL-01..04) are fixed. Remaining work is periodic billing creation (BIL-05), the order-page billing badge (BIL-06, frontend only), billing summary/filters (BIL-07, BIL-08) and overdue notifications (BIL-09).
 
 ---
 
@@ -12,15 +14,15 @@ The billing module has structural bugs and missing features that prevent it from
 |---|-----|--------|
 | 1 | `BillingsModule` never imported `TenantModule` → all billing queries fail silently (empty array always returned) | ✅ Fixed |
 | 2 | `findUnbilledPerSaleOrders` used billing-shaped tenant filter `{ order: { seller_id } }` on `Order` model → Prisma threw, swallowed by `.catch(() => null)` | ✅ Fixed |
-| 3 | `due_date DateTime @default(now())` → every billing is born already due; overdue detection `due_date < new Date()` fires immediately for everything | ❌ Open |
-| 4 | `updateStatus('delivered')` auto-sets billing to `paid` → billing is closed before the seller can charge the customer | ❌ Open |
+| 3 | `due_date DateTime @default(now())` → every billing is born already due; overdue detection `due_date < new Date()` fires immediately for everything | ✅ Fixed (`due_date DateTime?`) |
+| 4 | `updateStatus('delivered')` auto-sets billing to `paid` → billing is closed before the seller can charge the customer | ✅ Fixed (only `canceled` propagates to billing) |
 | 5 | Billing creation for periodic modes (weekly/biweekly/monthly) is not implemented; sync only handles `per_sale` | ❌ Open |
 
 ---
 
 ## Backlog
 
-### BIL-01 — Fix `due_date` schema default `[CRITICAL]`
+### BIL-01 — Fix `due_date` schema default `[CRITICAL]` — ✅ Done
 
 **Problem**: `Billing.due_date DateTime @default(now())` means every billing created without an explicit due date is already overdue the instant it's saved.
 
@@ -33,7 +35,9 @@ The billing module has structural bugs and missing features that prevent it from
 
 ---
 
-### BIL-02 — Auto-calculate `due_date` based on `billing_mode` `[CRITICAL]`
+### BIL-02 — Auto-calculate `due_date` based on `billing_mode` `[CRITICAL]` — ✅ Done
+
+> Implemented as `computeDueDate` in `src/shared/billing/billing-scheduler.ts` (with spec), used by `OrdersService` and `BillingsService`.
 
 When a billing is created (sync or automatic), compute `due_date` from the customer's `billing_mode` and `billing_day`:
 
@@ -49,7 +53,7 @@ When a billing is created (sync or automatic), compute `due_date` from the custo
 
 ---
 
-### BIL-03 — Remove automatic paid status on order delivery `[CRITICAL]`
+### BIL-03 — Remove automatic paid status on order delivery `[CRITICAL]` — ✅ Done
 
 **Problem**: In `orders.service.ts → updateStatus()`, when order status becomes `delivered`, the billing is auto-updated to `{ status: 'paid', payment_status: 'confirmed', paid_amount: order.total }`. This assumes cash-on-delivery and prevents the seller from managing the billing.
 
@@ -59,7 +63,9 @@ When a billing is created (sync or automatic), compute `due_date` from the custo
 
 ---
 
-### BIL-04 — Reliable per-sale billing creation on order save `[HIGH]`
+### BIL-04 — Reliable per-sale billing creation on order save `[HIGH]` — ✅ Done
+
+> `OrdersService.buildBillingData()` returns the billing payload and the repository persists it together with the order.
 
 **Current**: `OrdersService.create()` calls `createBillingIfPerSale()` which goes through `BillingsService.create()` → `verifyOrderAccess()`. This is fragile and duplicates access-control logic.
 
@@ -78,7 +84,9 @@ The `createForOrder` method on the repository should:
 
 ---
 
-### BIL-05 — Periodic billing: scheduled creation for weekly/biweekly/monthly `[HIGH]`
+### BIL-05 — Periodic billing: scheduled creation for weekly/biweekly/monthly `[HIGH]` — ❌ Open
+
+> Still open: `findUnbilledPerSaleOrders` filters `billing_mode: 'per_sale'` and no cron exists. Note that the comment on `OrdersService.buildBillingData()` says periodic modes are "handled by the scheduled sync". That sync does not exist yet, so fix the comment or implement the job.
 
 **Current**: Only `per_sale` orders are synced. Customers with `weekly`, `biweekly`, or `monthly` mode never get billings.
 
@@ -94,7 +102,9 @@ The `createForOrder` method on the repository should:
 
 ---
 
-### BIL-06 — Order page: billing status & next charge date `[MEDIUM]`
+### BIL-06 — Order page: billing status & next charge date `[MEDIUM]` — 🟡 Partial
+
+> Backend done: `PrismaOrderRepository.findById` includes `Billing`. Frontend badge, next-charge date and link are still missing.
 
 On the order detail/list page, for each order show:
 

@@ -30,6 +30,21 @@ export interface AccountEmailName {
 	name: string
 }
 
+export interface StripeSubscriptionUpsert {
+	account_id: string
+	plan_type: string
+	status: string
+	provider_subscription_id: string
+	provider_customer_id: string | null
+	/** null = Stripe didn't send it: keep the stored value (a fallback is used only on create). */
+	current_period_start: Date | null
+	current_period_end: Date | null
+	cancel_at_period_end: boolean
+	/** undefined = leave untouched; null = clear. */
+	trial_start?: Date | null
+	trial_end?: Date | null
+}
+
 export const SUBSCRIPTION_REPOSITORY = Symbol('SUBSCRIPTION_REPOSITORY')
 
 export interface SubscriptionRepository {
@@ -40,18 +55,6 @@ export interface SubscriptionRepository {
 	// Latest subscription a seller can still manage in the billing portal: active,
 	// trialing, past_due or paused (past_due included so dunning sellers can fix a card).
 	findManageableSubscription(accountId: string): Promise<SubscriptionRecord | null>
-	createSubscription(data: {
-		account_id: string
-		plan_type: string
-		status: string
-		payment_provider: string
-		provider_subscription_id: string
-		provider_customer_id: string
-		current_period_start: Date
-		current_period_end: Date
-		trial_start: Date | null
-		trial_end: Date | null
-	}): Promise<SubscriptionRecord>
 
 	findUsageRecord(accountId: string, periodStart: Date): Promise<UsageRecord | null>
 	createUsageRecord(data: {
@@ -86,18 +89,10 @@ export interface SubscriptionRepository {
 		data: Record<string, unknown>,
 	): Promise<void>
 
-	// Reconciliation: create-or-update a subscription row keyed by the Stripe
-	// subscription id (not @unique, so this is a find-then-write, not a Prisma upsert).
-	upsertSubscriptionFromStripe(data: {
-		account_id: string
-		plan_type: string
-		status: string
-		provider_subscription_id: string
-		provider_customer_id: string | null
-		current_period_start: Date
-		current_period_end: Date
-		cancel_at_period_end: boolean
-	}): Promise<'created' | 'updated'>
+	// The single write path for Stripe subscription state (webhook + reconcile):
+	// create-or-update keyed by the unique provider_subscription_id. Race-safe: a
+	// concurrent create that loses on the unique index is applied as an update.
+	upsertSubscriptionFromStripe(data: StripeSubscriptionUpsert): Promise<'created' | 'updated'>
 
 	// Reconciliation: account ids currently sitting on a paid plan, used to detect
 	// accounts that should be downgraded because Stripe no longer has them active.

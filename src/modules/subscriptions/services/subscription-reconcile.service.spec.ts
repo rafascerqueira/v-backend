@@ -88,7 +88,31 @@ describe('SubscriptionReconcileService', () => {
 			subscriptionsUpdated: 1,
 			accountsKeptPaid: 2,
 			accountsDowngraded: 1,
+			failures: 0,
 		})
+	})
+
+	it('keeps going when one subscription fails, and never downgrades a paying account whose write failed', async () => {
+		stripeServiceMock.isConfigured.mockReturnValue(true)
+		stripeServiceMock.listManagedSubscriptions.mockResolvedValue([
+			managedSub({ accountId: 'acc-broken', subscriptionId: 'sub_b', status: 'active' }),
+			managedSub({ accountId: 'acc-ok', subscriptionId: 'sub_ok', status: 'active' }),
+		])
+		repoMock.upsertSubscriptionFromStripe
+			.mockRejectedValueOnce(new Error('invalid input value for enum "PlanType"'))
+			.mockResolvedValueOnce('updated')
+		repoMock.findPaidAccountIds.mockResolvedValue(['acc-broken', 'acc-ok'])
+
+		const result = await service.reconcile()
+
+		// The second subscription is still processed after the first one threw.
+		expect(repoMock.upsertSubscriptionFromStripe).toHaveBeenCalledTimes(2)
+		expect(repoMock.updateAccountPlan).toHaveBeenCalledWith('acc-ok', 'pro')
+		// Stripe says acc-broken is paying: a failed local write must not downgrade it.
+		expect(repoMock.updateAccountPlan).not.toHaveBeenCalledWith('acc-broken', 'free')
+		expect(result.failures).toBe(1)
+		expect(result.accountsDowngraded).toBe(0)
+		expect(result.accountsKeptPaid).toBe(2)
 	})
 
 	it('downgrades all locally-paid accounts when Stripe reports none active', async () => {

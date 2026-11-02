@@ -174,7 +174,6 @@ expect(Number.isInteger(response.body.total_amount)).toBe(true)
 ## References
 
 - `test/helpers/e2e.ts` — `createE2EApp`, `seedTestSeller`, `TEST_SELLER`
-- `test/helpers/e2e-test.module.ts` — test module wiring
 - `test/test-setup.ts` — env var defaults (ports, JWT keys dir)
 - `test/global-setup.ts` — compose vs CI branch, `prisma migrate deploy`
 - `test/billings.e2e-spec.ts` — canonical tenant-isolation pattern + cents assertions
