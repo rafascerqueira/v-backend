@@ -1,9 +1,11 @@
+import { NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
-import { QueueProducer } from '@/shared/queue/queue.producer'
+import { OutboxRelayService } from '@/shared/events/outbox-relay.service'
+import { hashRequest } from '@/shared/idempotency/request-hash'
 import { ORDER_REPOSITORY } from '@/shared/repositories/order.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import { CustomersService } from '../../customers/services/customers.service'
-import { OrdersService } from './orders.service'
+import { ORDER_IDEMPOTENCY_SCOPES, OrdersService } from './orders.service'
 
 const repositoryMock = {
 	create: jest.fn(),
@@ -12,11 +14,10 @@ const repositoryMock = {
 	findAll: jest.fn(),
 	updateStatus: jest.fn(),
 	delete: jest.fn(),
+	findEvents: jest.fn(),
 }
 
-const queueProducerMock = {
-	createNotification: jest.fn(),
-}
+const outboxRelayMock = { kick: jest.fn(), relayPending: jest.fn() }
 
 const tenantContextMock = {
 	getSellerId: jest.fn().mockReturnValue('test-seller-id'),
@@ -25,8 +26,10 @@ const tenantContextMock = {
 }
 
 const customersServiceMock = {
-	findOne: jest.fn().mockResolvedValue({ billing_mode: 'monthly', billing_day: 5 }),
+	findOne: jest.fn(),
 }
+
+const monthlyCustomer = { billing_mode: 'monthly', billing_day: 5 }
 
 describe('OrdersService', () => {
 	let service: OrdersService
@@ -38,127 +41,152 @@ describe('OrdersService', () => {
 				{ provide: ORDER_REPOSITORY, useValue: repositoryMock },
 				{ provide: TenantContext, useValue: tenantContextMock },
 				{ provide: CustomersService, useValue: customersServiceMock },
-				{ provide: QueueProducer, useValue: queueProducerMock },
+				{ provide: OutboxRelayService, useValue: outboxRelayMock },
 			],
 		}).compile()
 
 		service = module.get(OrdersService)
 		jest.clearAllMocks()
+		customersServiceMock.findOne.mockResolvedValue(monthlyCustomer)
+		repositoryMock.create.mockResolvedValue({ orderId: 1, replayed: false })
+		repositoryMock.findById.mockImplementation(async (id: number) => ({
+			id,
+			order_number: 'PED-000001',
+		}))
 	})
 
-	it('create should compute totals and delegate to repository', async () => {
+	describe('create (dashboard)', () => {
 		const dto = {
 			customer_id: 'cuid123',
-			order_number: 'ORD-1',
 			items: [
 				{ product_id: 1, quantity: 2, unit_price: 1000, discount: 0 },
 				{ product_id: 2, quantity: 1, unit_price: 500, discount: 100 },
 			],
 		}
-		repositoryMock.create.mockResolvedValueOnce({ order: { id: 1 }, oversold: [] })
-		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: 'monthly', billing_day: 5 })
 
-		const res = await service.create(dto as any)
+		it('computes totals, writes through the repository and returns the stored order', async () => {
+			const res = await service.create(dto as any)
 
-		expect(repositoryMock.create).toHaveBeenCalled()
-		const call = repositoryMock.create.mock.calls[0][0]
-		expect(call.subtotal).toBe(2500)
-		expect(call.discount).toBe(100)
-		expect(call.total).toBe(2400)
-		expect(call.items).toHaveLength(2)
-		expect(call.seller_id).toBe('test-seller-id')
-		expect(res).toEqual({ id: 1 })
-		// monthly customer — no per_sale charge attached (periodic mode handled by sync)
-		expect(call.billing).toBeUndefined()
-	})
-
-	it('create should attach a per_sale charge to the order payload', async () => {
-		const dto = {
-			customer_id: 'cuid-ps',
-			order_number: 'ORD-100',
-			items: [{ product_id: 1, quantity: 1, unit_price: 5000, discount: 0 }],
-		}
-		repositoryMock.create.mockResolvedValueOnce({ order: { id: 10 }, oversold: [] })
-		customersServiceMock.findOne.mockResolvedValueOnce({
-			billing_mode: 'per_sale',
-			billing_day: null,
+			const call = repositoryMock.create.mock.calls[0][0]
+			expect(call).toMatchObject({
+				seller_id: 'test-seller-id',
+				customer_id: 'cuid123',
+				subtotal: 2500,
+				discount: 100,
+				total: 2400,
+				source: 'dashboard',
+				allowOversell: true,
+			})
+			expect(call.items).toHaveLength(2)
+			// monthly customer — no per_sale charge attached (periodic mode handled by sync)
+			expect(call.billing).toBeUndefined()
+			expect(call.idempotency).toBeUndefined()
+			expect(repositoryMock.findById).toHaveBeenCalledWith(1)
+			expect(res).toEqual({ id: 1, order_number: 'PED-000001' })
 		})
 
-		await service.create(dto as any)
+		it('ignores a client-sent order_number: the server numbers the order', async () => {
+			await service.create({ ...dto, order_number: 'PED-CLIENT-1' } as any)
 
-		// The charge now rides along in the SAME create() call so the repository can
-		// persist it atomically — it is no longer a separate, swallow-on-error call.
-		const call = repositoryMock.create.mock.calls[0][0]
-		expect(call.billing).toEqual(
-			expect.objectContaining({
-				billing_number: 'COB-100',
-				total_amount: 5000,
-				paid_amount: 0,
-				payment_method: 'cash',
-				payment_status: 'pending',
-				status: 'pending',
-			}),
-		)
-		// per_sale: the sale date is the due date — never a null that renders as 01/01/1970
-		expect(call.billing.due_date).toBeInstanceOf(Date)
-	})
-
-	it('clamps a line discount that exceeds the line value so totals never go negative', async () => {
-		const dto = {
-			customer_id: 'cuid-clamp',
-			order_number: 'ORD-CLAMP',
-			items: [{ product_id: 1, quantity: 2, unit_price: 1000, discount: 5000 }],
-		}
-		repositoryMock.create.mockResolvedValueOnce({ order: { id: 99 }, oversold: [] })
-		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: 'monthly', billing_day: 5 })
-
-		await service.create(dto as any)
-
-		const call = repositoryMock.create.mock.calls[0][0]
-		// line value = 1000 * 2 = 2000; discount clamped from 5000 down to 2000
-		expect(call.subtotal).toBe(2000)
-		expect(call.discount).toBe(2000)
-		expect(call.total).toBe(0)
-		expect(call.items[0].discount).toBe(2000)
-		expect(call.items[0].total).toBe(0)
-	})
-
-	it('notifies the seller for each item sold past its stock (allow_oversell)', async () => {
-		const dto = {
-			customer_id: 'cuid123',
-			order_number: 'ORD-7',
-			items: [{ product_id: 9, quantity: 5, unit_price: 1000, discount: 0 }],
-		}
-		repositoryMock.create.mockResolvedValueOnce({
-			order: { id: 7 },
-			oversold: [{ product_id: 9, product_name: 'Camiseta', available: 1, requested: 5 }],
+			const call = repositoryMock.create.mock.calls[0][0]
+			expect(call).not.toHaveProperty('order_number')
+			expect(JSON.stringify(call)).not.toContain('PED-CLIENT-1')
 		})
-		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: 'monthly', billing_day: 5 })
 
-		await service.create(dto as any)
+		it('kicks the outbox relay after the commit so notifications go out right away', async () => {
+			await service.create(dto as any)
 
-		expect(queueProducerMock.createNotification).toHaveBeenCalledTimes(1)
-		expect(queueProducerMock.createNotification).toHaveBeenCalledWith(
-			expect.objectContaining({
-				userId: 'test-seller-id',
-				type: 'warning',
-				data: expect.objectContaining({ productId: 9, available: 1, requested: 5 }),
-			}),
-		)
+			expect(outboxRelayMock.kick).toHaveBeenCalledTimes(1)
+		})
+
+		it('attaches a per_sale charge (numbered in the transaction) to the same write', async () => {
+			customersServiceMock.findOne.mockResolvedValueOnce({
+				billing_mode: 'per_sale',
+				billing_day: null,
+			})
+
+			await service.create({
+				customer_id: 'cuid-ps',
+				items: [{ product_id: 1, quantity: 1, unit_price: 5000, discount: 0 }],
+			} as any)
+
+			const call = repositoryMock.create.mock.calls[0][0]
+			expect(call.billing).toEqual(
+				expect.objectContaining({
+					total_amount: 5000,
+					paid_amount: 0,
+					payment_method: 'cash',
+					payment_status: 'pending',
+					status: 'pending',
+				}),
+			)
+			expect(call.billing).not.toHaveProperty('billing_number')
+			// per_sale: the sale date is the due date — never a null that renders as 01/01/1970
+			expect(call.billing.due_date).toBeInstanceOf(Date)
+		})
+
+		it('clamps a line discount that exceeds the line value so totals never go negative', async () => {
+			await service.create({
+				customer_id: 'cuid-clamp',
+				items: [{ product_id: 1, quantity: 2, unit_price: 1000, discount: 5000 }],
+			} as any)
+
+			const call = repositoryMock.create.mock.calls[0][0]
+			// line value = 1000 * 2 = 2000; discount clamped from 5000 down to 2000
+			expect(call.subtotal).toBe(2000)
+			expect(call.discount).toBe(2000)
+			expect(call.total).toBe(0)
+			expect(call.items[0]).toMatchObject({ discount: 2000, total: 0 })
+		})
+
+		describe('Idempotency-Key', () => {
+			it('passes the key, its scope and the hash of the body (minus order_number)', async () => {
+				await service.create({ ...dto, order_number: 'PED-OLD-CLIENT' } as any, 'key-1')
+
+				expect(repositoryMock.create.mock.calls[0][0].idempotency).toEqual({
+					scope: ORDER_IDEMPOTENCY_SCOPES.dashboard,
+					key: 'key-1',
+					requestHash: hashRequest(dto),
+				})
+			})
+
+			it('hashes the same body the same way even if an old client resends another number', async () => {
+				await service.create({ ...dto, order_number: 'PED-A' } as any, 'key-1')
+				await service.create({ ...dto, order_number: 'PED-B' } as any, 'key-1')
+
+				const [first, second] = repositoryMock.create.mock.calls.map((c) => c[0].idempotency)
+				expect(first.requestHash).toBe(second.requestHash)
+			})
+
+			it('returns the original order on a replay, without kicking the relay again', async () => {
+				repositoryMock.create.mockResolvedValueOnce({ orderId: 42, replayed: true })
+
+				const res = await service.create(dto as any, 'key-1')
+
+				expect(repositoryMock.findById).toHaveBeenCalledWith(42)
+				expect(res).toMatchObject({ id: 42 })
+				expect(outboxRelayMock.kick).not.toHaveBeenCalled()
+			})
+		})
 	})
 
-	it('does not notify when nothing was oversold', async () => {
-		const dto = {
-			customer_id: 'cuid123',
-			order_number: 'ORD-8',
-			items: [{ product_id: 1, quantity: 1, unit_price: 1000, discount: 0 }],
-		}
-		repositoryMock.create.mockResolvedValueOnce({ order: { id: 8 }, oversold: [] })
-		customersServiceMock.findOne.mockResolvedValueOnce({ billing_mode: 'monthly', billing_day: 5 })
+	describe('place (storefront)', () => {
+		it('never oversells and forwards metadata and the tracking token', async () => {
+			await service.place({
+				customerId: 'c1',
+				items: [{ product_id: 1, quantity: 1, unit_price: 1000, discount: 0 }],
+				source: 'storefront',
+				metadata: { source: 'catalog' },
+				trackingToken: 'tok_abcdefghijklmnopqrs',
+			})
 
-		await service.create(dto as any)
-
-		expect(queueProducerMock.createNotification).not.toHaveBeenCalled()
+			expect(repositoryMock.create.mock.calls[0][0]).toMatchObject({
+				source: 'storefront',
+				allowOversell: false,
+				metadata: { source: 'catalog' },
+				tracking_token: 'tok_abcdefghijklmnopqrs',
+			})
+		})
 	})
 
 	it('addItem should compute total and delegate to repository', async () => {
@@ -212,7 +240,24 @@ describe('OrdersService', () => {
 		expect(res).toEqual([{ id: 1 }])
 	})
 
-	it('updateStatus canceled should propagate cancellation to billing', async () => {
+	describe('findEvents', () => {
+		it("returns the order's timeline", async () => {
+			const events = [
+				{ id: 'e1', event_type: 'order.created', occurred_at: new Date(), payload: {} },
+			]
+			repositoryMock.findEvents.mockResolvedValueOnce(events)
+
+			await expect(service.findEvents(3)).resolves.toBe(events)
+		})
+
+		it('404s for a missing or foreign order', async () => {
+			repositoryMock.findEvents.mockResolvedValueOnce(null)
+
+			await expect(service.findEvents(3)).rejects.toBeInstanceOf(NotFoundException)
+		})
+	})
+
+	it('updateStatus canceled should propagate cancellation to billing and kick the relay', async () => {
 		repositoryMock.updateStatus.mockResolvedValueOnce({ id: 3, status: 'canceled' })
 
 		await service.updateStatus(3, 'canceled')
@@ -221,6 +266,7 @@ describe('OrdersService', () => {
 			status: 'canceled',
 			payment_status: 'canceled',
 		})
+		expect(outboxRelayMock.kick).toHaveBeenCalledTimes(1)
 	})
 
 	it('updateStatus delivered should NOT auto-mark billing as paid', async () => {
@@ -231,10 +277,11 @@ describe('OrdersService', () => {
 		expect(repositoryMock.updateStatus).toHaveBeenCalledWith(4, 'delivered', undefined)
 	})
 
-	it('delete delegates to repository (tenant/404 enforced in the repo)', async () => {
+	it('delete delegates to repository (tenant/404/409 enforced in the repo)', async () => {
 		repositoryMock.delete.mockResolvedValueOnce({ id: 5 })
 		const res = await service.delete(5)
 		expect(repositoryMock.delete).toHaveBeenCalledWith(5)
 		expect(res).toEqual({ id: 5 })
+		expect(outboxRelayMock.kick).toHaveBeenCalledTimes(1)
 	})
 })

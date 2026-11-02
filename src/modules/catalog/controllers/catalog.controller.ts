@@ -8,9 +8,10 @@ import {
 	Param,
 	Post,
 } from '@nestjs/common'
-import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { ApiBody, ApiHeader, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { Public } from '@/modules/auth/decorators/public.decorator'
+import { IdempotencyKey } from '@/shared/idempotency/idempotency-key.decorator'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { type AuthCustomerDto, authCustomerSchema } from '../dto/auth-customer.dto'
 import {
@@ -171,14 +172,20 @@ export class CatalogController {
 
 	@Public()
 	@Throttle(ORDER_TRACKING_THROTTLE)
-	@Get('loja/:slug/orders/:orderNumber/track')
+	@Get('loja/:slug/orders/:ref/track')
 	@ApiOperation({ summary: 'Track a storefront order of a specific store (public)' })
 	@ApiParam({ name: 'slug', type: String, description: 'Store slug' })
-	@ApiParam({ name: 'orderNumber', type: String, description: 'Order number (e.g. PED-LK3X4ABC)' })
+	@ApiParam({
+		name: 'ref',
+		type: String,
+		description:
+			'The tracking_token returned at checkout. Legacy links carrying a pre-1A random ' +
+			'order number (e.g. PED-LK3X4ABC) still resolve; sequential numbers never do.',
+	})
 	@ApiResponse({ status: 200, description: 'Order tracking info' })
 	@ApiResponse({ status: 404, description: 'Store or order not found' })
-	async trackOrder(@Param('slug') slug: string, @Param('orderNumber') orderNumber: string) {
-		return this.service.trackOrder(slug, orderNumber)
+	async trackOrder(@Param('slug') slug: string, @Param('ref') ref: string) {
+		return this.service.trackOrder(slug, ref)
 	}
 
 	/**
@@ -187,7 +194,7 @@ export class CatalogController {
 	 */
 	@Public()
 	@Get('orders/:orderNumber/track')
-	@ApiOperation({ summary: 'Retired — use /catalog/loja/:slug/orders/:orderNumber/track' })
+	@ApiOperation({ summary: 'Retired — use /catalog/loja/:slug/orders/:ref/track' })
 	@ApiResponse({ status: 410, description: 'Endpoint retired' })
 	legacyTrackOrder(): never {
 		throw new GoneException('Este link de acompanhamento não está mais disponível')
@@ -219,13 +226,23 @@ export class CatalogController {
 			},
 		},
 	})
-	@ApiResponse({ status: 201, description: 'Order created successfully' })
-	@ApiResponse({ status: 400, description: 'Invalid data' })
+	@ApiHeader({
+		name: 'Idempotency-Key',
+		required: false,
+		description: 'Same key + body replays the original order; another body answers 422',
+	})
+	@ApiResponse({
+		status: 201,
+		description: 'Order created; tracking_token builds the public tracking link',
+	})
+	@ApiResponse({ status: 400, description: 'Invalid data or not enough stock' })
 	@ApiResponse({ status: 404, description: 'Store not found' })
+	@ApiResponse({ status: 422, description: 'IDEMPOTENCY_KEY_MISMATCH' })
 	async createOrder(
 		@Param('slug') slug: string,
 		@Body(new ZodValidationPipe(createCatalogOrderSchema)) body: CreateCatalogOrderDto,
+		@IdempotencyKey() idempotencyKey?: string,
 	) {
-		return this.service.createOrder(slug, body)
+		return this.service.createOrder(slug, body, idempotencyKey)
 	}
 }

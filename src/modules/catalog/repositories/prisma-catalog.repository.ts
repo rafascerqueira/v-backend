@@ -1,12 +1,11 @@
 import { Injectable } from '@nestjs/common'
+import type { Prisma } from '@/generated/prisma/client'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CatalogActivePromotion,
 	CatalogCustomer,
 	CatalogCustomerWithHash,
-	CatalogOrderStatus,
 	CatalogOrderTracking,
-	CatalogPaymentStatus,
 	CatalogPrice,
 	CatalogProduct,
 	CatalogRepository,
@@ -203,16 +202,26 @@ export class PrismaCatalogRepository implements CatalogRepository {
 		})
 	}
 
+	async findOrderByTrackingToken(
+		sellerId: string,
+		token: string,
+	): Promise<CatalogOrderTracking | null> {
+		return this.findStorefrontOrder({ seller_id: sellerId, tracking_token: token })
+	}
+
 	async findOrderByNumber(
 		sellerId: string,
 		orderNumber: string,
 	): Promise<CatalogOrderTracking | null> {
+		return this.findStorefrontOrder({ seller_id: sellerId, order_number: orderNumber })
+	}
+
+	/** Tracking projection of one of the store's storefront orders (never dashboard ones). */
+	private async findStorefrontOrder(
+		where: Prisma.OrderWhereInput,
+	): Promise<CatalogOrderTracking | null> {
 		const order = await this.prisma.order.findFirst({
-			where: {
-				seller_id: sellerId,
-				order_number: orderNumber,
-				metadata: { path: ['source'], equals: 'catalog' },
-			},
+			where: { ...where, metadata: { path: ['source'], equals: 'catalog' } },
 			select: {
 				id: true,
 				order_number: true,
@@ -288,63 +297,5 @@ export class PrismaCatalogRepository implements CatalogRepository {
 		return this.prisma.customer.create({
 			data: data as any,
 		}) as unknown as CatalogCustomer
-	}
-
-	async findLastOrderId(): Promise<number | null> {
-		const lastOrder = await this.prisma.order.findFirst({
-			orderBy: { id: 'desc' },
-			select: { id: true },
-		})
-		return lastOrder?.id ?? null
-	}
-
-	async createOrderWithItems(data: {
-		seller_id: string
-		order_number: string
-		customer_id: string
-		status: CatalogOrderStatus
-		payment_status: CatalogPaymentStatus
-		subtotal: number
-		discount: number
-		total: number
-		notes: string
-		metadata: unknown
-		items: Array<{
-			product_id: number
-			quantity: number
-			unit_price: number
-			discount: number
-			total: number
-		}>
-	}) {
-		return this.prisma.order.create({
-			data: {
-				seller_id: data.seller_id,
-				order_number: data.order_number,
-				customer_id: data.customer_id,
-				status: data.status,
-				payment_status: data.payment_status,
-				subtotal: data.subtotal,
-				discount: data.discount,
-				total: data.total,
-				notes: data.notes,
-				metadata: data.metadata as any,
-				Order_item: {
-					create: data.items,
-				},
-			},
-			include: {
-				Order_item: {
-					include: {
-						product: {
-							select: { id: true, name: true },
-						},
-					},
-				},
-				customer: {
-					select: { id: true, name: true, email: true, phone: true },
-				},
-			},
-		}) as any
 	}
 }

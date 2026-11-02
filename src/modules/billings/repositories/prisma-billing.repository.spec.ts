@@ -4,8 +4,9 @@ import { PrismaService } from '@/shared/prisma/prisma.service'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import { PrismaBillingRepository } from './prisma-billing.repository'
 
-// Billing rows have no seller_id of their own — tenancy is enforced through the
-// related order (order.seller_id). These tests pin that list AND point-lookup
+// Tenancy is enforced through the related order (order.seller_id); since Phase 1A
+// billings also carry a denormalised seller_id (billing numbers are unique per
+// seller), always derived from the order on create. These tests pin that list AND point-lookup
 // queries constrain by the owning seller for non-admins, that findById returns
 // null for a foreign billing (so the service answers 404, never a 403 that would
 // leak the id exists), and that update/delete refuse to write a cross-tenant row.
@@ -29,7 +30,9 @@ describe('PrismaBillingRepository', () => {
 				findFirst: jest.fn(),
 				update: jest.fn().mockResolvedValue({ id: 5, status: 'paid', due_date: null }),
 				delete: jest.fn(),
+				create: jest.fn().mockResolvedValue({ id: 9, status: 'pending', due_date: null }),
 			},
+			order: { findUnique: jest.fn() },
 		}
 
 		const module = await Test.createTestingModule({
@@ -41,6 +44,41 @@ describe('PrismaBillingRepository', () => {
 		}).compile()
 
 		repo = module.get(PrismaBillingRepository)
+	})
+
+	describe('create', () => {
+		const input = {
+			order_id: 3,
+			billing_number: 'COB-MANUAL-1',
+			total_amount: 1000,
+			paid_amount: 0,
+			payment_method: 'cash',
+			payment_status: 'pending',
+			status: 'pending',
+		}
+
+		it("stamps the order's seller on the charge (never a caller-supplied one)", async () => {
+			prisma.order.findUnique.mockResolvedValueOnce({ seller_id: 'seller-1' })
+
+			await repo.create(input)
+
+			expect(prisma.order.findUnique).toHaveBeenCalledWith({
+				where: { id: 3 },
+				select: { seller_id: true },
+			})
+			expect(prisma.billing.create.mock.calls[0][0].data).toMatchObject({
+				order_id: 3,
+				seller_id: 'seller-1',
+				billing_number: 'COB-MANUAL-1',
+			})
+		})
+
+		it('404s when the order does not exist', async () => {
+			prisma.order.findUnique.mockResolvedValueOnce(null)
+
+			await expect(repo.create(input)).rejects.toBeInstanceOf(NotFoundException)
+			expect(prisma.billing.create).not.toHaveBeenCalled()
+		})
 	})
 
 	describe('findAll tenant scoping', () => {

@@ -177,6 +177,7 @@ describe('Billings (e2e)', () => {
 		const otherBilling = await prisma.billing.create({
 			data: {
 				order_id: otherOrder.id,
+				seller_id: OTHER_SELLER,
 				billing_number: `COB-O-${Date.now()}`,
 				total_amount: 1000,
 			},

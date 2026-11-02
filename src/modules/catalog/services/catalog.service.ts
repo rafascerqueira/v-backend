@@ -8,7 +8,10 @@ import {
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { TokenService } from '@/modules/auth/services/token.service'
+import { isSequentialOrderNumber } from '@/modules/orders/order-numbering'
+import { ORDER_IDEMPOTENCY_SCOPES, OrdersService } from '@/modules/orders/services/orders.service'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
+import { hashRequest } from '@/shared/idempotency/request-hash'
 import { QueueProducer } from '@/shared/queue/queue.producer'
 import { RedisService } from '@/shared/redis/redis.service'
 import {
@@ -17,6 +20,7 @@ import {
 	type CatalogRepository,
 } from '@/shared/repositories/catalog.repository'
 import { escapeHtml } from '@/shared/security/escape-html'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 import type { AuthCustomerDto } from '../dto/auth-customer.dto'
 import type { CreateCatalogOrderDto } from '../dto/create-catalog-order.dto'
 import type { LookupCustomerDto } from '../dto/lookup-customer.dto'
@@ -35,6 +39,9 @@ const OTP_RESEND_COOLDOWN_SECONDS = 60
 // Seller-issued set-password invite (covers customers with no email): valid for 7 days.
 const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60
 
+/** 128-bit base64url tokens (22 chars) and the 32-hex ones backfilled by the 1A migration. */
+const TRACKING_TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,32}$/
+
 @Injectable()
 export class CatalogService {
 	private readonly frontendUrl: string
@@ -45,6 +52,8 @@ export class CatalogService {
 		private readonly passwordHasher: PasswordHasherService,
 		private readonly redis: RedisService,
 		private readonly queueProducer: QueueProducer,
+		private readonly ordersService: OrdersService,
+		private readonly tenantContext: TenantContext,
 		readonly configService: ConfigService,
 	) {
 		this.frontendUrl = configService.get<string>('frontendUrl', 'http://localhost:3000')
@@ -247,7 +256,7 @@ export class CatalogService {
 		}
 	}
 
-	async createOrder(slug: string, dto: CreateCatalogOrderDto) {
+	async createOrder(slug: string, dto: CreateCatalogOrderDto, idempotencyKey?: string) {
 		const { items, notes } = dto
 
 		if (items.length === 0) {
@@ -273,24 +282,10 @@ export class CatalogService {
 			throw new BadRequestException('Um ou mais produtos não foram encontrados nesta loja')
 		}
 
-		// Customers can only buy what is in stock — allow_oversell is a seller-only
-		// capability and is deliberately NOT honored here. Stock-tracked products that
-		// are short are blocked; untracked products (no stock row) stay orderable, so
-		// out-of-stock items remain visible in the catalog but cannot be ordered.
-		const stocks = await this.catalogRepository.findStocks(productIds)
-		const availableMap = new Map<number, number>()
-		for (const stock of stocks) {
-			availableMap.set(stock.product_id, stock.quantity - stock.reserved_quantity)
-		}
-		for (const item of items) {
-			const available = availableMap.get(item.product_id)
-			if (available !== undefined && available < item.quantity) {
-				const product = validProducts.find((p) => p.id === item.product_id)
-				throw new BadRequestException(
-					`Estoque insuficiente para "${product?.name ?? item.product_id}". Disponível: ${available > 0 ? available : 0}.`,
-				)
-			}
-		}
+		// Stock is checked (and decremented) under lock inside the order transaction:
+		// customers can only buy what is in stock — allow_oversell is a seller-only
+		// capability, so the storefront path never honours it. Untracked products (no
+		// stock row) stay orderable.
 
 		// Get prices and active promotions
 		const prices = await this.catalogRepository.findActivePrices(productIds)
@@ -372,49 +367,47 @@ export class CatalogService {
 			}
 		}
 
-		// Generate order number with timestamp + random suffix to avoid collisions
-		const timestamp = Date.now().toString(36).toUpperCase()
-		const random = Math.random().toString(36).substring(2, 6).toUpperCase()
-		const orderNumber = `PED-${timestamp}${random}`
-
-		// Calculate totals
-		const orderItems = items.map((item) => {
-			const unitPrice = priceMap.get(item.product_id) || 0
-			return {
-				product_id: item.product_id,
-				quantity: item.quantity,
-				unit_price: unitPrice,
-				discount: 0,
-				total: unitPrice * item.quantity,
-			}
-		})
-
-		const subtotal = orderItems.reduce((acc, item) => acc + item.total, 0)
-
-		// Create order with items
-		const order = await this.catalogRepository.createOrderWithItems({
-			seller_id: sellerId,
-			order_number: orderNumber,
-			customer_id: customerId,
-			status: 'pending',
-			payment_status: 'pending',
-			subtotal,
-			discount: 0,
-			total: subtotal,
-			notes: notes || `Pedido via catálogo online`,
-			metadata: {
-				source: 'catalog',
-				customer_address: orderAddress,
-			},
-			items: orderItems,
-		})
+		// Same transactional path as dashboard orders (number, stock under lock,
+		// per-sale charge, order.created event), run as the store's seller. The order
+		// number is sequential, so the public tracking link uses an unguessable token.
+		const order = await this.tenantContext.run({ sellerId, role: 'seller' }, () =>
+			this.ordersService.place({
+				customerId,
+				items: items.map((item) => ({
+					product_id: item.product_id,
+					quantity: item.quantity,
+					unit_price: priceMap.get(item.product_id) || 0,
+					discount: 0,
+				})),
+				notes: notes || 'Pedido via catálogo online',
+				source: 'storefront',
+				// `source: 'catalog'` is what the public tracking lookup matches on.
+				metadata: { source: 'catalog', customer_address: orderAddress },
+				trackingToken: randomBytes(16).toString('base64url'),
+				idempotency: idempotencyKey
+					? {
+							scope: ORDER_IDEMPOTENCY_SCOPES.storefront,
+							key: idempotencyKey,
+							requestHash: hashRequest({ slug, ...dto }),
+						}
+					: undefined,
+			}),
+		)
 
 		return {
 			id: order.id,
 			order_number: order.order_number,
+			tracking_token: order.tracking_token ?? null,
 			status: order.status,
 			total: order.total,
-			customer: order.customer,
+			customer: order.customer
+				? {
+						id: order.customer.id,
+						name: order.customer.name,
+						email: order.customer.email,
+						phone: order.customer.phone ?? null,
+					}
+				: null,
 			items: order.Order_item.map((item) => ({
 				product: item.product,
 				quantity: item.quantity,
@@ -636,14 +629,23 @@ export class CatalogService {
 	}
 
 	/**
-	 * Public order tracking, scoped to the store the link belongs to. An unknown
-	 * store and an unknown order return the same 404 so neither leaks existence.
+	 * Public order tracking, scoped to the store the link belongs to. `ref` is the
+	 * order's tracking token; links issued before Phase 1A carry the order number,
+	 * which was random then and still resolves. Sequential numbers (PED-000123) are
+	 * guessable and never resolve here. Every miss is the same 404 so nothing leaks.
 	 */
-	async trackOrder(slug: string, orderNumber: string) {
+	async trackOrder(slug: string, ref: string) {
 		const store = await this.catalogRepository.findStoreBySlug(slug)
-		const order = store
-			? await this.catalogRepository.findOrderByNumber(store.id, orderNumber)
-			: null
+		let order: Awaited<ReturnType<CatalogRepository['findOrderByTrackingToken']>> = null
+		if (store) {
+			if (ref.startsWith('PED-')) {
+				if (!isSequentialOrderNumber(ref)) {
+					order = await this.catalogRepository.findOrderByNumber(store.id, ref)
+				}
+			} else if (TRACKING_TOKEN_PATTERN.test(ref)) {
+				order = await this.catalogRepository.findOrderByTrackingToken(store.id, ref)
+			}
+		}
 		if (!order) throw new NotFoundException('Pedido não encontrado')
 
 		const sellerFirstName = order.store?.name?.trim().split(/\s+/)[0]

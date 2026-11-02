@@ -10,13 +10,16 @@ import { BadRequestException, NotFoundException, UnauthorizedException } from '@
 import { ConfigService } from '@nestjs/config'
 import { Test } from '@nestjs/testing'
 import { TokenService } from '@/modules/auth/services/token.service'
+import { OrdersService } from '@/modules/orders/services/orders.service'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
+import { hashRequest } from '@/shared/idempotency/request-hash'
 import { QueueProducer } from '@/shared/queue/queue.producer'
 import { RedisService } from '@/shared/redis/redis.service'
 import {
 	CATALOG_REPOSITORY,
 	type CatalogRepository,
 } from '@/shared/repositories/catalog.repository'
+import { TenantContext } from '@/shared/tenant/tenant.context'
 import { CatalogService } from './catalog.service'
 
 const repositoryMock: jest.Mocked<CatalogRepository> = {
@@ -36,10 +39,12 @@ const repositoryMock: jest.Mocked<CatalogRepository> = {
 	updateCustomerPasswordHash: jest.fn(),
 	findCustomerByContact: jest.fn(),
 	createCustomer: jest.fn(),
-	findLastOrderId: jest.fn(),
-	createOrderWithItems: jest.fn(),
+	findOrderByTrackingToken: jest.fn(),
 	findOrderByNumber: jest.fn(),
 }
+
+const tenantContext = new TenantContext()
+const ordersServiceMock = { place: jest.fn() }
 
 const makeProduct = (id: number, sellerId = 'seller-1') => ({
 	id,
@@ -91,6 +96,8 @@ describe('CatalogService', () => {
 					provide: ConfigService,
 					useValue: { get: jest.fn().mockReturnValue('https://app.test') },
 				},
+				{ provide: OrdersService, useValue: ordersServiceMock },
+				{ provide: TenantContext, useValue: tenantContext },
 			],
 		}).compile()
 
@@ -104,7 +111,7 @@ describe('CatalogService', () => {
 	describe('trackOrder', () => {
 		const trackedOrder = {
 			id: 1,
-			order_number: 'PED-ABC123',
+			order_number: 'PED-000123',
 			status: 'pending',
 			payment_status: 'pending',
 			total: 4990,
@@ -116,34 +123,70 @@ describe('CatalogService', () => {
 			store: { name: 'Maria Souza', store_name: null },
 			items: [{ product: { id: 7, name: 'Bolo' }, quantity: 1, unit_price: 4990, total: 4990 }],
 		}
+		const TOKEN = 'Zm9vYmFyYmF6cXV4MTIzNA'
 
-		it('looks the order up inside the store resolved from the slug', async () => {
-			repositoryMock.findStoreBySlug.mockResolvedValueOnce({ id: 'seller-1' } as any)
-			repositoryMock.findOrderByNumber.mockResolvedValueOnce(trackedOrder as any)
+		beforeEach(() => {
+			repositoryMock.findStoreBySlug.mockResolvedValue({ id: 'seller-1' } as any)
+		})
 
-			const result = await service.trackOrder('minha-loja', 'PED-ABC123')
+		it('resolves a tracking token inside the store resolved from the slug', async () => {
+			repositoryMock.findOrderByTrackingToken.mockResolvedValueOnce(trackedOrder as any)
+
+			const result = await service.trackOrder('minha-loja', TOKEN)
 
 			expect(repositoryMock.findStoreBySlug).toHaveBeenCalledWith('minha-loja')
-			expect(repositoryMock.findOrderByNumber).toHaveBeenCalledWith('seller-1', 'PED-ABC123')
-			expect(result.order_number).toBe('PED-ABC123')
+			expect(repositoryMock.findOrderByTrackingToken).toHaveBeenCalledWith('seller-1', TOKEN)
+			expect(repositoryMock.findOrderByNumber).not.toHaveBeenCalled()
+			expect(result.order_number).toBe('PED-000123')
 			expect(result.total).toBe(4990)
 			expect(result.store_name).toBe('Loja de Maria')
+		})
+
+		it('still resolves a legacy link carrying a pre-1A random order number', async () => {
+			repositoryMock.findOrderByNumber.mockResolvedValueOnce({
+				...trackedOrder,
+				order_number: 'PED-MHZ3K2AB7Q',
+			} as any)
+
+			const result = await service.trackOrder('minha-loja', 'PED-MHZ3K2AB7Q')
+
+			expect(repositoryMock.findOrderByNumber).toHaveBeenCalledWith('seller-1', 'PED-MHZ3K2AB7Q')
+			expect(result.order_number).toBe('PED-MHZ3K2AB7Q')
+		})
+
+		it.each([
+			'PED-000123',
+			'PED-1',
+		])('never resolves a sequential (guessable) number like %s', async (ref) => {
+			await expect(service.trackOrder('minha-loja', ref)).rejects.toThrow(
+				new NotFoundException('Pedido não encontrado'),
+			)
+			expect(repositoryMock.findOrderByNumber).not.toHaveBeenCalled()
+			expect(repositoryMock.findOrderByTrackingToken).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			'short',
+			'has spaces in it ok',
+			'x'.repeat(33),
+		])('answers 404 without querying for a malformed token (%s)', async (ref) => {
+			await expect(service.trackOrder('minha-loja', ref)).rejects.toThrow(NotFoundException)
+			expect(repositoryMock.findOrderByTrackingToken).not.toHaveBeenCalled()
 		})
 
 		it('returns the same 404 for an unknown store without querying orders', async () => {
 			repositoryMock.findStoreBySlug.mockResolvedValueOnce(null)
 
-			await expect(service.trackOrder('nao-existe', 'PED-ABC123')).rejects.toThrow(
+			await expect(service.trackOrder('nao-existe', TOKEN)).rejects.toThrow(
 				new NotFoundException('Pedido não encontrado'),
 			)
-			expect(repositoryMock.findOrderByNumber).not.toHaveBeenCalled()
+			expect(repositoryMock.findOrderByTrackingToken).not.toHaveBeenCalled()
 		})
 
-		it('returns 404 when the order is not a storefront order of that store', async () => {
-			repositoryMock.findStoreBySlug.mockResolvedValueOnce({ id: 'seller-1' } as any)
-			repositoryMock.findOrderByNumber.mockResolvedValueOnce(null)
+		it('returns 404 when the token is not a storefront order of that store', async () => {
+			repositoryMock.findOrderByTrackingToken.mockResolvedValueOnce(null)
 
-			await expect(service.trackOrder('minha-loja', 'PED-202611-0001')).rejects.toThrow(
+			await expect(service.trackOrder('minha-loja', TOKEN)).rejects.toThrow(
 				new NotFoundException('Pedido não encontrado'),
 			)
 		})
@@ -555,6 +598,33 @@ describe('CatalogService', () => {
 			items: [{ product_id: 1, quantity: 2 }],
 			notes: undefined,
 		}
+		const placedOrder = {
+			id: 100,
+			order_number: 'PED-000007',
+			tracking_token: 'Zm9vYmFyYmF6cXV4MTIzNA',
+			status: 'pending',
+			total: 3000,
+			customer: {
+				id: 'cust-1',
+				name: 'Alice',
+				email: 'alice@test.com',
+				phone: '11999999999',
+				document: '12345678901',
+				address: { street: 'Rua A' },
+			},
+			Order_item: [
+				{ product: { id: 1, name: 'Product 1' }, quantity: 2, unit_price: 1500, total: 3000 },
+			],
+		}
+
+		/** Store with product 1 priced at `price`, resolved to an existing customer. */
+		const arrangeStore = (price = 1500) => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
+			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
+			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price }] as any)
+			repositoryMock.findCustomerByContact.mockResolvedValueOnce({ id: 'cust-1' } as any)
+			ordersServiceMock.place.mockResolvedValueOnce(placedOrder)
+		}
 
 		it('should throw BadRequestException when items is empty', async () => {
 			await expect(service.createOrder('myshop', { ...baseDto, items: [] })).rejects.toThrow(
@@ -566,7 +636,7 @@ describe('CatalogService', () => {
 			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce(null)
 
 			await expect(service.createOrder('ghost-store', baseDto)).rejects.toThrow(NotFoundException)
-			expect(repositoryMock.createOrderWithItems).not.toHaveBeenCalled()
+			expect(ordersServiceMock.place).not.toHaveBeenCalled()
 		})
 
 		it('should throw when some products are not in this store', async () => {
@@ -590,66 +660,84 @@ describe('CatalogService', () => {
 					],
 				}),
 			).rejects.toThrow(BadRequestException)
-			expect(repositoryMock.createOrderWithItems).not.toHaveBeenCalled()
+			expect(ordersServiceMock.place).not.toHaveBeenCalled()
 		})
 
 		it('scopes the product lookup to the store seller (no global catalog scan)', async () => {
-			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
-			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
-			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price: 1500 }] as any)
-			repositoryMock.findCustomerByContact.mockResolvedValueOnce({ id: 'cust-1' } as any)
-			repositoryMock.createOrderWithItems.mockResolvedValueOnce({
-				id: 100,
-				order_number: 'PED-X',
-				status: 'pending',
-				total: 3000,
-				customer: { id: 'cust-1', name: 'Alice' },
-				Order_item: [],
-			} as any)
+			arrangeStore()
 
 			await service.createOrder('myshop', baseDto)
 
 			expect(repositoryMock.findActiveProducts).toHaveBeenCalledWith('seller-1')
 		})
 
-		it('blocks the order when a tracked product is out of stock (no oversell for customers)', async () => {
-			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
-			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
-			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price: 1500 }] as any)
-			repositoryMock.findStocks.mockResolvedValueOnce([
-				{ product_id: 1, quantity: 1, reserved_quantity: 0 },
-			] as any)
+		it('places the order through the shared order path, as the store seller', async () => {
+			arrangeStore()
+			let sellerDuringPlace: string | undefined
+			ordersServiceMock.place.mockReset().mockImplementationOnce(async () => {
+				sellerDuringPlace = tenantContext.getSellerId()
+				return placedOrder
+			})
 
-			// baseDto orders quantity 2 of product 1, which only has 1 available.
-			await expect(service.createOrder('myshop', baseDto)).rejects.toThrow('Estoque insuficiente')
-			expect(repositoryMock.createOrderWithItems).not.toHaveBeenCalled()
+			await service.createOrder('myshop', baseDto)
+
+			expect(sellerDuringPlace).toBe('seller-1') // seller resolved from the slug
+			const input = ordersServiceMock.place.mock.calls[0][0]
+			expect(input).toMatchObject({
+				customerId: 'cust-1',
+				items: [{ product_id: 1, quantity: 2, unit_price: 1500, discount: 0 }], // integer cents
+				notes: 'Pedido via catálogo online',
+				source: 'storefront',
+				metadata: { source: 'catalog' },
+			})
+			expect(input.idempotency).toBeUndefined()
 		})
 
-		it('should create order with correct integer totals using existing customer', async () => {
-			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
-			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
-			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price: 1500 }] as any)
-			repositoryMock.findCustomerByContact.mockResolvedValueOnce({ id: 'cust-1' } as any)
-			repositoryMock.createOrderWithItems.mockResolvedValueOnce({
-				id: 100,
-				order_number: 'PED-XYZ',
-				status: 'pending',
-				total: 3000,
-				customer: { id: 'cust-1', name: 'Alice' },
-				Order_item: [
-					{ product: { id: 1, name: 'Product 1' }, quantity: 2, unit_price: 1500, total: 3000 },
-				],
-			} as any)
+		it('issues a fresh 128-bit base64url tracking token per order', async () => {
+			arrangeStore()
+			arrangeStore()
+
+			await service.createOrder('myshop', baseDto)
+			await service.createOrder('myshop', baseDto)
+
+			const [first, second] = ordersServiceMock.place.mock.calls.map(
+				(call) => call[0].trackingToken,
+			)
+			expect(first).toMatch(/^[A-Za-z0-9_-]{22}$/)
+			expect(second).toMatch(/^[A-Za-z0-9_-]{22}$/)
+			expect(first).not.toBe(second)
+		})
+
+		it('answers with the order number, the tracking token and a minimal customer', async () => {
+			arrangeStore()
 
 			const result = await service.createOrder('myshop', baseDto)
 
-			expect(result.total).toBe(3000) // integer cents
-			expect(repositoryMock.createCustomer).not.toHaveBeenCalled()
-			const orderData = repositoryMock.createOrderWithItems.mock.calls[0][0]
-			expect(orderData.subtotal).toBe(3000) // 2 * 1500
-			expect(orderData.total).toBe(3000)
-			expect(orderData.discount).toBe(0)
-			expect(orderData.seller_id).toBe('seller-1') // seller resolved from the slug
+			expect(result).toMatchObject({
+				id: 100,
+				order_number: 'PED-000007',
+				tracking_token: 'Zm9vYmFyYmF6cXV4MTIzNA',
+				total: 3000,
+				customer: { id: 'cust-1', name: 'Alice', email: 'alice@test.com', phone: '11999999999' },
+				items: [
+					{ product: { id: 1, name: 'Product 1' }, quantity: 2, unit_price: 1500, total: 3000 },
+				],
+			})
+			// Only contact fields go back to the public caller, never document/address.
+			expect(result.customer).not.toHaveProperty('document')
+			expect(result.customer).not.toHaveProperty('address')
+		})
+
+		it('forwards the Idempotency-Key with the storefront scope and a hash of slug + body', async () => {
+			arrangeStore()
+
+			await service.createOrder('myshop', baseDto, 'key-1')
+
+			expect(ordersServiceMock.place.mock.calls[0][0].idempotency).toEqual({
+				scope: 'catalog.orders.create',
+				key: 'key-1',
+				requestHash: hashRequest({ slug: 'myshop', ...baseDto }),
+			})
 		})
 
 		it('should create a new customer when none exists', async () => {
@@ -658,18 +746,12 @@ describe('CatalogService', () => {
 			repositoryMock.findActivePrices.mockResolvedValueOnce([{ product_id: 1, price: 1000 }] as any)
 			repositoryMock.findCustomerByContact.mockResolvedValueOnce(null)
 			repositoryMock.createCustomer.mockResolvedValueOnce({ id: 'new-cust' } as any)
-			repositoryMock.createOrderWithItems.mockResolvedValueOnce({
-				id: 101,
-				order_number: 'PED-NEW',
-				status: 'pending',
-				total: 1000,
-				customer: { id: 'new-cust', name: 'Alice' },
-				Order_item: [],
-			} as any)
+			ordersServiceMock.place.mockResolvedValueOnce({ ...placedOrder, customer: null })
 
 			await service.createOrder('myshop', baseDto)
 
 			expect(repositoryMock.createCustomer).toHaveBeenCalled()
+			expect(ordersServiceMock.place.mock.calls[0][0].customerId).toBe('new-cust')
 		})
 	})
 })

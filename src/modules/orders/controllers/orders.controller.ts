@@ -10,10 +10,11 @@ import {
 	Post,
 	UseGuards,
 } from '@nestjs/common'
-import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { ApiBody, ApiHeader, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { z } from 'zod'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { CheckPlanLimit, PlanLimitsGuard } from '@/modules/subscriptions/guards/plan-limits.guard'
+import { IdempotencyKey } from '@/shared/idempotency/idempotency-key.decorator'
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe'
 import {
 	type CreateOrderDto,
@@ -38,19 +39,28 @@ export class OrdersController {
 	@HttpCode(HttpStatus.CREATED)
 	@UseGuards(PlanLimitsGuard)
 	@CheckPlanLimit('order')
-	@ApiOperation({ summary: 'Create order with items' })
+	@ApiOperation({
+		summary: 'Create order with items',
+		description:
+			'The server numbers the order (PED-000123); order_number in the body is ignored. ' +
+			'Send an Idempotency-Key header to make retries safe: the same key and body ' +
+			'return the original order; the same key with another body answers 422.',
+	})
+	@ApiHeader({ name: 'Idempotency-Key', required: false, description: 'Up to 64 [A-Za-z0-9_-]' })
 	@ApiBody({
 		schema: {
 			example: {
 				customer_id: 'cuid',
-				order_number: 'ORD-001',
 				items: [{ product_id: 1, quantity: 2, unit_price: 1000 }],
 				notes: '...',
 			},
 		},
 	})
-	async create(@Body(new ZodValidationPipe(createOrderSchema)) body: CreateOrderDto) {
-		return this.service.create(body)
+	async create(
+		@Body(new ZodValidationPipe(createOrderSchema)) body: CreateOrderDto,
+		@IdempotencyKey() idempotencyKey?: string,
+	) {
+		return this.service.create(body, idempotencyKey)
 	}
 
 	@Post(':orderId/items')
@@ -75,6 +85,13 @@ export class OrdersController {
 	@ApiParam({ name: 'id', type: Number })
 	async get(@Param('id') id: string) {
 		return this.service.findById(Number(id))
+	}
+
+	@Get(':id/events')
+	@ApiOperation({ summary: "Order timeline: the order's domain events, oldest first" })
+	@ApiParam({ name: 'id', type: Number })
+	async events(@Param('id') id: string) {
+		return this.service.findEvents(Number(id))
 	}
 
 	@Patch(':id/status')

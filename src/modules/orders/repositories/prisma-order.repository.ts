@@ -1,16 +1,32 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+	BadRequestException,
+	ConflictException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common'
+import type { Prisma } from '@/generated/prisma/client'
+import { appendDomainEvents } from '@/shared/events/append-domain-events'
+import { DOMAIN_EVENT_TYPES } from '@/shared/events/domain-event.types'
+import { claimIdempotencyKey, completeIdempotencyKey } from '@/shared/idempotency/idempotency'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateOrderData,
 	CreateOrderItemData,
 	CreateOrderResult,
 	Order,
+	OrderEvent,
 	OrderItem,
 	OrderRepository,
 	OrderWithRelations,
 	OversoldItem,
 } from '@/shared/repositories/order.repository'
+import { nextSellerSequenceValue } from '@/shared/sequences/seller-sequence'
 import { TenantContext } from '@/shared/tenant/tenant.context'
+import { billingNumberFor, orderNumberFor } from '../order-numbering'
+
+export const ORDER_ERROR_CODES = {
+	hasPayments: 'HAS_PAYMENTS',
+} as const
 
 @Injectable()
 export class PrismaOrderRepository implements OrderRepository {
@@ -26,8 +42,24 @@ export class PrismaOrderRepository implements OrderRepository {
 		return { seller_id: this.tenantContext.requireSellerId() }
 	}
 
+	/**
+	 * The single write path for every order (dashboard and storefront), in one
+	 * transaction: Idempotency-Key claim → product ownership + stock lock/check →
+	 * sequence number → order + items → backorders → stock movements → per-sale charge
+	 * → order.created event → key completion. Side effects run later from the event.
+	 */
 	async create(data: CreateOrderData): Promise<CreateOrderResult> {
 		return this.prisma.$transaction(async (tx) => {
+			// FIRST statement on purpose: a concurrent repeat blocks here, before taking
+			// any stock lock, so repeats can't deadlock with the request they repeat.
+			const idempotency = data.idempotency
+				? { ...data.idempotency, sellerId: data.seller_id }
+				: undefined
+			if (idempotency) {
+				const claim = await claimIdempotencyKey(tx, idempotency, 'order')
+				if (!claim.claimed) return { orderId: Number(claim.resourceId), replayed: true }
+			}
+
 			// Lock stock rows to prevent concurrent overselling
 			if (data.items.length > 0) {
 				const productIds = data.items.map((i) => i.product_id)
@@ -81,10 +113,11 @@ export class PrismaOrderRepository implements OrderRepository {
 					})
 					// Products flagged allow_oversell sell past their stock; the
 					// decrement below simply takes the quantity negative. Anything
-					// else is a hard stop.
-					if (!product?.allow_oversell) {
+					// else is a hard stop — and always on the storefront, where
+					// overselling is not the customer's call.
+					if (!data.allowOversell || !product?.allow_oversell) {
 						throw new BadRequestException(
-							`Estoque insuficiente para "${product?.name || item.product_id}". Disponível: ${available}, Solicitado: ${item.quantity}`,
+							`Estoque insuficiente para "${product?.name || item.product_id}". Disponível: ${Math.max(available, 0)}, Solicitado: ${item.quantity}`,
 						)
 					}
 					// Only the part beyond what's on hand is owed (clamp at 0 so an
@@ -101,16 +134,24 @@ export class PrismaOrderRepository implements OrderRepository {
 				runningAvailable.set(item.product_id, available - item.quantity)
 			}
 
+			// Numbered by the server. Taken after the stock checks because the counter row
+			// stays locked until commit (it serialises this seller's order creation); a
+			// rollback hands the number back, so numbers stay contiguous.
+			const sequence = await nextSellerSequenceValue(tx, data.seller_id, 'order')
+			const orderNumber = orderNumberFor(sequence)
+
 			// Create order with items
 			const order = await tx.order.create({
 				data: {
 					seller_id: data.seller_id,
 					customer_id: data.customer_id,
-					order_number: data.order_number,
+					order_number: orderNumber,
 					notes: data.notes,
 					subtotal: data.subtotal,
 					discount: data.discount,
 					total: data.total,
+					metadata: data.metadata as Prisma.InputJsonValue | undefined,
+					tracking_token: data.tracking_token,
 					Order_item: {
 						create: data.items.map((it) => ({
 							product_id: it.product_id,
@@ -172,22 +213,66 @@ export class PrismaOrderRepository implements OrderRepository {
 			// left without its billing record. Previously billing was a separate call
 			// whose failure was swallowed as a warning, silently dropping the charge.
 			if (data.billing) {
-				await tx.billing.create({
-					data: {
-						order_id: order.id,
-						billing_number: data.billing.billing_number,
-						total_amount: data.billing.total_amount,
-						paid_amount: data.billing.paid_amount,
-						payment_method: data.billing.payment_method as any,
-						payment_status: data.billing.payment_status as any,
-						status: data.billing.status as any,
-						due_date: data.billing.due_date,
-					},
+				const billing = {
+					order_id: order.id,
+					seller_id: data.seller_id,
+					total_amount: data.billing.total_amount,
+					paid_amount: data.billing.paid_amount,
+					payment_method: data.billing.payment_method as any,
+					payment_status: data.billing.payment_status as any,
+					status: data.billing.status as any,
+					due_date: data.billing.due_date,
+				}
+				// COB-n mirrors PED-n. A charge typed by hand may already hold that number
+				// (billing numbers are free text on POST /orders/:id/billings): ON CONFLICT
+				// DO NOTHING keeps the transaction alive, and the order id disambiguates.
+				const { count } = await tx.billing.createMany({
+					data: [{ ...billing, billing_number: billingNumberFor(sequence) }],
+					skipDuplicates: true,
 				})
+				if (count === 0) {
+					await tx.billing.create({
+						data: { ...billing, billing_number: `${billingNumberFor(sequence)}-${order.id}` },
+					})
+				}
 			}
 
-			return { order: order as unknown as OrderWithRelations, oversold }
+			await appendDomainEvents(tx, [
+				{
+					sellerId: data.seller_id,
+					aggregateType: 'order',
+					aggregateId: order.id,
+					eventType: DOMAIN_EVENT_TYPES.ORDER_CREATED,
+					payload: orderCreatedPayload(order.id, orderNumber, data, oversold),
+				},
+			])
+
+			if (idempotency) await completeIdempotencyKey(tx, idempotency, order.id, 201)
+
+			return { orderId: order.id, replayed: false }
 		})
+	}
+
+	async findEvents(orderId: number): Promise<OrderEvent[] | null> {
+		const order = await this.prisma.order.findUnique({
+			where: { id: orderId },
+			select: { seller_id: true },
+		})
+		if (
+			!order ||
+			(!this.tenantContext.isAdmin() && order.seller_id !== this.tenantContext.getSellerId())
+		) {
+			return null
+		}
+		const events = await this.prisma.domainEvent.findMany({
+			where: { seller_id: order.seller_id, aggregate_type: 'order', aggregate_id: String(orderId) },
+			orderBy: { occurred_at: 'asc' },
+			select: { id: true, event_type: true, occurred_at: true, payload: true },
+		})
+		return events.map((event) => ({
+			...event,
+			payload: (event.payload ?? {}) as Record<string, unknown>,
+		}))
 	}
 
 	async addItem(data: CreateOrderItemData): Promise<OrderItem> {
@@ -344,6 +429,23 @@ export class PrismaOrderRepository implements OrderRepository {
 				data: { status: status as any },
 			})
 
+			if (order.status !== status) {
+				await appendDomainEvents(tx, [
+					{
+						sellerId: order.seller_id,
+						aggregateType: 'order',
+						aggregateId: id,
+						eventType: DOMAIN_EVENT_TYPES.ORDER_STATUS_CHANGED,
+						payload: {
+							orderId: id,
+							orderNumber: order.order_number,
+							from: order.status,
+							to: status,
+						},
+					},
+				])
+			}
+
 			if (billingUpdate) {
 				await tx.billing.updateMany({
 					where: { order_id: id },
@@ -368,11 +470,37 @@ export class PrismaOrderRepository implements OrderRepository {
 		return this.prisma.$transaction(async (tx) => {
 			const order = await this.requireOrderInTenant(tx, id)
 
+			// Financial history is never erased (D2): an order whose charge has money on
+			// it is canceled, not deleted. Until the payment ledger exists (Phase 1C),
+			// "has payments" means a positive paid_amount.
+			const paid = await tx.billing.findFirst({
+				where: { order_id: id, paid_amount: { gt: 0 } },
+				select: { id: true },
+			})
+			if (paid) {
+				throw new ConflictException({
+					message:
+						'Este pedido tem pagamento registrado e não pode ser excluído. Cancele o pedido em vez de excluí-lo.',
+					error: 'Conflict',
+					code: ORDER_ERROR_CODES.hasPayments,
+				})
+			}
+
 			// Only restore stock if it wasn't already returned by a prior cancellation —
 			// otherwise deleting a canceled order would double-count stock.
 			if (order.status !== 'canceled') {
 				await this.restoreStockInTx(tx, id)
 			}
+
+			await appendDomainEvents(tx, [
+				{
+					sellerId: order.seller_id,
+					aggregateType: 'order',
+					aggregateId: id,
+					eventType: DOMAIN_EVENT_TYPES.ORDER_DELETED,
+					payload: { orderId: id, orderNumber: order.order_number, status: order.status },
+				},
+			])
 
 			return tx.order.delete({ where: { id } }) as unknown as Order
 		})
@@ -381,7 +509,10 @@ export class PrismaOrderRepository implements OrderRepository {
 	// Loads an order inside a transaction and enforces tenant ownership. Throws
 	// NotFoundException (404) for both missing AND cross-tenant orders so existence
 	// is never leaked to another seller. Mirrors the guard already used in addItem.
-	private async requireOrderInTenant(tx: any, id: number): Promise<{ status: string }> {
+	private async requireOrderInTenant(
+		tx: any,
+		id: number,
+	): Promise<{ status: string; seller_id: string; order_number: string }> {
 		const order = await tx.order.findUnique({ where: { id } })
 		if (
 			!order ||
@@ -426,5 +557,31 @@ export class PrismaOrderRepository implements OrderRepository {
 				})
 			}
 		}
+	}
+}
+
+/**
+ * order.created payload: ids, numbers, quantities and cents only (no customer PII).
+ * Product names are snapshotted for the "Venda sem estoque" notification text.
+ */
+function orderCreatedPayload(
+	orderId: number,
+	orderNumber: string,
+	data: CreateOrderData,
+	oversold: OversoldItem[],
+): Record<string, unknown> {
+	return {
+		orderId,
+		orderNumber,
+		source: data.source,
+		customerId: data.customer_id,
+		total: data.total,
+		itemCount: data.items.length,
+		oversold: oversold.map((item) => ({
+			productId: item.product_id,
+			productName: item.product_name,
+			available: item.available,
+			requested: item.requested,
+		})),
 	}
 }
