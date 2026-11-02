@@ -97,4 +97,22 @@ export interface SubscriptionRepository {
 	// Reconciliation: account ids currently sitting on a paid plan, used to detect
 	// accounts that should be downgraded because Stripe no longer has them active.
 	findPaidAccountIds(planTypes: string[]): Promise<string[]>
+
+	// --- One Stripe Customer per account (AUDIT-001) ---
+	findStripeCustomerId(accountId: string): Promise<string | null>
+	// Stores the Customer only if the account has none yet; returns whichever id ends up
+	// stored (ours, or the one a concurrent request saved first).
+	setStripeCustomerIdIfMissing(accountId: string, customerId: string): Promise<string | null>
+	// Swaps a stale (deleted in Stripe) Customer for its replacement, only if the account
+	// still points at the stale one; returns whichever id ends up stored.
+	replaceStripeCustomerId(
+		accountId: string,
+		staleCustomerId: string,
+		customerId: string,
+	): Promise<string | null>
+	// Distinct Stripe Customers already seen on the account's subscription rows (legacy
+	// accounts may have several, from before Customers were reused).
+	findProviderCustomerIds(accountId: string): Promise<string[]>
+	// provider_subscription_id of the account's active/trialing Stripe rows.
+	findPayingProviderSubscriptionIds(accountId: string): Promise<string[]>
 }

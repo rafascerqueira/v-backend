@@ -213,4 +213,66 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 		})
 		return rows.map((row) => row.id)
 	}
+
+	async findStripeCustomerId(accountId: string): Promise<string | null> {
+		const account = await this.prisma.account.findUnique({
+			where: { id: accountId },
+			select: { stripe_customer_id: true },
+		})
+		return account?.stripe_customer_id ?? null
+	}
+
+	async setStripeCustomerIdIfMissing(
+		accountId: string,
+		customerId: string,
+	): Promise<string | null> {
+		// Conditional write: only the first concurrent request stores its Customer; the
+		// re-read returns whichever id won, so every caller converges on the same one.
+		await this.prisma.account.updateMany({
+			where: { id: accountId, stripe_customer_id: null },
+			data: { stripe_customer_id: customerId },
+		})
+		return this.findStripeCustomerId(accountId)
+	}
+
+	async replaceStripeCustomerId(
+		accountId: string,
+		staleCustomerId: string,
+		customerId: string,
+	): Promise<string | null> {
+		// Compare-and-swap on the stale value: a concurrent replacement wins once.
+		await this.prisma.account.updateMany({
+			where: { id: accountId, stripe_customer_id: staleCustomerId },
+			data: { stripe_customer_id: customerId },
+		})
+		return this.findStripeCustomerId(accountId)
+	}
+
+	async findProviderCustomerIds(accountId: string): Promise<string[]> {
+		const rows = await this.prisma.subscription.findMany({
+			where: {
+				account_id: accountId,
+				payment_provider: 'stripe',
+				provider_customer_id: { not: null },
+			},
+			select: { provider_customer_id: true },
+			distinct: ['provider_customer_id'],
+		})
+		return rows.flatMap((row) => (row.provider_customer_id ? [row.provider_customer_id] : []))
+	}
+
+	async findPayingProviderSubscriptionIds(accountId: string): Promise<string[]> {
+		const rows = await this.prisma.subscription.findMany({
+			where: {
+				account_id: accountId,
+				payment_provider: 'stripe',
+				status: { in: ['active', 'trialing'] },
+				provider_subscription_id: { not: null },
+			},
+			select: { provider_subscription_id: true },
+		})
+		return rows.flatMap((row) =>
+			row.provider_subscription_id ? [row.provider_subscription_id] : [],
+		)
+	}
 }

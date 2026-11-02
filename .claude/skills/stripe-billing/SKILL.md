@@ -41,14 +41,18 @@ defer to `prisma-migrations-safe`. Do **not** edit anything under `.devin/`.
    must be safe to re-run (upsert/`updateBy...ProviderId`, not blind insert).
 3. **Idempotency keys on subscription mutations.** Any state-changing Stripe call
    should pass `{ idempotencyKey }` as the second arg so a retried request can't
-   double-charge or duplicate a subscription. `createCheckoutSession` wires this via
-   `checkoutIdempotencyKey`: `checkout_${accountId}_${sha256(params)[0..16]}_${10-min window}`.
-   Stripe answers `idempotency_error` when a key is reused with **different**
-   parameters, so the key must be derived from the parameters (promo coupon, email,
-   price, tier): a changed request gets a new key, an identical double-submit inside
-   the window replays the first session, and a later retry gets a fresh one. A
-   time-only bucket (e.g. per day) is NOT enough. Key any new mutation off
-   `account_id` + a hash of its parameters the same way.
+   double-charge or duplicate a subscription. Stripe compares the **whole request body**
+   for a reused key and answers `idempotency_error` if anything differs. So a key
+   must never be shared by two requests whose bodies can differ, and a body with a
+   volatile field like `expires_at` always differs between attempts.
+   - Checkout session: `checkout_${accountId}_${attemptId}`. The attempt id is the
+     per-account lock token, so the key only dedupes the SDK's own network retries of
+     that request. Duplicates across attempts are prevented by the lock and by
+     expiring older open sessions, not by the key. A time-bucketed or params-hash
+     key breaks every retry within the bucket (AUDIT-010).
+   - Customer: `customer_${accountId}_${purpose}_${hash(params)}`, where `purpose` is
+     `initial`, or `replace_<staleId>` when the stored Customer was deleted, so a
+     replacement never replays the deleted one.
 4. **Card-only recurring.** `mode: 'subscription'`, `payment_method_types: ['card']`.
    No boleto/Pix/one-off here.
 5. **All amounts are integer cents.** `PLAN_PRICES.pro = 1490` (R$ 14,90). Stripe
@@ -94,20 +98,48 @@ defer to `prisma-migrations-safe`. Do **not** edit anything under `.devin/`.
    `account_id` rides on `metadata.account_id` (set at checkout + on `subscription_data`).
    No metadata → log and return; never guess the tenant.
 
-3. **Checkout & portal** (`StripeService` + `SubscriptionController`)
-   - `POST /subscriptions/checkout { planId }` → body validated by `checkoutSchema`
-     (`z.enum(PAID_PLANS)`: `planId` doubles as a ConfigService path resolved with
-     lodash `get`, so `'[pro]'` would otherwise find the Pro price) → 409 when
-     `hasBlockingSubscription` (one paid subscription per account; tier switches go
-     through the portal) → resolve `stripe.priceIds.<planId>` (unconfigured → 400),
-     create a card-only subscription Checkout session with
-     `metadata.account_id`, return `{ url }`. Optional promo coupon via
-     `SettingsService.getPromotionalPeriod()`.
-   - `POST /subscriptions/portal` → Billing Portal session for the stored
-     `provider_customer_id` (lets the seller update card / cancel). Resolves the sub
-     via `getManageableSubscription` — active/trialing/**past_due**/paused, NOT
-     active-only — so a seller in dunning can still reach the portal to fix their
-     card. No manageable sub → 400.
+3. **Checkout & portal** (`CheckoutService` + `StripeService` + `SubscriptionController`)
+   - **One paid subscription per account, enforced from Stripe's live state**, never
+     from local rows alone (rows only exist once a webhook lands; AUDIT-001).
+     `POST /subscriptions/checkout { planId }`:
+     1. body validated by `checkoutSchema` (`z.enum(PAID_PLANS)`: `planId` doubles as
+        a ConfigService path resolved with lodash `get`, so `'[pro]'` would otherwise
+        find the Pro price); unconfigured price/Stripe → 400;
+     2. per-account Redis lock `checkout-lock:{accountId}`
+        (`RedisService.acquireLock`/`releaseLock`); busy → 409 `CHECKOUT_IN_PROGRESS`;
+     3. local `hasBlockingSubscription` → 409 `SUBSCRIPTION_EXISTS`;
+     4. **one Stripe Customer per account**: `accounts.stripe_customer_id`, created
+        once by `getOrCreateCustomer`. Checkout passes `customer`, **never
+        `customer_email`**, which spawned a Customer per session and hid existing
+        subscriptions from Stripe. A stored Customer that was deleted in Stripe (or
+        is from the other mode) is replaced with a compare-and-swap;
+     5. `expireOpenCheckoutSessions` **first**, so a session paid in the meantime
+        shows up as a live subscription in the next step instead of slipping
+        between the two;
+     6. live `listLiveSubscriptions` over that Customer plus legacy
+        `provider_customer_id`s:
+        - active/trialing/past_due/unpaid/paused → 409 `SUBSCRIPTION_EXISTS` (the
+          way forward is the portal);
+        - this account's `incomplete` (never paid) is canceled; one younger than
+          10 min may still be in 3-D Secure → 409 `CHECKOUT_IN_PROGRESS`;
+     7. create the card-only session (`expires_at` = +35 min, above Stripe's 30 min
+        minimum), then **re-check the lock is still ours** (`isLockHeld`). If a slow
+        call outlived it, expire the new session and return 409. Stripe calls are
+        bounded (20 s timeout, 1 retry) and the lock TTL is 60 s.
+     Any Stripe error **fails closed**: 500, no session. 409 bodies carry a `code`
+     (SCREAMING_SNAKE_CASE only) that `GlobalExceptionFilter` forwards. Optional
+     promo coupon via `SettingsService.getPromotionalPeriod()`.
+   - **Backstop:** a second paying subscription that slips through is logged as
+     `[DUPLICATE_SUBSCRIPTION]`, by the webhook and by the reconcile
+     (`duplicateSubscriptionAccounts`). There is no automatic cancel or refund: handle
+     it in the Dashboard. Also keep Checkout's "Limit customers to one subscription"
+     setting on, with the portal login link enabled.
+   - `POST /subscriptions/portal` → Billing Portal session for the Customer that owns
+     the account's manageable (live) subscription, falling back to
+     `accounts.stripe_customer_id` (`getPortalCustomerId`). The fallback covers a
+     legacy account with several Customers, the time before any webhook has landed,
+     and a free account that still owes an unpaid invoice. No Customer → 400. The
+     portal configuration must allow paying open invoices and canceling.
 
 4. **Plan gating**
    - Per-resource usage caps: `@UseGuards(PlanLimitsGuard)` + `@CheckPlanLimit('product'|'customer'|'order')`

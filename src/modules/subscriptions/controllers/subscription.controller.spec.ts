@@ -11,6 +11,7 @@ import { Test } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { checkoutSchema } from '../dto/checkout.dto'
+import { CheckoutService } from '../services/checkout.service'
 import { PlanLimitsService } from '../services/plan-limits.service'
 import { StripeService } from '../services/stripe.service'
 import { SubscriptionService } from '../services/subscription.service'
@@ -22,7 +23,11 @@ const serviceMock = {
 	refreshUsage: jest.fn(),
 	getActiveSubscription: jest.fn(),
 	getManageableSubscription: jest.fn(),
-	hasBlockingSubscription: jest.fn(),
+	getPortalCustomerId: jest.fn(),
+}
+
+const checkoutServiceMock = {
+	startCheckout: jest.fn(),
 }
 
 const planLimitsServiceMock = {
@@ -55,6 +60,7 @@ describe('SubscriptionController', () => {
 				{ provide: PlanLimitsService, useValue: planLimitsServiceMock },
 				{ provide: StripeService, useValue: stripeServiceMock },
 				{ provide: ConfigService, useValue: configServiceMock },
+				{ provide: CheckoutService, useValue: checkoutServiceMock },
 			],
 		})
 			.overrideGuard(JwtAuthGuard)
@@ -195,44 +201,24 @@ describe('SubscriptionController', () => {
 		})
 	})
 
+	// Orchestration (lock, live Stripe check, 409s) is covered in checkout.service.spec.
 	describe('createCheckout', () => {
-		it('should resolve the price id and forward the planId as the tier', async () => {
-			configServiceMock.get.mockImplementation((key: string) => {
-				if (key === 'stripe.priceIds.pro') return 'price_pro'
-				if (key === 'frontendUrl') return 'https://app.test'
-				return undefined
-			})
-			stripeServiceMock.createCheckoutSession.mockResolvedValueOnce({ url: 'https://pay' })
+		it('delegates to CheckoutService with the caller account and validated tier', async () => {
+			checkoutServiceMock.startCheckout.mockResolvedValueOnce({ url: 'https://pay' })
 
-			const result = await controller.createCheckout(makeRequest(), { planId: 'pro' })
+			const result = await controller.createCheckout(makeRequest(), { planId: 'enterprise' })
 
-			expect(stripeServiceMock.createCheckoutSession).toHaveBeenCalledWith(
-				'user-uuid-1',
-				'price_pro',
-				'https://app.test/plans?checkout=success',
-				'https://app.test/plans?checkout=canceled',
-				'pro',
-			)
+			expect(checkoutServiceMock.startCheckout).toHaveBeenCalledWith('user-uuid-1', 'enterprise')
 			expect(result).toEqual({ url: 'https://pay' })
 		})
 
-		it('should 409 and not open a checkout when the account already has a subscription', async () => {
-			serviceMock.hasBlockingSubscription.mockResolvedValueOnce(true)
+		it('propagates the 409 from CheckoutService unchanged', async () => {
+			const conflict = new ConflictException({ message: 'x', code: 'SUBSCRIPTION_EXISTS' })
+			checkoutServiceMock.startCheckout.mockRejectedValueOnce(conflict)
 
-			const call = controller.createCheckout(makeRequest(), { planId: 'enterprise' })
-
-			await expect(call).rejects.toBeInstanceOf(ConflictException)
-			await expect(call).rejects.toThrow('Gerenciar assinatura')
-			expect(serviceMock.hasBlockingSubscription).toHaveBeenCalledWith('user-uuid-1')
-			expect(stripeServiceMock.createCheckoutSession).not.toHaveBeenCalled()
-		})
-
-		it('should 400 when the plan/price is not configured', async () => {
-			configServiceMock.get.mockReturnValue(undefined)
-
-			await expect(
-				controller.createCheckout(makeRequest(), { planId: 'enterprise' }),
-			).rejects.toThrow('Plano inválido ou pagamento não configurado')
+			await expect(controller.createCheckout(makeRequest(), { planId: 'pro' })).rejects.toBe(
+				conflict,
+			)
 		})
 	})
 
@@ -265,11 +251,8 @@ describe('SubscriptionController', () => {
 	})
 
 	describe('createPortal', () => {
-		it('should open the portal for a past_due subscription (dunning recovery)', async () => {
-			serviceMock.getManageableSubscription.mockResolvedValueOnce({
-				status: 'past_due',
-				provider_customer_id: 'cus_1',
-			})
+		it("opens the portal for the account's Stripe Customer (works before any webhook)", async () => {
+			serviceMock.getPortalCustomerId.mockResolvedValueOnce('cus_1')
 			configServiceMock.get.mockImplementation((key: string) =>
 				key === 'frontendUrl' ? 'https://app.test' : undefined,
 			)
@@ -277,7 +260,7 @@ describe('SubscriptionController', () => {
 
 			const result = await controller.createPortal(makeRequest())
 
-			expect(serviceMock.getManageableSubscription).toHaveBeenCalledWith('user-uuid-1')
+			expect(serviceMock.getPortalCustomerId).toHaveBeenCalledWith('user-uuid-1')
 			expect(stripeServiceMock.createPortalSession).toHaveBeenCalledWith(
 				'cus_1',
 				'https://app.test/plans',
@@ -285,8 +268,8 @@ describe('SubscriptionController', () => {
 			expect(result).toEqual({ url: 'https://portal' })
 		})
 
-		it('should 400 when there is no manageable subscription', async () => {
-			serviceMock.getManageableSubscription.mockResolvedValueOnce(null)
+		it('should 400 when the account has no Stripe Customer at all', async () => {
+			serviceMock.getPortalCustomerId.mockResolvedValueOnce(null)
 
 			await expect(controller.createPortal(makeRequest())).rejects.toThrow(
 				'Nenhuma assinatura ativa encontrada',

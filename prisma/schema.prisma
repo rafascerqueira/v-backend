@@ -75,6 +75,9 @@ model Account {
   facebook_id        String?     @unique @db.VarChar(255)
   role               AccountRole @default(seller)
   plan_type          PlanType    @default(free)
+  // The account's single Stripe Customer: every checkout reuses it so Stripe can see
+  // (and block) an existing subscription. Created on first checkout.
+  stripe_customer_id String?     @unique(map: "uq_accounts_stripe_customer_id") @db.VarChar(255)
   is_active          Boolean     @default(true)
   email_verified     Boolean     @default(false)
   email_verified_at  DateTime?   @db.Timestamptz()

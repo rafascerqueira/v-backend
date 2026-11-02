@@ -14,6 +14,7 @@ import { SubscriptionReconcileProcessor } from './processors/subscription-reconc
 import { PrismaPlanLimitsRepository } from './repositories/prisma-plan-limits.repository'
 import { PrismaSubscriptionRepository } from './repositories/prisma-subscription.repository'
 import { PrismaWebhookRepository } from './repositories/prisma-webhook.repository'
+import { CheckoutService } from './services/checkout.service'
 import { PlanLimitsService } from './services/plan-limits.service'
 import { StripeService } from './services/stripe.service'
 import { SubscriptionService } from './services/subscription.service'
@@ -31,6 +32,7 @@ import { WebhookService } from './services/webhook.service'
 		PlanLimitsService,
 		WebhookService,
 		StripeService,
+		CheckoutService,
 		SubscriptionReconcileService,
 		SubscriptionReconcileProcessor,
 		{

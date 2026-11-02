@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto'
-import { Inject, Injectable, Logger } from '@nestjs/common'
+import {
+	Inject,
+	Injectable,
+	InternalServerErrorException,
+	Logger,
+	NotFoundException,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Stripe from 'stripe'
 import { SettingsService } from '@/modules/admin/services/settings.service'
@@ -9,8 +15,29 @@ import {
 } from '@/shared/repositories/subscription.repository'
 import { PAID_PLANS, type PaidPlanType, toPaidPlanType } from '../constants/plan-limits'
 
-/** Double-submit protection window for checkout session creation. */
-const CHECKOUT_IDEMPOTENCY_WINDOW_MS = 10 * 60 * 1000
+/**
+ * Checkout session lifetime. Stripe's minimum is 30 minutes; a margin above it keeps
+ * clock skew / request latency from tripping the minimum-expiry validation.
+ */
+const CHECKOUT_SESSION_TTL_SECONDS = 35 * 60
+
+/**
+ * Bounded Stripe calls (SDK defaults: 80s timeout, 2 retries). Checkout runs several
+ * calls under a per-account lock, so a single slow call must not outlive the lock;
+ * webhooks and the reconcile are retried by Stripe/cron anyway.
+ */
+const STRIPE_TIMEOUT_MS = 20_000
+const STRIPE_MAX_NETWORK_RETRIES = 1
+
+/** Terminal subscription statuses: anything else is still alive in Stripe. */
+const ENDED_SUBSCRIPTION_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set([
+	'canceled',
+	'incomplete_expired',
+])
+
+function hashParams(params: unknown): string {
+	return createHash('sha256').update(JSON.stringify(params)).digest('hex').slice(0, 16)
+}
 
 export interface ManagedStripeSubscription {
 	accountId: string
@@ -49,6 +76,8 @@ export class StripeService {
 
 		this.stripe = new Stripe(secretKey, {
 			apiVersion: '2026-03-25.dahlia',
+			timeout: STRIPE_TIMEOUT_MS,
+			maxNetworkRetries: STRIPE_MAX_NETWORK_RETRIES,
 		})
 
 		this.logger.log('💳 Stripe initialized')
@@ -58,37 +87,152 @@ export class StripeService {
 		return this.stripe !== null
 	}
 
-	async createCustomer(email: string, name: string, accountId: string): Promise<string | null> {
-		if (!this.stripe) return null
+	private requireStripe(): Stripe {
+		if (!this.stripe) {
+			throw new InternalServerErrorException('Pagamento não configurado')
+		}
+		return this.stripe
+	}
 
+	/**
+	 * The account's single Stripe Customer, created on first use and stored on the
+	 * account. Reusing it is what lets Stripe (and our live check) see an existing
+	 * subscription. Throws on Stripe/DB errors: checkout must fail closed.
+	 */
+	async getOrCreateCustomer(accountId: string): Promise<string> {
+		const stripe = this.requireStripe()
+
+		const existing = await this.subscriptionRepository.findStripeCustomerId(accountId)
+		if (existing) {
+			if (await this.customerIsUsable(stripe, existing)) return existing
+
+			// The stored Customer was deleted in Stripe (support cleanup, data erasure) or
+			// belongs to the other Stripe mode. Without replacing it, every checkout and
+			// portal call would fail forever. The replacement uses a DIFFERENT idempotency
+			// key: the original one would replay the deleted Customer for 24h.
+			this.logger.warn(
+				`Stripe Customer ${existing} of account ${accountId} is gone; creating a replacement`,
+			)
+			const replacement = await this.createCustomer(stripe, accountId, `replace_${existing}`)
+			const stored = await this.subscriptionRepository.replaceStripeCustomerId(
+				accountId,
+				existing,
+				replacement,
+			)
+			return stored ?? replacement
+		}
+
+		const customerId = await this.createCustomer(stripe, accountId, 'initial')
+		// A concurrent request may have stored its Customer first; converge on that one.
+		const stored = await this.subscriptionRepository.setStripeCustomerIdIfMissing(
+			accountId,
+			customerId,
+		)
+		return stored ?? customerId
+	}
+
+	private async customerIsUsable(stripe: Stripe, customerId: string): Promise<boolean> {
 		try {
-			const customer = await this.stripe.customers.create({
-				email,
-				name,
-				metadata: { account_id: accountId },
-			})
-
-			return customer.id
+			const customer = await stripe.customers.retrieve(customerId)
+			return !(customer as Stripe.DeletedCustomer).deleted
 		} catch (error) {
-			this.logger.error('Failed to create Stripe customer', error)
-			return null
+			if ((error as Stripe.errors.StripeError)?.code === 'resource_missing') return false
+			throw error
 		}
 	}
 
+	private async createCustomer(
+		stripe: Stripe,
+		accountId: string,
+		purpose: string,
+	): Promise<string> {
+		const account = await this.subscriptionRepository.findAccountEmailName(accountId)
+		if (!account) throw new NotFoundException('Conta não encontrada')
+
+		const params: Stripe.CustomerCreateParams = {
+			email: account.email,
+			name: account.name,
+			metadata: { account_id: accountId },
+		}
+		// Keyed by account + purpose + params: a retry after a failed DB write replays the
+		// same Customer instead of creating an orphan.
+		const customer = await stripe.customers.create(params, {
+			idempotencyKey: `customer_${accountId}_${purpose}_${hashParams(params)}`,
+		})
+		return customer.id
+	}
+
+	/**
+	 * Every subscription of these Customers that is still alive in Stripe (anything not
+	 * canceled/incomplete_expired), read live so it doesn't depend on webhooks having
+	 * landed. A Customer deleted in Stripe is skipped.
+	 */
+	async listLiveSubscriptions(customerIds: string[]): Promise<Stripe.Subscription[]> {
+		const stripe = this.requireStripe()
+		const live: Stripe.Subscription[] = []
+
+		for (const customer of new Set(customerIds)) {
+			try {
+				for await (const sub of stripe.subscriptions.list({
+					customer,
+					status: 'all',
+					limit: 100,
+				})) {
+					if (!ENDED_SUBSCRIPTION_STATUSES.has(sub.status)) live.push(sub)
+				}
+			} catch (error) {
+				if ((error as Stripe.errors.StripeError)?.code === 'resource_missing') continue
+				throw error
+			}
+		}
+
+		return live
+	}
+
+	async cancelSubscription(subscriptionId: string): Promise<void> {
+		await this.requireStripe().subscriptions.cancel(subscriptionId)
+	}
+
+	/** Expires every still-open Checkout session of the Customer; returns how many. */
+	async expireOpenCheckoutSessions(customerId: string): Promise<number> {
+		const stripe = this.requireStripe()
+		let expired = 0
+		for await (const session of stripe.checkout.sessions.list({
+			customer: customerId,
+			status: 'open',
+			limit: 100,
+		})) {
+			await stripe.checkout.sessions.expire(session.id)
+			expired++
+		}
+		return expired
+	}
+
+	/** Expires one session (used when a checkout attempt lost its lock mid-flight). */
+	async expireCheckoutSession(sessionId: string): Promise<void> {
+		await this.requireStripe().checkout.sessions.expire(sessionId)
+	}
+
+	/**
+	 * `attemptId` scopes the idempotency key to ONE checkout attempt (the lock token), so
+	 * it only dedupes the SDK's own network retries of this request. Stripe compares the
+	 * whole request body for a reused key, and `expires_at` changes every second, so a
+	 * key shared across attempts would make every retry fail with idempotency_error.
+	 * Cross-attempt duplicates are prevented by the per-account lock and by expiring
+	 * older open sessions (CheckoutService).
+	 */
 	async createCheckoutSession(
 		accountId: string,
+		customerId: string,
 		priceId: string,
 		successUrl: string,
 		cancelUrl: string,
-		planType = 'pro',
+		planType: string,
+		attemptId: string,
 	): Promise<{ url: string | null; sessionId: string } | null> {
 		if (!this.stripe) return null
 
 		try {
-			const account = await this.subscriptionRepository.findAccountEmailName(accountId)
-
-			if (!account) return null
-
 			const promo = await this.settingsService.getPromotionalPeriod()
 			const couponId = promo.isActive
 				? await this.ensurePromotionalCoupon(promo.discountPercent)
@@ -106,14 +250,19 @@ export class StripeService {
 				line_items: [{ price: priceId, quantity: 1 }],
 				success_url: successUrl,
 				cancel_url: cancelUrl,
-				customer_email: account.email,
+				// The account's own Customer (never customer_email, which made Stripe create
+				// a new Customer per session and hid existing subscriptions).
+				customer: customerId,
 				metadata,
 				subscription_data: { metadata },
+				// Short-lived: an abandoned tab can't be paid hours later next to a newer
+				// session (Stripe's minimum is 30 minutes).
+				expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_TTL_SECONDS,
 				...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
 			}
 
 			const session = await this.stripe.checkout.sessions.create(params, {
-				idempotencyKey: this.checkoutIdempotencyKey(accountId, params),
+				idempotencyKey: `checkout_${accountId}_${attemptId}`,
 			})
 
 			return { url: session.url, sessionId: session.id }
@@ -121,24 +270,6 @@ export class StripeService {
 			this.logger.error('Failed to create checkout session', error)
 			return null
 		}
-	}
-
-	/**
-	 * Stripe rejects a reused idempotency key whose parameters differ (idempotency_error),
-	 * so the key is derived FROM the parameters: if the promo coupon, email, price or
-	 * tier changes between attempts, the key changes too. A double-submit with identical
-	 * parameters inside the same short window still replays the first session instead of
-	 * opening a second one. The window is short so that a later retry (or a re-subscribe
-	 * after a cancel) gets a fresh session rather than replaying a completed/expired one.
-	 */
-	checkoutIdempotencyKey(
-		accountId: string,
-		params: Stripe.Checkout.SessionCreateParams,
-		now: Date = new Date(),
-	): string {
-		const digest = createHash('sha256').update(JSON.stringify(params)).digest('hex').slice(0, 16)
-		const window = Math.floor(now.getTime() / CHECKOUT_IDEMPOTENCY_WINDOW_MS)
-		return `checkout_${accountId}_${digest}_${window}`
 	}
 
 	/**

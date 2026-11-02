@@ -14,7 +14,13 @@
  */
 
 import type { ArgumentsHost } from '@nestjs/common'
-import { BadRequestException, HttpException, HttpStatus, Logger } from '@nestjs/common'
+import {
+	BadRequestException,
+	ConflictException,
+	HttpException,
+	HttpStatus,
+	Logger,
+} from '@nestjs/common'
 import { GlobalExceptionFilter } from './global-exception.filter'
 
 function makeHost(url = '/api/things') {
@@ -96,6 +102,52 @@ describe('GlobalExceptionFilter', () => {
 
 			const body = send.mock.calls[0][0]
 			expect(body).not.toHaveProperty('details')
+		})
+
+		it('forwards a machine-readable `code` when the exception sets one', () => {
+			const { host, status, send } = makeHost()
+
+			filter.catch(
+				new ConflictException({
+					message: 'Você já tem uma assinatura.',
+					error: 'Conflict',
+					code: 'SUBSCRIPTION_EXISTS',
+				}),
+				host,
+			)
+
+			expect(status).toHaveBeenCalledWith(409)
+			expect(send).toHaveBeenCalledWith(
+				expect.objectContaining({
+					statusCode: 409,
+					message: 'Você já tem uma assinatura.',
+					error: 'Conflict',
+					code: 'SUBSCRIPTION_EXISTS',
+				}),
+			)
+		})
+
+		it('omits `code` when absent, and ignores a non-string code', () => {
+			const { host, send } = makeHost()
+			filter.catch(new ConflictException('Plain conflict'), host)
+			expect(send.mock.calls[0][0]).not.toHaveProperty('code')
+
+			const second = makeHost()
+			filter.catch(new ConflictException({ message: 'x', code: 42 }), second.host)
+			expect(second.send.mock.calls[0][0]).not.toHaveProperty('code')
+		})
+
+		it.each([
+			['free text', 'already subscribed'],
+			['lowercase', 'subscription_exists'],
+			['internal detail', 'ECONNREFUSED 10.0.0.5:5432'],
+			['too long', `A${'B'.repeat(64)}`],
+		])('drops a `code` that is not a SCREAMING_SNAKE_CASE identifier (%s)', (_label, code) => {
+			const { host, send } = makeHost()
+
+			filter.catch(new ConflictException({ message: 'x', code }), host)
+
+			expect(send.mock.calls[0][0]).not.toHaveProperty('code')
 		})
 	})
 
