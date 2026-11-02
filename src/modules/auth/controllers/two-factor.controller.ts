@@ -5,7 +5,12 @@ import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { type TwoFactorCodeDto, twoFactorCodeSchema } from '../dto/two-factor-code.dto'
 import { TwoFactorService } from '../services/two-factor.service'
 
-/** Same per-user brute-force budget for every endpoint that checks a TOTP/backup code. */
+/**
+ * Brute-force budget for endpoints that check a TOTP/backup code. Note: the
+ * default throttler tracker is the client IP and the key includes the handler,
+ * so this is per IP *and* per endpoint, not per account (per-account lockout +
+ * TOTP replay protection are tracked in docs/BACKLOG.md "Complete 2FA").
+ */
 const CODE_CHECK_THROTTLE = {
 	short: { ttl: 1000, limit: 1 },
 	medium: { ttl: 60000, limit: 5 },
