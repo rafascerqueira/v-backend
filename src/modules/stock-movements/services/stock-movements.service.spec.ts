@@ -1,117 +1,77 @@
 import { BadRequestException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
-import { QueueProducer } from '@/shared/queue/queue.producer'
+import { OutboxRelayService } from '@/shared/events/outbox-relay.service'
 import { STOCK_MOVEMENT_REPOSITORY } from '@/shared/repositories/stock-movement.repository'
 import { StockMovementsService } from './stock-movements.service'
 
 const repositoryMock = {
 	findByProduct: jest.fn(),
 	create: jest.fn(),
+	adjustTo: jest.fn(),
 }
 
-const queueMock = {
-	createNotification: jest.fn(),
+const outboxMock = { kick: jest.fn(), relayPending: jest.fn() }
+
+const dto = {
+	movement_type: 'in' as const,
+	reference_type: 'purchase' as const,
+	reference_id: 1,
+	product_id: 7,
+	quantity: 5,
 }
 
 describe('StockMovementsService', () => {
 	let service: StockMovementsService
 
 	beforeEach(async () => {
+		jest.resetAllMocks()
 		const module = await Test.createTestingModule({
 			providers: [
 				StockMovementsService,
 				{ provide: STOCK_MOVEMENT_REPOSITORY, useValue: repositoryMock },
-				{ provide: QueueProducer, useValue: queueMock },
+				{ provide: OutboxRelayService, useValue: outboxMock },
 			],
 		}).compile()
 
 		service = module.get(StockMovementsService)
-		jest.clearAllMocks()
 	})
 
 	it('listByProduct should delegate to repository', async () => {
 		repositoryMock.findByProduct.mockResolvedValueOnce([])
-		const res = await service.listByProduct(10)
+		await expect(service.listByProduct(10)).resolves.toEqual([])
 		expect(repositoryMock.findByProduct).toHaveBeenCalledWith(10)
-		expect(res).toEqual([])
 	})
 
-	it('create returns the movement and notifies nothing when no backorder was fulfilled', async () => {
-		const dto = {
-			movement_type: 'in' as const,
-			reference_type: 'purchase' as const,
-			reference_id: 1,
-			product_id: 1,
-			quantity: 5,
-		}
+	it('create returns the movement and kicks the relay (notifications follow from stock.moved)', async () => {
 		repositoryMock.create.mockResolvedValueOnce({
-			movement: { id: 1, product_id: 1 },
-			fulfilled: [],
+			movement: { id: 2, product_id: 7 },
+			fulfilled: [{ order_id: 42, order_number: 'PED-000042' }],
 		})
 
 		const res = await service.create(dto)
 
 		expect(repositoryMock.create).toHaveBeenCalledWith(dto)
-		expect(res).toEqual({ id: 1, product_id: 1 })
-		expect(queueMock.createNotification).not.toHaveBeenCalled()
+		expect(res).toEqual({ id: 2, product_id: 7 })
+		expect(outboxMock.kick).toHaveBeenCalledTimes(1)
 	})
 
-	it('create enqueues a "ready to finalize" notification for each fulfilled order', async () => {
-		repositoryMock.create.mockResolvedValueOnce({
-			movement: { id: 2, product_id: 7 },
-			fulfilled: [
-				{
-					seller_id: 'seller-1',
-					order_id: 42,
-					order_number: 'PED-001',
-					product_id: 7,
-					product_name: 'Camiseta',
-					quantity: 3,
-				},
-			],
-		})
-
-		await service.create({
-			movement_type: 'in' as const,
-			reference_type: 'purchase' as const,
-			reference_id: 1,
-			product_id: 7,
-			quantity: 5,
-		})
-
-		expect(queueMock.createNotification).toHaveBeenCalledTimes(1)
-		expect(queueMock.createNotification).toHaveBeenCalledWith(
-			expect.objectContaining({
-				userId: 'seller-1',
-				type: 'success',
-				data: expect.objectContaining({ orderId: 42, orderNumber: 'PED-001', quantity: 3 }),
-			}),
-		)
-	})
-
-	it('create should propagate repository errors (insufficient stock)', async () => {
+	it('create propagates repository errors (insufficient stock / product not found)', async () => {
 		repositoryMock.create.mockRejectedValueOnce(new BadRequestException('Insufficient stock'))
-		await expect(
-			service.create({
-				movement_type: 'out' as const,
-				reference_type: 'sale' as const,
-				reference_id: 3,
-				product_id: 1,
-				quantity: 5,
-			}),
-		).rejects.toBeInstanceOf(BadRequestException)
+		await expect(service.create({ ...dto, movement_type: 'out' })).rejects.toBeInstanceOf(
+			BadRequestException,
+		)
+		expect(outboxMock.kick).not.toHaveBeenCalled()
 	})
 
-	it('create should propagate repository errors (product not found)', async () => {
-		repositoryMock.create.mockRejectedValueOnce(new BadRequestException('Product not found'))
-		await expect(
-			service.create({
-				movement_type: 'in' as const,
-				reference_type: 'purchase' as const,
-				reference_id: 4,
-				product_id: 9,
-				quantity: 1,
-			}),
-		).rejects.toBeInstanceOf(BadRequestException)
+	it('adjustTo records the adjustment and kicks the relay; a no-op returns null', async () => {
+		repositoryMock.adjustTo
+			.mockResolvedValueOnce({ movement: { id: 3 }, fulfilled: [] })
+			.mockResolvedValueOnce(null)
+
+		await expect(service.adjustTo(7, 4)).resolves.toEqual({ id: 3 })
+		await expect(service.adjustTo(7, 4)).resolves.toBeNull()
+
+		expect(repositoryMock.adjustTo).toHaveBeenCalledWith(7, 4)
+		expect(outboxMock.kick).toHaveBeenCalledTimes(1)
 	})
 })

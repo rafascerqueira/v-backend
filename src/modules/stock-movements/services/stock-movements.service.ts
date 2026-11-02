@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { QueueProducer } from '@/shared/queue/queue.producer'
+import { OutboxRelayService } from '@/shared/events/outbox-relay.service'
 import {
 	STOCK_MOVEMENT_REPOSITORY,
 	type StockMovementRepository,
@@ -11,35 +11,30 @@ export class StockMovementsService {
 	constructor(
 		@Inject(STOCK_MOVEMENT_REPOSITORY)
 		private readonly stockMovementRepository: StockMovementRepository,
-		private readonly queueProducer: QueueProducer,
+		private readonly outboxRelay: OutboxRelayService,
 	) {}
 
 	async listByProduct(productId: number) {
 		return this.stockMovementRepository.findByProduct(productId)
 	}
 
+	/**
+	 * The "Reposição alocada a pedido" notification now follows from the stock.moved
+	 * event written in the same transaction (StockNotificationsHandler) instead of an
+	 * enqueue after the commit, which a Redis failure could lose.
+	 */
 	async create(dto: CreateStockMovementDto) {
-		const { movement, fulfilled } = await this.stockMovementRepository.create(dto)
-
-		// Tell the seller which open orders this arrival just covered. Enqueued (not
-		// sent inline) per the side-effect rule, after the commit so it never fires
-		// on a rolled-back movement.
-		for (const order of fulfilled) {
-			await this.queueProducer.createNotification({
-				userId: order.seller_id,
-				type: 'success',
-				title: 'Reposição alocada a pedido',
-				message: `A reposição de "${order.product_name}" cobriu o pedido ${order.order_number} (${order.quantity} un). Pronto para finalizar.`,
-				data: {
-					orderId: order.order_id,
-					orderNumber: order.order_number,
-					productId: order.product_id,
-					quantity: order.quantity,
-				},
-			})
-		}
-
+		const { movement } = await this.stockMovementRepository.create(dto)
+		// Not awaited: kick() never throws, but a degraded Redis would delay the response.
+		void this.outboxRelay.kick()
 		// Keep the HTTP response shape as the movement itself (unchanged for callers).
 		return movement
+	}
+
+	/** Sets the on-hand quantity through an `adjustment` movement of the difference. */
+	async adjustTo(productId: number, target: number) {
+		const result = await this.stockMovementRepository.adjustTo(productId, target)
+		if (result) void this.outboxRelay.kick()
+		return result?.movement ?? null
 	}
 }

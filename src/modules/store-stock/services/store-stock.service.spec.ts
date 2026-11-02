@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing'
+import { StockMovementsService } from '@/modules/stock-movements/services/stock-movements.service'
 import { STORE_STOCK_REPOSITORY } from '@/shared/repositories/store-stock.repository'
 import { StoreStockService } from './store-stock.service'
 
@@ -8,12 +9,18 @@ const repositoryMock = {
 	upsert: jest.fn(),
 }
 
+const stockMovementsMock = { adjustTo: jest.fn() }
+
 describe('StoreStockService', () => {
 	let service: StoreStockService
 
 	beforeEach(async () => {
 		const module = await Test.createTestingModule({
-			providers: [StoreStockService, { provide: STORE_STOCK_REPOSITORY, useValue: repositoryMock }],
+			providers: [
+				StoreStockService,
+				{ provide: STORE_STOCK_REPOSITORY, useValue: repositoryMock },
+				{ provide: StockMovementsService, useValue: stockMovementsMock },
+			],
 		}).compile()
 
 		service = module.get(StoreStockService)
@@ -27,11 +34,26 @@ describe('StoreStockService', () => {
 		expect(res).toEqual({ product_id: 1, quantity: 5 })
 	})
 
-	it('upsert should delegate to repository', async () => {
-		repositoryMock.upsert.mockResolvedValueOnce({ product_id: 2, quantity: 10 })
-		const res = await service.upsert(2, { quantity: 10 })
-		expect(repositoryMock.upsert).toHaveBeenCalledWith(2, { quantity: 10 })
-		expect(res).toEqual({ product_id: 2, quantity: 10 })
+	it('upsert turns a quantity change into an adjustment movement, never an absolute write', async () => {
+		repositoryMock.upsert.mockResolvedValueOnce({ product_id: 2, quantity: 10, min_stock: 3 })
+
+		const res = await service.upsert(2, { quantity: 10, min_stock: 3 })
+
+		expect(stockMovementsMock.adjustTo).toHaveBeenCalledWith(2, 10)
+		expect(repositoryMock.upsert).toHaveBeenCalledWith(2, { min_stock: 3 })
+		expect(stockMovementsMock.adjustTo.mock.invocationCallOrder[0]).toBeLessThan(
+			repositoryMock.upsert.mock.invocationCallOrder[0],
+		)
+		expect(res).toEqual({ product_id: 2, quantity: 10, min_stock: 3 })
+	})
+
+	it('upsert without a quantity only saves the settings', async () => {
+		repositoryMock.upsert.mockResolvedValueOnce({ product_id: 2, min_stock: 1 })
+
+		await service.upsert(2, { min_stock: 1 })
+
+		expect(stockMovementsMock.adjustTo).not.toHaveBeenCalled()
+		expect(repositoryMock.upsert).toHaveBeenCalledWith(2, { min_stock: 1 })
 	})
 
 	it('findAll should delegate to repository', async () => {
