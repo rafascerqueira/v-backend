@@ -37,6 +37,17 @@ const CUSTOMER_AUTH_THROTTLE = {
 }
 
 /** Per-IP limits for public order tracking: room for a customer refreshing, not for enumeration. */
+/**
+ * Anonymous order creation: every order now reserves stock, opens a charge and
+ * notifies the seller, so it gets its own per-IP budget (lenient enough for
+ * shoppers behind a shared mobile-carrier IP).
+ */
+const STOREFRONT_ORDER_THROTTLE = {
+	short: { ttl: 1000, limit: 1 },
+	medium: { ttl: 60000, limit: 10 },
+	long: { ttl: 3600000, limit: 60 },
+}
+
 const ORDER_TRACKING_THROTTLE = {
 	short: { ttl: 1000, limit: 2 },
 	medium: { ttl: 60000, limit: 20 },
@@ -202,6 +213,7 @@ export class CatalogController {
 
 	@Public()
 	@Post('loja/:slug/orders')
+	@Throttle(STOREFRONT_ORDER_THROTTLE)
 	@HttpCode(HttpStatus.CREATED)
 	@ApiOperation({ summary: 'Create order from a specific store (public)' })
 	@ApiParam({ name: 'slug', type: String, description: 'Store slug' })

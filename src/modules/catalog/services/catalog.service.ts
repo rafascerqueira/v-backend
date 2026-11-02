@@ -282,10 +282,32 @@ export class CatalogService {
 			throw new BadRequestException('Um ou mais produtos não foram encontrados nesta loja')
 		}
 
-		// Stock is checked (and decremented) under lock inside the order transaction:
-		// customers can only buy what is in stock — allow_oversell is a seller-only
-		// capability, so the storefront path never honours it. Untracked products (no
-		// stock row) stay orderable.
+		// Customers can only buy what is in stock — allow_oversell is a seller-only
+		// capability, so the storefront never honours it. This is a cheap fast-fail
+		// (before a new customer gets created for an order that can't happen); the
+		// authoritative check and decrement run under lock in the order transaction.
+		// Untracked products (no stock row) stay orderable.
+		const stocks = await this.catalogRepository.findStocks(productIds)
+		const availableByProduct = new Map<number, number>()
+		for (const stock of stocks) {
+			availableByProduct.set(stock.product_id, stock.quantity - stock.reserved_quantity)
+		}
+		const requestedByProduct = new Map<number, number>()
+		for (const item of items) {
+			requestedByProduct.set(
+				item.product_id,
+				(requestedByProduct.get(item.product_id) ?? 0) + item.quantity,
+			)
+		}
+		for (const [productId, requested] of requestedByProduct) {
+			const available = availableByProduct.get(productId)
+			if (available !== undefined && available < requested) {
+				const product = validProducts.find((p) => p.id === productId)
+				throw new BadRequestException(
+					`Estoque insuficiente para "${product?.name ?? productId}". Disponível: ${Math.max(available, 0)}.`,
+				)
+			}
+		}
 
 		// Get prices and active promotions
 		const prices = await this.catalogRepository.findActivePrices(productIds)
@@ -400,13 +422,11 @@ export class CatalogService {
 			tracking_token: order.tracking_token ?? null,
 			status: order.status,
 			total: order.total,
+			// The caller is anonymous and the order may have been attached to an existing
+			// customer matched by phone/e-mail/document: echo the first name only (like
+			// lookupCustomer), never stored contact data or the customer id.
 			customer: order.customer
-				? {
-						id: order.customer.id,
-						name: order.customer.name,
-						email: order.customer.email,
-						phone: order.customer.phone ?? null,
-					}
+				? { firstName: order.customer.name.trim().split(/\s+/)[0] ?? '' }
 				: null,
 			items: order.Order_item.map((item) => ({
 				product: item.product,

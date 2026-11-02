@@ -7,6 +7,9 @@ import { TenantContext } from '@/shared/tenant/tenant.context'
 import { CustomersService } from '../../customers/services/customers.service'
 import { ORDER_IDEMPOTENCY_SCOPES, OrdersService } from './orders.service'
 
+/** Placeholder in the tracking-token format (22 chars). Zero entropy on purpose: secret scanners. */
+const TRACKING_TOKEN = 'x'.repeat(22)
+
 const repositoryMock = {
 	create: jest.fn(),
 	addItem: jest.fn(),
@@ -177,14 +180,14 @@ describe('OrdersService', () => {
 				items: [{ product_id: 1, quantity: 1, unit_price: 1000, discount: 0 }],
 				source: 'storefront',
 				metadata: { source: 'catalog' },
-				trackingToken: 'tok_abcdefghijklmnopqrs',
+				trackingToken: TRACKING_TOKEN,
 			})
 
 			expect(repositoryMock.create.mock.calls[0][0]).toMatchObject({
 				source: 'storefront',
 				allowOversell: false,
 				metadata: { source: 'catalog' },
-				tracking_token: 'tok_abcdefghijklmnopqrs',
+				tracking_token: TRACKING_TOKEN,
 			})
 		})
 	})

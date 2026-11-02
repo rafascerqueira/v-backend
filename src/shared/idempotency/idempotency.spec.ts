@@ -90,6 +90,15 @@ describe('hashRequest', () => {
 		)
 	})
 
+	it('hashes dates as their JSON rendering (not as an empty object)', () => {
+		expect(hashRequest({ at: new Date('2026-11-02T12:00:00Z') })).toBe(
+			hashRequest({ at: '2026-11-02T12:00:00.000Z' }),
+		)
+		expect(hashRequest({ at: new Date('2026-11-02T12:00:00Z') })).not.toBe(
+			hashRequest({ at: new Date('2026-11-03T12:00:00Z') }),
+		)
+	})
+
 	it('changes with any value, array order included', () => {
 		const base = hashRequest({ items: [{ id: 1 }, { id: 2 }] })
 		expect(hashRequest({ items: [{ id: 2 }, { id: 1 }] })).not.toBe(base)
@@ -112,7 +121,13 @@ describe('parseIdempotencyKey', () => {
 		expect(parseIdempotencyKey([uuid, 'other'])).toBe(uuid)
 	})
 
-	it.each(['has space', 'a'.repeat(65), 'semi;colon', 'ação'])('rejects %p with 400', (raw) => {
+	it.each([
+		'short-key-15chr',
+		'has space in the key',
+		'a'.repeat(65),
+		'semi;colon;key;123',
+		'ação-é-inválida-aqui',
+	])('rejects %p with 400', (raw) => {
 		expect(() => parseIdempotencyKey(raw)).toThrow(/Idempotency-Key inválido/)
 	})
 })

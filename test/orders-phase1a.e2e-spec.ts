@@ -1,6 +1,11 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
+import type { TestingModule } from '@nestjs/testing'
 import request from 'supertest'
 import type { PrismaService } from '../src/shared/prisma/prisma.service'
+import {
+	CATALOG_REPOSITORY,
+	type CatalogRepository,
+} from '../src/shared/repositories/catalog.repository'
 import { createE2EApp, seedTestSeller, TEST_SELLER } from './helpers/e2e'
 
 /**
@@ -12,6 +17,7 @@ import { createE2EApp, seedTestSeller, TEST_SELLER } from './helpers/e2e'
 describe('Orders — Phase 1A (e2e)', () => {
 	let app: NestFastifyApplication
 	let prisma: PrismaService
+	let module: TestingModule
 
 	const SHOP = 'p1a-shop'
 	const OTHER = {
@@ -88,7 +94,7 @@ describe('Orders — Phase 1A (e2e)', () => {
 	}
 
 	beforeAll(async () => {
-		;({ app, prisma } = await createE2EApp())
+		;({ app, prisma, module } = await createE2EApp())
 		await seedTestSeller(prisma)
 		await prisma.account.update({ where: { id: TEST_SELLER.id }, data: { store_slug: SHOP } })
 		await prisma.account.upsert({
@@ -183,7 +189,7 @@ describe('Orders — Phase 1A (e2e)', () => {
 
 			const responses = await Promise.all(
 				Array.from({ length: 10 }, () =>
-					http().post('/orders').set('Idempotency-Key', 'e2e-same-key-1').send(body),
+					http().post('/orders').set('Idempotency-Key', 'e2e-same-key-00000001').send(body),
 				),
 			)
 
@@ -204,7 +210,7 @@ describe('Orders — Phase 1A (e2e)', () => {
 			const order = (quantity: number) =>
 				http()
 					.post('/orders')
-					.set('Idempotency-Key', 'e2e-reused-key')
+					.set('Idempotency-Key', 'e2e-reused-key-0000001')
 					.send({
 						customer_id: customer.id,
 						items: [{ product_id: product.id, quantity, unit_price: 1500 }],
@@ -219,6 +225,8 @@ describe('Orders — Phase 1A (e2e)', () => {
 
 		it('rejects a malformed key with 400', async () => {
 			await http().post('/orders').set('Idempotency-Key', 'not valid!').send({}).expect(400)
+			// Too short: storefront keys share a namespace per store, so they must not collide.
+			await http().post('/orders').set('Idempotency-Key', 'short-key').send({}).expect(400)
 		})
 	})
 
@@ -366,6 +374,70 @@ describe('Orders — Phase 1A (e2e)', () => {
 			expect(res.body.code).toBe('HAS_PAYMENTS')
 			expect(await prisma.order.count({ where: { id: order.id } })).toBe(1)
 			expect(await stockOf(product.id)).toBe(4)
+		})
+	})
+
+	describe('security review fixes', () => {
+		it("never returns a customer's password hash (orders and the customer list)", async () => {
+			const product = await seedProduct(TEST_SELLER.id, { stock: 5 })
+			const customer = await seedCustomer(TEST_SELLER.id)
+			await prisma.customer.update({
+				where: { id: customer.id },
+				data: { password_hash: '$argon2id$v=19$m=65536,t=3,p=4$e2e$e2e', document: '12345678901' },
+			})
+
+			const { body: order } = await http()
+				.post('/orders')
+				.send({
+					customer_id: customer.id,
+					items: [{ product_id: product.id, quantity: 1, unit_price: 1500 }],
+				})
+				.expect(201)
+			const { body: customers } = await http().get('/customers').expect(200)
+
+			expect(order.customer).toEqual({
+				id: customer.id,
+				name: customer.name,
+				email: null,
+				phone: customer.phone,
+			})
+			expect(JSON.stringify(customers)).not.toContain('argon2id')
+			expect(JSON.stringify(customers)).not.toContain('password_hash')
+		})
+
+		it('still lets storefront login read the hash (explicit select beats the global omit)', async () => {
+			const customer = await seedCustomer(TEST_SELLER.id)
+			await prisma.customer.update({
+				where: { id: customer.id },
+				data: { password_hash: '$argon2id$v=19$m=65536,t=3,p=4$e2e$e2e' },
+			})
+
+			const withHash = await module
+				.get<CatalogRepository>(CATALOG_REPOSITORY)
+				.findCustomerWithHashById(customer.id)
+
+			expect(withHash?.password_hash).toBe('$argon2id$v=19$m=65536,t=3,p=4$e2e$e2e')
+		})
+
+		it('echoes only the first name to the anonymous storefront caller', async () => {
+			const product = await seedProduct(TEST_SELLER.id, { stock: 5 })
+
+			const { body } = await storefrontOrder(SHOP, product.id).expect(201)
+
+			expect(body.customer).toEqual({ firstName: 'Maria' })
+		})
+
+		it('caps an order at 100 lines', async () => {
+			const product = await seedProduct(TEST_SELLER.id)
+
+			await http()
+				.post(`/catalog/loja/${SHOP}/orders`)
+				.send({
+					customer: { name: 'Maria Cliente', phone: '11988887777', city: 'SP', state: 'SP' },
+					items: Array.from({ length: 101 }, () => ({ product_id: product.id, quantity: 1 })),
+				})
+				.expect(400)
+			expect(await prisma.order.count({ where: { seller_id: TEST_SELLER.id } })).toBe(0)
 		})
 	})
 })

@@ -22,6 +22,9 @@ import {
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import { CatalogService } from './catalog.service'
 
+/** Placeholder in the tracking-token format (22 chars). Zero entropy on purpose: secret scanners. */
+const TRACKING_TOKEN = 'x'.repeat(22)
+
 const repositoryMock: jest.Mocked<CatalogRepository> = {
 	findStoreBySlug: jest.fn(),
 	findStoreIdBySlug: jest.fn(),
@@ -123,7 +126,6 @@ describe('CatalogService', () => {
 			store: { name: 'Maria Souza', store_name: null },
 			items: [{ product: { id: 7, name: 'Bolo' }, quantity: 1, unit_price: 4990, total: 4990 }],
 		}
-		const TOKEN = 'Zm9vYmFyYmF6cXV4MTIzNA'
 
 		beforeEach(() => {
 			repositoryMock.findStoreBySlug.mockResolvedValue({ id: 'seller-1' } as any)
@@ -132,10 +134,13 @@ describe('CatalogService', () => {
 		it('resolves a tracking token inside the store resolved from the slug', async () => {
 			repositoryMock.findOrderByTrackingToken.mockResolvedValueOnce(trackedOrder as any)
 
-			const result = await service.trackOrder('minha-loja', TOKEN)
+			const result = await service.trackOrder('minha-loja', TRACKING_TOKEN)
 
 			expect(repositoryMock.findStoreBySlug).toHaveBeenCalledWith('minha-loja')
-			expect(repositoryMock.findOrderByTrackingToken).toHaveBeenCalledWith('seller-1', TOKEN)
+			expect(repositoryMock.findOrderByTrackingToken).toHaveBeenCalledWith(
+				'seller-1',
+				TRACKING_TOKEN,
+			)
 			expect(repositoryMock.findOrderByNumber).not.toHaveBeenCalled()
 			expect(result.order_number).toBe('PED-000123')
 			expect(result.total).toBe(4990)
@@ -177,7 +182,7 @@ describe('CatalogService', () => {
 		it('returns the same 404 for an unknown store without querying orders', async () => {
 			repositoryMock.findStoreBySlug.mockResolvedValueOnce(null)
 
-			await expect(service.trackOrder('nao-existe', TOKEN)).rejects.toThrow(
+			await expect(service.trackOrder('nao-existe', TRACKING_TOKEN)).rejects.toThrow(
 				new NotFoundException('Pedido não encontrado'),
 			)
 			expect(repositoryMock.findOrderByTrackingToken).not.toHaveBeenCalled()
@@ -186,7 +191,7 @@ describe('CatalogService', () => {
 		it('returns 404 when the token is not a storefront order of that store', async () => {
 			repositoryMock.findOrderByTrackingToken.mockResolvedValueOnce(null)
 
-			await expect(service.trackOrder('minha-loja', TOKEN)).rejects.toThrow(
+			await expect(service.trackOrder('minha-loja', TRACKING_TOKEN)).rejects.toThrow(
 				new NotFoundException('Pedido não encontrado'),
 			)
 		})
@@ -601,7 +606,7 @@ describe('CatalogService', () => {
 		const placedOrder = {
 			id: 100,
 			order_number: 'PED-000007',
-			tracking_token: 'Zm9vYmFyYmF6cXV4MTIzNA',
+			tracking_token: TRACKING_TOKEN,
 			status: 'pending',
 			total: 3000,
 			customer: {
@@ -716,16 +721,16 @@ describe('CatalogService', () => {
 			expect(result).toMatchObject({
 				id: 100,
 				order_number: 'PED-000007',
-				tracking_token: 'Zm9vYmFyYmF6cXV4MTIzNA',
+				tracking_token: TRACKING_TOKEN,
 				total: 3000,
-				customer: { id: 'cust-1', name: 'Alice', email: 'alice@test.com', phone: '11999999999' },
+				customer: { firstName: 'Alice' },
 				items: [
 					{ product: { id: 1, name: 'Product 1' }, quantity: 2, unit_price: 1500, total: 3000 },
 				],
 			})
-			// Only contact fields go back to the public caller, never document/address.
-			expect(result.customer).not.toHaveProperty('document')
-			expect(result.customer).not.toHaveProperty('address')
+			// Anonymous caller: the order may have matched an existing customer by
+			// phone/document, so nothing stored about them is echoed back.
+			expect(result.customer).toEqual({ firstName: 'Alice' })
 		})
 
 		it('forwards the Idempotency-Key with the storefront scope and a hash of slug + body', async () => {
@@ -738,6 +743,20 @@ describe('CatalogService', () => {
 				key: 'key-1',
 				requestHash: hashRequest({ slug: 'myshop', ...baseDto }),
 			})
+		})
+
+		it('fails fast on short stock, before creating a customer for an order that cannot happen', async () => {
+			repositoryMock.findStoreIdBySlug.mockResolvedValueOnce({ id: 'seller-1' })
+			repositoryMock.findActiveProducts.mockResolvedValueOnce([makeProduct(1)] as any)
+			repositoryMock.findStocks.mockResolvedValueOnce([
+				{ product_id: 1, quantity: 1, reserved_quantity: 0 },
+			] as any)
+
+			// baseDto orders quantity 2 of product 1, which only has 1 available.
+			await expect(service.createOrder('myshop', baseDto)).rejects.toThrow('Estoque insuficiente')
+			expect(repositoryMock.findCustomerByContact).not.toHaveBeenCalled()
+			expect(repositoryMock.createCustomer).not.toHaveBeenCalled()
+			expect(ordersServiceMock.place).not.toHaveBeenCalled()
 		})
 
 		it('should create a new customer when none exists', async () => {

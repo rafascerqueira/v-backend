@@ -121,7 +121,8 @@ export class OrdersService {
 		})
 
 		// Run the order.created effects now rather than on the next relay tick.
-		if (!replayed) await this.outboxRelay.kick()
+		// Not awaited: kick() never throws, but a degraded Redis would delay the response.
+		if (!replayed) void this.outboxRelay.kick()
 
 		const order = await this.orderRepository.findById(orderId)
 		if (!order) throw new NotFoundException('Pedido não encontrado')
@@ -186,13 +187,13 @@ export class OrdersService {
 			status === 'canceled' ? { status: 'canceled', payment_status: 'canceled' } : undefined
 
 		const order = await this.orderRepository.updateStatus(id, status, billingUpdate)
-		await this.outboxRelay.kick()
+		void this.outboxRelay.kick()
 		return order
 	}
 
 	async delete(id: number) {
 		const order = await this.orderRepository.delete(id)
-		await this.outboxRelay.kick()
+		void this.outboxRelay.kick()
 		return order
 	}
 }

@@ -6,6 +6,7 @@ import {
 	HttpCode,
 	HttpStatus,
 	Param,
+	ParseIntPipe,
 	Patch,
 	Post,
 	UseGuards,
@@ -90,8 +91,8 @@ export class OrdersController {
 	@Get(':id/events')
 	@ApiOperation({ summary: "Order timeline: the order's domain events, oldest first" })
 	@ApiParam({ name: 'id', type: Number })
-	async events(@Param('id') id: string) {
-		return this.service.findEvents(Number(id))
+	async events(@Param('id', ParseIntPipe) id: number) {
+		return this.service.findEvents(id)
 	}
 
 	@Patch(':id/status')

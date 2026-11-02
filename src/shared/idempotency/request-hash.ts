@@ -10,6 +10,14 @@ export function hashRequest(body: unknown): string {
 }
 
 function canonicalJson(value: unknown): string {
+	// Dates and other toJSON() values hash as JSON.stringify would render them.
+	if (
+		value !== null &&
+		typeof value === 'object' &&
+		typeof (value as { toJSON?: unknown }).toJSON === 'function'
+	) {
+		return canonicalJson((value as { toJSON: () => unknown }).toJSON())
+	}
 	if (value === null || typeof value !== 'object') {
 		return JSON.stringify(value) ?? 'null'
 	}

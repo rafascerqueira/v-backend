@@ -1,7 +1,9 @@
 import { BadRequestException, createParamDecorator, type ExecutionContext } from '@nestjs/common'
 
 export const IDEMPOTENCY_KEY_HEADER = 'idempotency-key'
-const KEY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+// At least 16 chars: storefront keys share one namespace per store, so a short or
+// predictable key could collide with another visitor's (UUIDs are 36).
+const KEY_PATTERN = /^[A-Za-z0-9_-]{16,64}$/
 
 /** Validates the optional Idempotency-Key header value. Absent/empty → undefined. */
 export function parseIdempotencyKey(raw: string | string[] | undefined): string | undefined {
@@ -9,7 +11,7 @@ export function parseIdempotencyKey(raw: string | string[] | undefined): string 
 	if (value === undefined || value === '') return undefined
 	if (!KEY_PATTERN.test(value)) {
 		throw new BadRequestException(
-			'Cabeçalho Idempotency-Key inválido: use até 64 caracteres entre letras, números, "-" e "_".',
+			'Cabeçalho Idempotency-Key inválido: use de 16 a 64 caracteres entre letras, números, "-" e "_".',
 		)
 	}
 	return value

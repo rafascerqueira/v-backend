@@ -60,6 +60,9 @@ export class PrismaOrderRepository implements OrderRepository {
 				if (!claim.claimed) return { orderId: Number(claim.resourceId), replayed: true }
 			}
 
+			// Stock rows of the ordered products (absent = not stock-tracked).
+			const stockByProduct = new Map<number, { quantity: number; reserved_quantity: number }>()
+
 			// Lock stock rows to prevent concurrent overselling
 			if (data.items.length > 0) {
 				const productIds = data.items.map((i) => i.product_id)
@@ -80,6 +83,9 @@ export class PrismaOrderRepository implements OrderRepository {
 					`SELECT id FROM store_stock WHERE product_id = ANY($1::int[]) FOR UPDATE`,
 					productIds,
 				)
+				// One read for every line (not one per line): the rows are locked above.
+				const rows = await tx.store_stock.findMany({ where: { product_id: { in: uniqueIds } } })
+				for (const row of rows) stockByProduct.set(row.product_id, row)
 			}
 
 			// Items sold past their stock via allow_oversell — reported back so the
@@ -96,9 +102,7 @@ export class PrismaOrderRepository implements OrderRepository {
 			// Validate stock availability for items that have stock control
 			for (let i = 0; i < data.items.length; i++) {
 				const item = data.items[i]
-				const stock = await tx.store_stock.findUnique({
-					where: { product_id: item.product_id },
-				})
+				const stock = stockByProduct.get(item.product_id)
 				// Only items with a stock record participate in oversell/backorders.
 				if (!stock) continue
 
@@ -137,7 +141,18 @@ export class PrismaOrderRepository implements OrderRepository {
 			// Numbered by the server. Taken after the stock checks because the counter row
 			// stays locked until commit (it serialises this seller's order creation); a
 			// rollback hands the number back, so numbers stay contiguous.
-			const sequence = await nextSellerSequenceValue(tx, data.seller_id, 'order')
+			let sequence = await nextSellerSequenceValue(tx, data.seller_id, 'order')
+			// The migration seeds the counter past every number it saw, but a number
+			// typed by hand afterwards (old client during the deploy window) could
+			// still be taken. Skip it instead of failing every later order of the seller.
+			while (
+				await tx.order.findFirst({
+					where: { seller_id: data.seller_id, order_number: orderNumberFor(sequence) },
+					select: { id: true },
+				})
+			) {
+				sequence = await nextSellerSequenceValue(tx, data.seller_id, 'order')
+			}
 			const orderNumber = orderNumberFor(sequence)
 
 			// Create order with items
@@ -187,11 +202,7 @@ export class PrismaOrderRepository implements OrderRepository {
 
 			// Decrement stock and create movements only for items with stock control
 			for (const item of data.items) {
-				const stock = await tx.store_stock.findUnique({
-					where: { product_id: item.product_id },
-				})
-
-				if (stock) {
+				if (stockByProduct.has(item.product_id)) {
 					await tx.store_stock.update({
 						where: { product_id: item.product_id },
 						data: { quantity: { decrement: item.quantity } },
@@ -368,7 +379,8 @@ export class PrismaOrderRepository implements OrderRepository {
 					include: { product: { select: { id: true, name: true } }, backorder: true },
 				},
 				Billing: true,
-				customer: true,
+				// Contact fields only — never the whole row (document, address, hash).
+				customer: { select: { id: true, name: true, email: true, phone: true } },
 			},
 		})
 		if (!order) return null
@@ -473,11 +485,11 @@ export class PrismaOrderRepository implements OrderRepository {
 			// Financial history is never erased (D2): an order whose charge has money on
 			// it is canceled, not deleted. Until the payment ledger exists (Phase 1C),
 			// "has payments" means a positive paid_amount.
-			const paid = await tx.billing.findFirst({
-				where: { order_id: id, paid_amount: { gt: 0 } },
-				select: { id: true },
-			})
-			if (paid) {
+			// Locked so a payment recorded concurrently can't slip in between this check
+			// and the cascade delete below.
+			const charges: { paid_amount: number }[] = await tx.$queryRaw`
+				SELECT paid_amount FROM billings WHERE order_id = ${id} FOR UPDATE`
+			if (charges.some((charge) => Number(charge.paid_amount) > 0)) {
 				throw new ConflictException({
 					message:
 						'Este pedido tem pagamento registrado e não pode ser excluído. Cancele o pedido em vez de excluí-lo.',

@@ -5,6 +5,9 @@ import type { CreateOrderData } from '@/shared/repositories/order.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
 import { PrismaOrderRepository } from './prisma-order.repository'
 
+/** Placeholder in the tracking-token format (22 chars). Zero entropy on purpose: secret scanners. */
+const TRACKING_TOKEN = 'x'.repeat(22)
+
 // Exercises the transactional logic that moved out of OrdersService: tenant
 // ownership (404 on missing/cross-tenant), idempotent stock restoration on
 // cancellation, no double-restore when deleting an already-canceled order, and
@@ -34,6 +37,8 @@ describe('PrismaOrderRepository', () => {
 			domainEvent: { createMany: jest.fn() },
 			order: {
 				findUnique: jest.fn(),
+				// order-number collision check: no existing order with the generated number
+				findFirst: jest.fn().mockResolvedValue(null),
 				create: jest.fn().mockResolvedValue({ id: 42, Order_item: [] }),
 				update: jest.fn().mockResolvedValue({ id: 1, status: 'canceled' }),
 				delete: jest.fn().mockResolvedValue({ id: 1 }),
@@ -41,6 +46,10 @@ describe('PrismaOrderRepository', () => {
 			order_item: { findMany: jest.fn().mockResolvedValue([{ product_id: 7, quantity: 3 }]) },
 			store_stock: {
 				findUnique: jest.fn().mockResolvedValue({ quantity: 10, reserved_quantity: 0 }),
+				// create(): one batched read of the locked stock rows
+				findMany: jest
+					.fn()
+					.mockResolvedValue([{ product_id: 7, quantity: 10, reserved_quantity: 0 }]),
 				update: jest.fn(),
 			},
 			stock_movement: { create: jest.fn() },
@@ -214,13 +223,13 @@ describe('PrismaOrderRepository', () => {
 					source: 'storefront',
 					allowOversell: false,
 					metadata: { source: 'catalog' },
-					tracking_token: 'tok_abcdefghijklmnopqrs',
+					tracking_token: TRACKING_TOKEN,
 				}),
 			)
 
 			expect(tx.order.create.mock.calls[0][0].data).toMatchObject({
 				metadata: { source: 'catalog' },
-				tracking_token: 'tok_abcdefghijklmnopqrs',
+				tracking_token: TRACKING_TOKEN,
 			})
 		})
 
@@ -249,7 +258,9 @@ describe('PrismaOrderRepository', () => {
 		})
 
 		it('blocks the sale when stock is insufficient and oversell is off', async () => {
-			tx.store_stock.findUnique.mockResolvedValue({ quantity: 1, reserved_quantity: 0 })
+			tx.store_stock.findMany.mockResolvedValue([
+				{ product_id: 7, quantity: 1, reserved_quantity: 0 },
+			])
 			tx.product.findUnique.mockResolvedValue({ name: 'P', allow_oversell: false })
 
 			await expect(
@@ -259,7 +270,9 @@ describe('PrismaOrderRepository', () => {
 		})
 
 		it('never oversells on the storefront, even for an allow_oversell product', async () => {
-			tx.store_stock.findUnique.mockResolvedValue({ quantity: 1, reserved_quantity: 0 })
+			tx.store_stock.findMany.mockResolvedValue([
+				{ product_id: 7, quantity: 1, reserved_quantity: 0 },
+			])
 			tx.product.findUnique.mockResolvedValue({ name: 'P', allow_oversell: true })
 
 			await expect(
@@ -275,7 +288,9 @@ describe('PrismaOrderRepository', () => {
 		})
 
 		it('completes the sale, lets stock go negative and reports the oversold item in the event', async () => {
-			tx.store_stock.findUnique.mockResolvedValue({ quantity: 1, reserved_quantity: 0 })
+			tx.store_stock.findMany.mockResolvedValue([
+				{ product_id: 7, quantity: 1, reserved_quantity: 0 },
+			])
 			tx.product.findUnique.mockResolvedValue({ name: 'P', allow_oversell: true })
 
 			await repo.create(data({ items: [{ ...item, quantity: 5, total: 5000 }] }))
@@ -291,7 +306,9 @@ describe('PrismaOrderRepository', () => {
 		})
 
 		it('records a backorder for only the owed units when oversold', async () => {
-			tx.store_stock.findUnique.mockResolvedValue({ quantity: 2, reserved_quantity: 0 })
+			tx.store_stock.findMany.mockResolvedValue([
+				{ product_id: 7, quantity: 2, reserved_quantity: 0 },
+			])
 			tx.product.findUnique.mockResolvedValue({ name: 'P', allow_oversell: true })
 			tx.order.create.mockResolvedValue({ id: 50, Order_item: [{ id: 500, product_id: 7 }] })
 
@@ -319,6 +336,28 @@ describe('PrismaOrderRepository', () => {
 			expect(tx.order.create).not.toHaveBeenCalled()
 			expect(tx.store_stock.update).not.toHaveBeenCalled()
 			expect(tx.$queryRaw).not.toHaveBeenCalled()
+		})
+
+		it('reads the locked stock rows once, not once per line', async () => {
+			tx.product.count.mockResolvedValueOnce(2) // products 7 and 8 both owned
+
+			await repo.create(
+				data({
+					items: [item, { ...item, product_id: 8 }, { ...item, product_id: 7 }],
+				}),
+			)
+
+			expect(tx.store_stock.findMany).toHaveBeenCalledTimes(1)
+			expect(tx.store_stock.findUnique).not.toHaveBeenCalled()
+		})
+
+		it('skips a sequence number already taken by a hand-typed order', async () => {
+			tx.order.findFirst.mockResolvedValueOnce({ id: 3 }) // PED-000009 exists
+			tx.$queryRaw.mockResolvedValueOnce([{ value: 9 }]).mockResolvedValueOnce([{ value: 10 }])
+
+			await repo.create(data())
+
+			expect(tx.order.create.mock.calls[0][0].data.order_number).toBe('PED-000010')
 		})
 
 		it('does not create a charge when none is attached', async () => {
@@ -425,16 +464,14 @@ describe('PrismaOrderRepository', () => {
 
 		it('refuses to delete an order whose charge has money on it (409 HAS_PAYMENTS)', async () => {
 			tx.order.findUnique.mockResolvedValue({ id: 1, seller_id: 'seller-1', status: 'pending' })
-			tx.billing.findFirst.mockResolvedValueOnce({ id: 5 })
+			// The order's charges, read FOR UPDATE so a concurrent payment can't slip in.
+			tx.$queryRaw.mockResolvedValueOnce([{ paid_amount: 0 }, { paid_amount: 500 }])
 
 			const error = await repo.delete(1).catch((e) => e)
 
 			expect(error).toBeInstanceOf(ConflictException)
 			expect(error.getResponse()).toMatchObject({ code: 'HAS_PAYMENTS' })
-			expect(tx.billing.findFirst).toHaveBeenCalledWith({
-				where: { order_id: 1, paid_amount: { gt: 0 } },
-				select: { id: true },
-			})
+			expect(tx.$queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE')
 			expect(tx.order.delete).not.toHaveBeenCalled()
 			expect(tx.store_stock.update).not.toHaveBeenCalled()
 		})

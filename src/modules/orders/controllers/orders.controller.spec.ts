@@ -45,7 +45,7 @@ describe('OrdersController', () => {
 
 	it('events should call service.findEvents with numeric id', async () => {
 		serviceMock.findEvents.mockResolvedValueOnce([])
-		await controller.events('9')
+		await controller.events(9)
 		expect(serviceMock.findEvents).toHaveBeenCalledWith(9)
 	})
 
