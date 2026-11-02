@@ -10,6 +10,9 @@ const serviceMock = {
 	delete: jest.fn(),
 	findAll: jest.fn(),
 	syncBillings: jest.fn(),
+	listPayments: jest.fn(),
+	recordPayment: jest.fn(),
+	reversePayment: jest.fn(),
 }
 
 describe('BillingsController', () => {
@@ -84,5 +87,35 @@ describe('BillingsController', () => {
 		serviceMock.delete.mockResolvedValueOnce(undefined)
 		await controller.remove('15')
 		expect(serviceMock.delete).toHaveBeenCalledWith(15)
+	})
+
+	describe('ledger routes', () => {
+		it('listPayments passes the numeric id', async () => {
+			serviceMock.listPayments.mockResolvedValueOnce([])
+			await controller.listPayments(7)
+			expect(serviceMock.listPayments).toHaveBeenCalledWith(7)
+		})
+
+		it('recordPayment forwards the body and the Idempotency-Key', async () => {
+			const body = { amount: 1500, method: 'pix' as const }
+			serviceMock.recordPayment.mockResolvedValueOnce({ payment: { id: 1 }, billing: { id: 7 } })
+
+			await controller.recordPayment(7, body, 'k'.repeat(16))
+
+			expect(serviceMock.recordPayment).toHaveBeenCalledWith(7, body, 'k'.repeat(16))
+		})
+
+		it('reversePayment forwards both ids, the reason and the key', async () => {
+			serviceMock.reversePayment.mockResolvedValueOnce({ reversal: { id: 2 }, billing: { id: 7 } })
+
+			await controller.reversePayment(7, 1, { reason: 'Duplicado' }, undefined)
+
+			expect(serviceMock.reversePayment).toHaveBeenCalledWith(
+				7,
+				1,
+				{ reason: 'Duplicado' },
+				undefined,
+			)
+		})
 	})
 })

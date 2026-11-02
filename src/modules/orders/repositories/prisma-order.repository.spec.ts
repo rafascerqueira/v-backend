@@ -472,6 +472,16 @@ describe('PrismaOrderRepository', () => {
 			expect(error).toBeInstanceOf(ConflictException)
 			expect(error.getResponse()).toMatchObject({ code: 'HAS_PAYMENTS' })
 			expect(tx.$queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE')
+		})
+
+		it('also refuses when the charge has ledger entries, even fully reversed (paid 0)', async () => {
+			tx.order.findUnique.mockResolvedValue({ id: 1, seller_id: 'seller-1', status: 'pending' })
+			tx.$queryRaw.mockResolvedValueOnce([{ paid_amount: 0, has_entries: true }])
+
+			const error = await repo.delete(1).catch((e) => e)
+
+			expect(error).toBeInstanceOf(ConflictException)
+			expect(tx.order.delete).not.toHaveBeenCalled()
 			expect(tx.order.delete).not.toHaveBeenCalled()
 			expect(tx.store_stock.update).not.toHaveBeenCalled()
 		})

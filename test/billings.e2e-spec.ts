@@ -1,7 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import request from 'supertest'
 import type { PrismaService } from '../src/shared/prisma/prisma.service'
-import { createE2EApp, seedTestSeller } from './helpers/e2e'
+import { createE2EApp, deleteLedgerEntries, seedTestSeller } from './helpers/e2e'
 
 const OTHER_SELLER = 'e2e-other-seller-00000000001'
 
@@ -15,6 +15,8 @@ describe('Billings (e2e)', () => {
 	})
 
 	afterEach(async () => {
+		// Ledger entries first: their FK refuses to drop charges that still have them.
+		await deleteLedgerEntries(prisma)
 		await prisma.billing.deleteMany()
 		await prisma.order_item.deleteMany()
 		await prisma.order.deleteMany()
@@ -40,6 +42,10 @@ describe('Billings (e2e)', () => {
 					city: 'Sao Paulo',
 					state: 'SP',
 					zip_code: '01234000',
+					// Monthly billing: the order gets no automatic per-sale charge, so the
+					// test can attach one by hand (one charge per order since Phase 1C).
+					billing_mode: 'monthly',
+					billing_day: 10,
 				})
 				.expect(201)
 		).body
