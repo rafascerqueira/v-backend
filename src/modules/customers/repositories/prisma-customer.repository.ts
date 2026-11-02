@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	CreateCustomerData,
@@ -122,6 +122,19 @@ export class PrismaCustomerRepository implements CustomerRepository {
 		const customer = await this.findById(id)
 		if (!customer) {
 			throw new NotFoundException('Customer not found or access denied')
+		}
+		// Financial history is never erased (D2): deleting the customer would cascade
+		// to orders and charges that have ledger entries (the ledger FK also refuses).
+		const entries = await this.prisma.billingPayment.count({
+			where: { billing: { order: { customer_id: id } } },
+		})
+		if (entries > 0) {
+			throw new ConflictException({
+				message:
+					'Este cliente tem pagamentos registrados e não pode ser excluído. Marque o cliente como inativo em vez de excluí-lo.',
+				error: 'Conflict',
+				code: 'HAS_PAYMENTS',
+			})
 		}
 		return this.prisma.customer.delete({
 			where: { id },

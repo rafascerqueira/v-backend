@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common'
+import { ConflictException, NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import { TenantContext } from '@/shared/tenant/tenant.context'
@@ -29,6 +29,7 @@ describe('PrismaCustomerRepository', () => {
 				update: jest.fn().mockResolvedValue({ id: 'c1' }),
 				delete: jest.fn().mockResolvedValue({ id: 'c1' }),
 			},
+			billingPayment: { count: jest.fn().mockResolvedValue(0) },
 		}
 
 		const module = await Test.createTestingModule({
@@ -73,6 +74,28 @@ describe('PrismaCustomerRepository', () => {
 			prisma.customer.findUnique.mockResolvedValue(null)
 			await expect(repo.delete('missing')).rejects.toBeInstanceOf(NotFoundException)
 			expect(prisma.customer.delete).not.toHaveBeenCalled()
+		})
+
+		it('delete refuses (409 HAS_PAYMENTS) when the customer has ledger entries', async () => {
+			prisma.customer.findUnique.mockResolvedValue({ id: 'c1', seller_id: 'seller-1' })
+			prisma.billingPayment.count.mockResolvedValueOnce(3)
+
+			const error = await repo.delete('c1').catch((e) => e)
+
+			expect(error).toBeInstanceOf(ConflictException)
+			expect(error.getResponse()).toMatchObject({ code: 'HAS_PAYMENTS' })
+			expect(prisma.billingPayment.count).toHaveBeenCalledWith({
+				where: { billing: { order: { customer_id: 'c1' } } },
+			})
+			expect(prisma.customer.delete).not.toHaveBeenCalled()
+		})
+
+		it('delete proceeds for an owned customer without payment history', async () => {
+			prisma.customer.findUnique.mockResolvedValue({ id: 'c1', seller_id: 'seller-1' })
+
+			await repo.delete('c1')
+
+			expect(prisma.customer.delete).toHaveBeenCalledWith({ where: { id: 'c1' } })
 		})
 
 		it('update proceeds for an owned customer', async () => {

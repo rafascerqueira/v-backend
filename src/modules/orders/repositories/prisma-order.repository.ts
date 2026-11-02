@@ -482,14 +482,15 @@ export class PrismaOrderRepository implements OrderRepository {
 		return this.prisma.$transaction(async (tx) => {
 			const order = await this.requireOrderInTenant(tx, id)
 
-			// Financial history is never erased (D2): an order whose charge has money on
-			// it is canceled, not deleted. Until the payment ledger exists (Phase 1C),
-			// "has payments" means a positive paid_amount.
-			// Locked so a payment recorded concurrently can't slip in between this check
-			// and the cascade delete below.
-			const charges: { paid_amount: number }[] = await tx.$queryRaw`
-				SELECT paid_amount FROM billings WHERE order_id = ${id} FOR UPDATE`
-			if (charges.some((charge) => Number(charge.paid_amount) > 0)) {
+			// Financial history is never erased (D2): an order whose charge has ledger
+			// entries (even fully reversed ones) is canceled, not deleted. Locked so a
+			// payment recorded concurrently can't slip in between this check and the
+			// cascade delete below (the ledger FK is the DB backstop).
+			const charges: { paid_amount: number; has_entries: boolean }[] = await tx.$queryRaw`
+				SELECT b.paid_amount,
+				       EXISTS (SELECT 1 FROM billing_payments p WHERE p.billing_id = b.id) AS has_entries
+				FROM billings b WHERE b.order_id = ${id} FOR UPDATE OF b`
+			if (charges.some((charge) => charge.has_entries || Number(charge.paid_amount) > 0)) {
 				throw new ConflictException({
 					message:
 						'Este pedido tem pagamento registrado e não pode ser excluído. Cancele o pedido em vez de excluí-lo.',

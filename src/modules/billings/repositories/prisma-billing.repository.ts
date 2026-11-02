@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import type {
 	BillingRecord,
@@ -17,11 +17,12 @@ export class PrismaBillingRepository implements BillingRepository {
 		private readonly tenantContext: TenantContext,
 	) {}
 
+	// Billings carry their seller (Phase 1A): filter on it directly, no join.
 	private getTenantFilter() {
 		if (this.tenantContext.isAdmin()) {
 			return {}
 		}
-		return { order: { seller_id: this.tenantContext.requireSellerId() } }
+		return { seller_id: this.tenantContext.requireSellerId() }
 	}
 
 	/**
@@ -79,8 +80,8 @@ export class PrismaBillingRepository implements BillingRepository {
 	}
 
 	async findById(id: number): Promise<BillingWithOrder | null> {
-		// Tenant-scope through the order relation so a foreign billing looks
-		// non-existent (→ service returns 404, never a 403 that leaks existence).
+		// Tenant-scoped so a foreign billing looks non-existent (→ service returns 404,
+		// never a 403 that leaks existence).
 		const row = await this.prisma.billing.findFirst({
 			where: { id, ...this.getTenantFilter() } as any,
 			include: {
@@ -159,10 +160,31 @@ export class PrismaBillingRepository implements BillingRepository {
 		return this.applyOverdue(row as unknown as BillingRecord)
 	}
 
+	/**
+	 * Financial history is never erased (D2): a charge with ledger entries is
+	 * canceled, not deleted (409 HAS_PAYMENTS). The row lock keeps a payment from
+	 * landing between the check and the delete; the ledger FK is the DB backstop.
+	 */
 	async delete(id: number): Promise<void> {
-		const existing = await this.findById(id)
-		if (!existing) throw new NotFoundException('Cobrança não encontrada')
-		await this.prisma.billing.delete({ where: { id } })
+		await this.prisma.$transaction(async (tx) => {
+			const sellerId = this.tenantContext.isAdmin() ? null : this.tenantContext.requireSellerId()
+			const [row] = await tx.$queryRaw<{ id: number }[]>`
+				SELECT id FROM billings
+				WHERE id = ${id} AND (${sellerId}::text IS NULL OR seller_id = ${sellerId}::text)
+				FOR UPDATE`
+			if (!row) throw new NotFoundException('Cobrança não encontrada')
+
+			const entries = await tx.billingPayment.count({ where: { billing_id: id } })
+			if (entries > 0) {
+				throw new ConflictException({
+					message:
+						'Esta cobrança tem pagamentos registrados e não pode ser excluída. Cancele a cobrança em vez de excluí-la.',
+					error: 'Conflict',
+					code: 'HAS_PAYMENTS',
+				})
+			}
+			await tx.billing.delete({ where: { id } })
+		})
 	}
 
 	async verifyOrderAccess(

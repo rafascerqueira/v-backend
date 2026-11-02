@@ -113,6 +113,7 @@ model Account {
   domain_events             DomainEvent[]
   seller_sequences          SellerSequence[]
   billings                  Billing[]
+  billing_payments          BillingPayment[]
   idempotency_keys          IdempotencyKey[]
   exceptions                AccountException[]         @relation("AccountExceptions")
   exceptions_created        AccountException[]         @relation("AccountExceptionsCreated")
@@ -352,15 +353,53 @@ model Billing {
   payment_method PaymentMethod @default(cash)
   payment_status PaymentStatus @default(pending)
   due_date       DateTime?     @db.Timestamptz()
-  payment_date   DateTime?
+  // paid_at of the latest payment that hasn't been reversed (derived from the ledger).
+  payment_date   DateTime?     @db.Timestamptz()
   notes          String?
 
   createdAt DateTime @default(now()) @db.Timestamptz()
   updatedAt DateTime @updatedAt @db.Timestamptz()
 
+  // Append-only money ledger (Phase 1C). paid_amount is its running balance:
+  // Σ payments − Σ reversals, maintained in the same transaction.
+  payments BillingPayment[]
+
+  // One charge per order. CHECKs (amounts >= 0, paid <= total) live in the migration.
+  @@unique([order_id], map: "uq_billings_order_id")
   @@unique([seller_id, billing_number], map: "uq_billings_seller_number")
-  @@index([order_id], name: "idx_billings_order_id")
   @@map("billings")
+}
+
+enum BillingPaymentKind {
+  payment
+  reversal
+}
+
+// Append-only: rows are never updated or deleted. A mistake is undone by a
+// `reversal` row pointing at the payment it cancels (at most one per payment).
+model BillingPayment {
+  id             Int                @id @default(autoincrement())
+  // NO ACTION (checked at end of statement): deleting a charge that has entries
+  // fails, while deleting the whole account still cascades through seller_id.
+  billing_id     Int
+  billing        Billing            @relation(fields: [billing_id], references: [id], onDelete: NoAction)
+  seller_id      String
+  seller         Account            @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  kind           BillingPaymentKind
+  amount         Int // cents, > 0 (CHECK in the migration)
+  method         PaymentMethod
+  paid_at        DateTime           @db.Timestamptz()
+  note           String?            @db.VarChar(500)
+  // Account that recorded it; NULL for entries backfilled from the old paid_amount.
+  created_by     String?            @db.VarChar(50)
+  reversal_of_id Int?               @unique(map: "uq_billing_payments_reversal_of")
+  reversal_of    BillingPayment?    @relation("PaymentReversal", fields: [reversal_of_id], references: [id], onDelete: NoAction)
+  reversed_by    BillingPayment?    @relation("PaymentReversal")
+  created_at     DateTime           @default(now()) @db.Timestamptz()
+
+  @@index([billing_id, paid_at], name: "idx_billing_payments_billing")
+  @@index([seller_id], name: "idx_billing_payments_seller")
+  @@map("billing_payments")
 }
 
 enum MovementType {
