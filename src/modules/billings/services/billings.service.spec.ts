@@ -36,6 +36,9 @@ const tenantContextMock = {
 
 const redisMock = { delete: jest.fn() }
 
+// Zero-entropy on purpose: secret scanners read realistic-looking keys as API keys.
+const IDEMPOTENCY_KEY = 'k'.repeat(20)
+
 const billing = (over: Record<string, unknown> = {}) => ({
 	id: 1,
 	order_id: 2,
@@ -288,11 +291,11 @@ describe('BillingsService', () => {
 			paymentsMock.record.mockResolvedValueOnce({ entry, sellerId: 'owner-seller', replayed: true })
 			const dto = { amount: 1500, method: 'pix' as const }
 
-			await service.recordPayment(1, dto, 'key-1234567890abcdef')
+			await service.recordPayment(1, dto, IDEMPOTENCY_KEY)
 
 			expect(paymentsMock.record.mock.calls[0][0].idempotency).toEqual({
 				scope: BILLING_PAYMENT_SCOPES.record,
-				key: 'key-1234567890abcdef',
+				key: IDEMPOTENCY_KEY,
 				requestHash: hashRequest({ billingId: 1, ...dto }),
 			})
 			expect(redisMock.delete).not.toHaveBeenCalled()
