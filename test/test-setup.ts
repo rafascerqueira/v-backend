@@ -38,6 +38,13 @@ export async function cleanupTestDatabase() {
 	try {
 		// Deletar todos os dados em ordem respeitando as foreign keys
 		await prisma.order_item.deleteMany()
+		// Ledger entries first: their FK refuses to drop charges that still have them.
+		// The ledger is append-only in the database; cleanup opens the maintenance
+		// switch for its own transaction.
+		await prisma.$transaction(async (tx) => {
+			await tx.$queryRaw`SELECT set_config('app.ledger_maintenance', 'on', true)`
+			await tx.billingPayment.deleteMany()
+		})
 		await prisma.billing.deleteMany()
 		await prisma.order.deleteMany()
 		await prisma.stock_movement.deleteMany()

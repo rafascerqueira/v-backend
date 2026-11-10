@@ -135,11 +135,10 @@ export interface OrderRepository {
 	updateStatus(
 		id: number,
 		status: string,
+		// Lifecycle only (cancellation). Money never moves here: only the ledger.
 		billingUpdate?: {
 			status: string
 			payment_status: string
-			payment_date?: Date
-			paid_amount?: number
 		},
 	): Promise<Order>
 	/** 409 HAS_PAYMENTS when a charge of the order has money recorded on it. */

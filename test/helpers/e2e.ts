@@ -4,6 +4,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { Test, type TestingModule } from '@nestjs/testing'
 import { ThrottlerStorage } from '@nestjs/throttler'
 import { AppModule } from '../../src/app.module'
+import type { Prisma, PrismaClient } from '../../src/generated/prisma/client'
 import { TokenService } from '../../src/modules/auth/services/token.service'
 import { TokenBlacklistService } from '../../src/modules/auth/services/token-blacklist.service'
 import { GlobalExceptionFilter } from '../../src/shared/filters/global-exception.filter'
@@ -118,5 +119,20 @@ export async function seedTestSeller(prisma: PrismaService): Promise<void> {
 			role: TEST_SELLER.role,
 			plan_type: TEST_SELLER.plan_type,
 		},
+	})
+}
+
+/**
+ * billing_payments is append-only in the database (a trigger refuses UPDATE and
+ * DELETE). Test cleanup opens the maintenance switch for its own transaction only;
+ * the app never does.
+ */
+export async function deleteLedgerEntries(
+	prisma: Pick<PrismaClient, '$transaction'>,
+	where: Prisma.BillingPaymentWhereInput = {},
+): Promise<void> {
+	await prisma.$transaction(async (tx) => {
+		await tx.$queryRaw`SELECT set_config('app.ledger_maintenance', 'on', true)`
+		await tx.billingPayment.deleteMany({ where })
 	})
 }

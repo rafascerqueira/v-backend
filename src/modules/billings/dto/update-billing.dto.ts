@@ -6,9 +6,11 @@ import { z } from 'zod'
 // cancellation and preserved by the service, not set through this endpoint.
 export const updateBillingSchema = z.object({
 	total_amount: z.coerce.number().int().nonnegative().optional(),
+	// DEPRECATED: use POST /billings/:id/payments. A higher value records the difference.
 	paid_amount: z.coerce.number().int().nonnegative().optional(),
 	payment_method: z.enum(['cash', 'credit_card', 'debit_card', 'pix']).optional(),
 	due_date: z.string().datetime().optional().nullable(),
+	// DEPRECATED: paid_at of the payment recorded from paid_amount; otherwise ignored.
 	payment_date: z.string().datetime().optional().nullable(),
 	notes: z.string().optional(),
 })
