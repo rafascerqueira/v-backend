@@ -9,6 +9,7 @@ import { appendDomainEvents } from '@/shared/events/append-domain-events'
 import { DOMAIN_EVENT_TYPES } from '@/shared/events/domain-event.types'
 import { claimIdempotencyKey, completeIdempotencyKey } from '@/shared/idempotency/idempotency'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { LOCKING_TRANSACTION } from '@/shared/prisma/transaction-options'
 import type {
 	CreateOrderData,
 	CreateOrderItemData,
@@ -261,7 +262,7 @@ export class PrismaOrderRepository implements OrderRepository {
 			if (idempotency) await completeIdempotencyKey(tx, idempotency, order.id, 201)
 
 			return { orderId: order.id, replayed: false }
-		})
+		}, LOCKING_TRANSACTION)
 	}
 
 	async findEvents(orderId: number): Promise<OrderEvent[] | null> {

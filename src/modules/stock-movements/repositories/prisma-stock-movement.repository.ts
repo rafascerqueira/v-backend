@@ -1,5 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import type { Prisma } from '@/generated/prisma/client'
+import { appendDomainEvents } from '@/shared/events/append-domain-events'
+import { DOMAIN_EVENT_TYPES } from '@/shared/events/domain-event.types'
 import { PrismaService } from '@/shared/prisma/prisma.service'
+import { LOCKING_TRANSACTION } from '@/shared/prisma/transaction-options'
 import type {
 	CreateStockMovementData,
 	CreateStockMovementResult,
@@ -8,6 +12,19 @@ import type {
 	StockMovementRepository,
 } from '@/shared/repositories/stock-movement.repository'
 import { TenantContext } from '@/shared/tenant/tenant.context'
+
+type Tx = Prisma.TransactionClient
+
+interface StockedProduct {
+	id: number
+	name: string
+	seller_id: string
+}
+
+interface LockedStock {
+	quantity: number
+	reserved_quantity: number
+}
 
 @Injectable()
 export class PrismaStockMovementRepository implements StockMovementRepository {
@@ -37,58 +54,132 @@ export class PrismaStockMovementRepository implements StockMovementRepository {
 	}
 
 	async create(data: CreateStockMovementData): Promise<CreateStockMovementResult> {
-		const { movement_type, product_id, quantity } = data
-
 		return this.prisma.$transaction(async (tx) => {
-			// Ensure product exists and belongs to tenant
-			const product = await tx.product.findFirst({
-				where: { id: product_id, ...this.getTenantFilter() },
-			})
+			const product = await this.findProduct(tx, data.product_id)
 			if (!product) throw new BadRequestException('Product not found')
 
-			// Current stock
-			const current = await tx.store_stock.findUnique({
-				where: { product_id },
-			})
+			const current = await this.lockStock(tx, data.product_id)
 			const currentQty = current?.quantity ?? 0
-			const reserved = current?.reserved_quantity ?? 0
-
-			const delta = movement_type === 'in' ? quantity : -quantity
-			const nextQty = currentQty + delta
-			// Only block an `out` adjustment from removing more than is on hand. An `in`
+			// Only block an `out` movement from removing more than is on hand. An `in`
 			// movement only raises stock, so it must never be blocked — in particular a
 			// restock that merely reduces an oversold deficit (e.g. -3 → -1) is valid and
-			// gets allocated to pending backorders below.
-			if (movement_type === 'out' && nextQty < 0) {
+			// gets allocated to pending backorders.
+			if (data.movement_type === 'out' && currentQty - data.quantity < 0) {
 				throw new BadRequestException('Insufficient stock')
 			}
+			return this.applyMovement(tx, product, current, data)
+		}, LOCKING_TRANSACTION)
+	}
 
-			// Upsert store stock
-			await tx.store_stock.upsert({
-				where: { product_id },
-				create: {
-					seller_id: product.seller_id,
-					product_id,
-					quantity: nextQty,
-					reserved_quantity: reserved,
-					min_stock: current?.min_stock ?? 0,
-					max_stock: current?.max_stock ?? 0,
-				},
-				update: { quantity: nextQty },
+	async adjustTo(productId: number, target: number): Promise<CreateStockMovementResult | null> {
+		return this.prisma.$transaction(async (tx) => {
+			const product = await this.findProduct(tx, productId)
+			if (!product) throw new NotFoundException('Product not found')
+
+			// The difference is computed under the lock: a sale or restock landing
+			// meanwhile can't make "set to N" end anywhere but N.
+			const current = await this.lockStock(tx, productId)
+			const delta = target - (current?.quantity ?? 0)
+			if (delta === 0) return null
+
+			// A count correction is the seller's call: it may take stock to any value.
+			return this.applyMovement(tx, product, current, {
+				movement_type: delta > 0 ? 'in' : 'out',
+				reference_type: 'adjustment',
+				reference_id: productId,
+				product_id: productId,
+				quantity: Math.abs(delta),
 			})
+		}, LOCKING_TRANSACTION)
+	}
 
-			// Create movement record
-			const movement = await tx.stock_movement.create({ data: data as any })
-
-			// An incoming arrival covers part/all of the deficit — allocate it to the
-			// product's pending backorders FIFO so the seller can finalize those orders.
-			const fulfilled =
-				movement_type === 'in'
-					? await this.allocateBackorders(tx, product, currentQty, nextQty, reserved)
-					: []
-
-			return { movement: movement as unknown as StockMovement, fulfilled }
+	private findProduct(tx: Tx, productId: number): Promise<StockedProduct | null> {
+		return tx.product.findFirst({
+			where: { id: productId, ...this.getTenantFilter() },
+			select: { id: true, name: true, seller_id: true },
 		})
+	}
+
+	/** Locks the product's stock row for the rest of the transaction (none yet → null). */
+	private async lockStock(tx: Tx, productId: number): Promise<LockedStock | null> {
+		const [row] = await tx.$queryRaw<LockedStock[]>`
+			SELECT quantity, reserved_quantity FROM store_stock
+			WHERE product_id = ${productId}
+			FOR UPDATE`
+		return row ?? null
+	}
+
+	/**
+	 * Applies a movement to the locked row with an atomic increment/decrement (never
+	 * an absolute write), records it, allocates an arrival to pending backorders and
+	 * appends stock.moved — all in the caller's transaction.
+	 */
+	private async applyMovement(
+		tx: Tx,
+		product: StockedProduct,
+		current: LockedStock | null,
+		data: CreateStockMovementData,
+	): Promise<CreateStockMovementResult> {
+		const currentQty = current?.quantity ?? 0
+		const reserved = current?.reserved_quantity ?? 0
+		const delta = data.movement_type === 'in' ? data.quantity : -data.quantity
+		const nextQty = currentQty + delta
+
+		await tx.store_stock.upsert({
+			where: { product_id: data.product_id },
+			create: {
+				seller_id: product.seller_id,
+				product_id: data.product_id,
+				quantity: nextQty,
+				reserved_quantity: reserved,
+				min_stock: 0,
+				max_stock: 0,
+			},
+			update: { quantity: { increment: delta } },
+		})
+
+		const movement = await tx.stock_movement.create({
+			data: {
+				movement_type: data.movement_type as any,
+				reference_type: data.reference_type as any,
+				reference_id: data.reference_id,
+				product_id: data.product_id,
+				quantity: data.quantity,
+			},
+		})
+
+		// An incoming arrival covers part/all of the deficit — allocate it to the
+		// product's pending backorders FIFO so the seller can finalize those orders.
+		const fulfilled =
+			data.movement_type === 'in'
+				? await this.allocateBackorders(tx, product, currentQty, nextQty, reserved)
+				: []
+
+		await appendDomainEvents(tx, [
+			{
+				sellerId: product.seller_id,
+				aggregateType: 'stock',
+				aggregateId: product.id,
+				eventType: DOMAIN_EVENT_TYPES.STOCK_MOVED,
+				payload: {
+					productId: product.id,
+					productName: product.name,
+					movementId: movement.id,
+					movementType: data.movement_type,
+					referenceType: data.reference_type,
+					quantity: data.quantity,
+					previousQuantity: currentQty,
+					newQuantity: nextQty,
+					fulfilled: fulfilled.map((f) => ({
+						orderId: f.order_id,
+						orderNumber: f.order_number,
+						quantity: f.quantity,
+					})),
+				},
+			},
+		])
+
+		return { movement: movement as unknown as StockMovement, fulfilled }
 	}
 
 	// Distributes the units this arrival just covered across the product's pending
@@ -96,8 +187,8 @@ export class PrismaStockMovementRepository implements StockMovementRepository {
 	// (owed = max(reserved - quantity, 0)); a row is marked `fulfilled` once its full
 	// owed quantity is met. Returns the orders that became fully covered.
 	private async allocateBackorders(
-		tx: any,
-		product: { id: number; name: string; seller_id: string },
+		tx: Tx,
+		product: StockedProduct,
 		prevQty: number,
 		nextQty: number,
 		reserved: number,
