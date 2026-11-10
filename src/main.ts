@@ -58,7 +58,14 @@ async function bootstrap() {
 		},
 		credentials: true,
 		methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-		allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'stripe-signature', 'X-CSRF-Token'],
+		allowedHeaders: [
+			'Content-Type',
+			'Authorization',
+			'Accept',
+			'stripe-signature',
+			'X-CSRF-Token',
+			'Idempotency-Key',
+		],
 	})
 
 	await app.register(cookie as any, {

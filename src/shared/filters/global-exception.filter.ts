@@ -66,6 +66,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 			status = HttpStatus.NOT_FOUND
 			message = 'Registro não encontrado'
 			error = 'Not Found'
+		} else if ((exception as any)?.code === 'P2003') {
+			// Foreign-key violation, e.g. deleting something whose payment history must
+			// be kept (the ledger FK backs the app-level HAS_PAYMENTS checks).
+			status = HttpStatus.CONFLICT
+			message = 'Não é possível concluir: existem registros vinculados a este item.'
+			error = 'Conflict'
 		}
 
 		const errorResponse = {

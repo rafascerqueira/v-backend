@@ -111,6 +111,9 @@ model Account {
   promotions                Promotion[]
   backorders                Backorder[]
   domain_events             DomainEvent[]
+  seller_sequences          SellerSequence[]
+  billings                  Billing[]
+  billing_payments          BillingPayment[]
   idempotency_keys          IdempotencyKey[]
   exceptions                AccountException[]         @relation("AccountExceptions")
   exceptions_created        AccountException[]         @relation("AccountExceptionsCreated")
@@ -291,6 +294,9 @@ model Order {
   total          Int           @default(0)
   notes          String?
   metadata       Json?         @db.JsonB()
+  // Storefront orders only: the unguessable handle in the public tracking link
+  // (order numbers are sequential per seller since Phase 1A, so not secret).
+  tracking_token String?       @unique(map: "uq_orders_tracking_token") @db.VarChar(32)
 
   createdAt  DateTime     @default(now()) @db.Timestamptz()
   updatedAt  DateTime     @updatedAt @db.Timestamptz()
@@ -299,6 +305,7 @@ model Order {
   Backorder  Backorder[]
 
   @@unique([seller_id, order_number])
+  @@index([customer_id], name: "idx_orders_customer")
   @@index([seller_id], name: "idx_orders_seller")
   @@index([seller_id, createdAt], name: "idx_orders_seller_date")
   @@map("orders")
@@ -315,8 +322,8 @@ model Order_item {
   discount   Int     @default(0)
   total      Int     @default(0)
 
-  createdAt DateTime @default(now()) @db.Timestamptz()
-  updatedAt DateTime @updatedAt @db.Timestamptz()
+  createdAt DateTime   @default(now()) @db.Timestamptz()
+  updatedAt DateTime   @updatedAt @db.Timestamptz()
   backorder Backorder?
 
   @@index([order_id], name: "idx_order_items_order_id")
@@ -336,21 +343,63 @@ model Billing {
   id             Int           @id @default(autoincrement())
   order_id       Int
   order          Order         @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  billing_number String        @unique @db.VarChar(50)
+  // Denormalised from the order: billing numbers are unique per seller, not globally.
+  seller_id      String
+  seller         Account       @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  billing_number String        @db.VarChar(50)
   status         BillingStatus @default(pending)
   total_amount   Int           @default(0)
   paid_amount    Int           @default(0)
   payment_method PaymentMethod @default(cash)
   payment_status PaymentStatus @default(pending)
   due_date       DateTime?     @db.Timestamptz()
-  payment_date   DateTime?
+  // paid_at of the latest payment that hasn't been reversed (derived from the ledger).
+  payment_date   DateTime?     @db.Timestamptz()
   notes          String?
 
   createdAt DateTime @default(now()) @db.Timestamptz()
   updatedAt DateTime @updatedAt @db.Timestamptz()
 
-  @@index([order_id], name: "idx_billings_order_id")
+  // Append-only money ledger (Phase 1C). paid_amount is its running balance:
+  // Σ payments − Σ reversals, maintained in the same transaction.
+  payments BillingPayment[]
+
+  // One charge per order. CHECKs (amounts >= 0, paid <= total) live in the migration.
+  @@unique([order_id], map: "uq_billings_order_id")
+  @@unique([seller_id, billing_number], map: "uq_billings_seller_number")
   @@map("billings")
+}
+
+enum BillingPaymentKind {
+  payment
+  reversal
+}
+
+// Append-only: rows are never updated or deleted. A mistake is undone by a
+// `reversal` row pointing at the payment it cancels (at most one per payment).
+model BillingPayment {
+  id             Int                @id @default(autoincrement())
+  // NO ACTION (checked at end of statement): deleting a charge that has entries
+  // fails, while deleting the whole account still cascades through seller_id.
+  billing_id     Int
+  billing        Billing            @relation(fields: [billing_id], references: [id], onDelete: NoAction)
+  seller_id      String
+  seller         Account            @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  kind           BillingPaymentKind
+  amount         Int // cents, > 0 (CHECK in the migration)
+  method         PaymentMethod
+  paid_at        DateTime           @db.Timestamptz()
+  note           String?            @db.VarChar(500)
+  // Account that recorded it; NULL for entries backfilled from the old paid_amount.
+  created_by     String?            @db.VarChar(50)
+  reversal_of_id Int?               @unique(map: "uq_billing_payments_reversal_of")
+  reversal_of    BillingPayment?    @relation("PaymentReversal", fields: [reversal_of_id], references: [id], onDelete: NoAction)
+  reversed_by    BillingPayment?    @relation("PaymentReversal")
+  created_at     DateTime           @default(now()) @db.Timestamptz()
+
+  @@index([billing_id, paid_at], name: "idx_billing_payments_billing")
+  @@index([seller_id], name: "idx_billing_payments_seller")
+  @@map("billing_payments")
 }
 
 enum MovementType {
@@ -682,4 +731,17 @@ model IdempotencyKey {
   @@id([seller_id, scope, key])
   @@index([created_at], name: "idx_idempotency_keys_created")
   @@map("idempotency_keys")
+}
+
+// Per-seller counters (Phase 1A). `order` numbers orders PED-000123 and their
+// per-sale charge COB-000123. Bumped with INSERT ... ON CONFLICT DO UPDATE inside
+// the order's transaction, so numbers are gap-free per seller under concurrency.
+model SellerSequence {
+  seller_id String
+  seller    Account @relation(fields: [seller_id], references: [id], onDelete: Cascade)
+  name      String  @db.VarChar(30)
+  value     Int     @default(0)
+
+  @@id([seller_id, name])
+  @@map("seller_sequences")
 }

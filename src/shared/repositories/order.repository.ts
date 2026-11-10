@@ -1,3 +1,5 @@
+import type { IdempotencyRequest } from '@/shared/idempotency/idempotency'
+
 export interface Order {
 	id: number
 	seller_id: string
@@ -8,6 +10,8 @@ export interface Order {
 	discount: number
 	total: number
 	status: string
+	/** Storefront orders only: the public tracking link handle. */
+	tracking_token?: string | null
 	createdAt: Date
 	updatedAt: Date
 }
@@ -15,7 +19,7 @@ export interface Order {
 export interface OrderWithRelations extends Order {
 	Order_item: OrderItem[]
 	Billing?: Billing[]
-	customer?: { id: string; name: string; email: string | null }
+	customer?: { id: string; name: string; email: string | null; phone?: string | null }
 }
 
 export interface OrderItem {
@@ -44,10 +48,12 @@ export interface Billing {
 	payment_status: string
 }
 
+/** Where an order came from: the seller's dashboard or the public storefront. */
+export type OrderSource = 'dashboard' | 'storefront'
+
 export interface CreateOrderData {
 	seller_id: string
 	customer_id: string
-	order_number: string
 	notes?: string
 	subtotal: number
 	discount: number
@@ -59,13 +65,23 @@ export interface CreateOrderData {
 		discount: number
 		total: number
 	}[]
+	source: OrderSource
+	/**
+	 * Honour products' allow_oversell. Seller-only: the storefront passes false, so a
+	 * short stock-tracked item is always a 400 there.
+	 */
+	allowOversell: boolean
+	metadata?: Record<string, unknown>
+	/** Storefront orders: the unguessable handle for the public tracking link. */
+	tracking_token?: string
 	// Optional charge created atomically with the order (per_sale billing mode).
 	billing?: CreateOrderBillingData
+	idempotency?: IdempotencyRequest
 }
 
 // An item that was sold past its available stock because the product is flagged
-// allow_oversell. Surfaced from create() so the service can notify the seller that
-// these units are pending delivery (stock has gone negative).
+// allow_oversell (stock went negative). Carried in the order.created event so the
+// seller is notified that these units are pending delivery.
 export interface OversoldItem {
 	product_id: number
 	product_name: string
@@ -73,15 +89,25 @@ export interface OversoldItem {
 	requested: number
 }
 
-// create() returns the order plus any oversold items, keeping the notification
-// (a side effect) in the service layer instead of the repository transaction.
+/**
+ * The order is numbered (PED-n / COB-n) inside the transaction. `replayed` means the
+ * Idempotency-Key was already used with the same body: nothing was written and
+ * `orderId` is the original order.
+ */
 export interface CreateOrderResult {
-	order: OrderWithRelations
-	oversold: OversoldItem[]
+	orderId: number
+	replayed: boolean
+}
+
+/** One entry of an order's timeline (GET /orders/:id/events). */
+export interface OrderEvent {
+	id: string
+	event_type: string
+	occurred_at: Date
+	payload: Record<string, unknown>
 }
 
 export interface CreateOrderBillingData {
-	billing_number: string
 	total_amount: number
 	paid_amount: number
 	payment_method: string
@@ -109,12 +135,14 @@ export interface OrderRepository {
 	updateStatus(
 		id: number,
 		status: string,
+		// Lifecycle only (cancellation). Money never moves here: only the ledger.
 		billingUpdate?: {
 			status: string
 			payment_status: string
-			payment_date?: Date
-			paid_amount?: number
 		},
 	): Promise<Order>
+	/** 409 HAS_PAYMENTS when a charge of the order has money recorded on it. */
 	delete(id: number): Promise<Order>
+	/** The order's domain events, oldest first; null when missing or another tenant's. */
+	findEvents(orderId: number): Promise<OrderEvent[] | null>
 }

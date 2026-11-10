@@ -1,6 +1,8 @@
 export interface BillingRecord {
 	id: number
 	order_id: number
+	/** Owner (denormalised from the order). */
+	seller_id: string
 	billing_number: string
 	total_amount: number
 	paid_amount: number
@@ -37,14 +39,14 @@ export interface CreateBillingData {
 	notes?: string
 }
 
+// No paid_amount / payment_date: money only moves through the payment ledger
+// (BillingPaymentRepository), and the database refuses other writes to paid_amount.
 export interface UpdateBillingData {
 	total_amount?: number
-	paid_amount?: number
 	payment_method?: string
 	payment_status?: string
 	status?: string
 	due_date?: Date | null
-	payment_date?: Date | null
 	notes?: string
 }
 
@@ -65,7 +67,8 @@ export interface BillingRepository {
 	findUnbilledPerSaleOrders(): Promise<UnbilledOrder[]>
 	create(data: CreateBillingData): Promise<BillingRecord>
 	update(id: number, data: UpdateBillingData): Promise<BillingRecord>
-	delete(id: number): Promise<void>
+	/** 404 missing/foreign; 409 HAS_PAYMENTS. Returns the owner (cache invalidation). */
+	delete(id: number): Promise<{ sellerId: string }>
 	verifyOrderAccess(
 		orderId: number,
 		sellerId: string | null,

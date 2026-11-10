@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { PrismaModule } from '@/shared/prisma/prisma.module'
 import { CATALOG_REPOSITORY } from '@/shared/repositories/catalog.repository'
 import { STORE_SETTINGS_REPOSITORY } from '@/shared/repositories/store-settings.repository'
+import { OrdersModule } from '../orders/orders.module'
 import { CatalogController } from './controllers/catalog.controller'
 import { CustomerInviteController } from './controllers/customer-invite.controller'
 import { StoreSettingsController } from './controllers/store-settings.controller'
@@ -11,7 +12,8 @@ import { CatalogService } from './services/catalog.service'
 import { StoreSettingsService } from './services/store-settings.service'
 
 @Module({
-	imports: [PrismaModule],
+	// OrdersModule: storefront orders go through OrdersService.place (one write path).
+	imports: [PrismaModule, OrdersModule],
 	controllers: [CatalogController, StoreSettingsController, CustomerInviteController],
 	providers: [
 		CatalogService,

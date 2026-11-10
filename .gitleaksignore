@@ -1,0 +1,13 @@
+# False positives, one fingerprint per line (commit:file:rule:line). Explain each.
+#
+# A test placeholder for a storefront tracking token ("foobarbazqux1234" in
+# base64) read as a generic API key. Replaced by a zero-entropy fixture in
+# 2146bf0, but it stays in the Phase 1A commit's history.
+d3f9001fe4ee38cc96deeeb82d1772b7c3784b70:src/modules/catalog/services/catalog.service.spec.ts:generic-api-key:126
+d3f9001fe4ee38cc96deeeb82d1772b7c3784b70:src/modules/catalog/services/catalog.service.spec.ts:generic-api-key:604
+d3f9001fe4ee38cc96deeeb82d1772b7c3784b70:src/modules/catalog/services/catalog.service.spec.ts:generic-api-key:719
+#
+# A made-up Idempotency-Key in a unit test ("key-" plus a hex counting run) read
+# as a generic API key. Replaced by a zero-entropy fixture, but it stays in the
+# Phase 1C commit's history.
+7044d5ee6aeb4fe5bf8d492fb675b837aedbe81f:src/modules/billings/services/billings.service.spec.ts:generic-api-key:334

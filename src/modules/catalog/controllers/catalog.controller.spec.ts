@@ -118,9 +118,9 @@ describe('CatalogController', () => {
 			const createdOrder = { id: 100, ...orderBody }
 			serviceMock.createOrder.mockResolvedValueOnce(createdOrder)
 
-			const result = await controller.createOrder('my-shop', orderBody)
+			const result = await controller.createOrder('my-shop', orderBody, 'key-1')
 
-			expect(serviceMock.createOrder).toHaveBeenCalledWith('my-shop', orderBody)
+			expect(serviceMock.createOrder).toHaveBeenCalledWith('my-shop', orderBody, 'key-1')
 			expect(result).toEqual(createdOrder)
 		})
 

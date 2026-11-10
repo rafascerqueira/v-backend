@@ -1,0 +1,1 @@
+- [Phase 1 orders/outbox review](phase1-orders-outbox-review.md) — 2026-11-02 #5/#6 review: storefront PII echo (H), password_hash in POST /orders, anon DoS; non-issues
