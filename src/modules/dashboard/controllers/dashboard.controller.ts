@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CurrentUser } from '@/modules/auth/decorators/current-user.decorator'
-import type { TokenPayload } from '@/modules/auth/dto/auth-response.dto'
+import type { AuthenticatedUser } from '@/modules/auth/session/session.types'
 import { DashboardService } from '../services/dashboard.service'
 
 @ApiTags('dashboard')
@@ -12,7 +12,7 @@ export class DashboardController {
 
 	@Get('stats')
 	@ApiOperation({ summary: 'Get dashboard statistics' })
-	async getStats(@CurrentUser() user: TokenPayload) {
+	async getStats(@CurrentUser() user: AuthenticatedUser) {
 		return this.dashboardService.getStats(user.sub)
 	}
 }

@@ -1,10 +1,20 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, UnauthorizedException } from '@nestjs/common'
+import {
+	Body,
+	Controller,
+	HttpCode,
+	HttpStatus,
+	Post,
+	Res,
+	UnauthorizedException,
+} from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
+import type { FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { AccountService } from '@/modules/users/services/account.service'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { CurrentUser } from '../decorators/current-user.decorator'
+import { clearSessionCookies } from '../utils/session-cookies'
 
 const dataDeletionSchema = z.object({
 	password: z.string().min(1),
@@ -39,12 +49,16 @@ export class DataDeletionController {
 	async handle(
 		@CurrentUser() user: { sub: string },
 		@Body(new ZodValidationPipe(dataDeletionSchema)) body: DataDeletionDto,
+		@Res({ passthrough: true }) response: FastifyReply,
 	) {
 		const success = await this.accountService.anonymizeAccount(user.sub, body.password)
 
 		if (!success) {
 			throw new UnauthorizedException('Senha inválida')
 		}
+
+		// Anonymizing ended every session of the account; drop this device's cookies too.
+		clearSessionCookies(response)
 
 		return {
 			message:

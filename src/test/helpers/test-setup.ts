@@ -2,8 +2,8 @@ import type { CanActivate } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { Test } from '@nestjs/testing'
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
+import { SessionService } from '@/modules/auth/services/session.service'
 import { TokenService } from '@/modules/auth/services/token.service'
-import { TokenBlacklistService } from '@/modules/auth/services/token-blacklist.service'
 
 export const createTestModule = async (controller: any, providers: any[] = []) => {
 	const testModule = Test.createTestingModule({
@@ -20,14 +20,13 @@ export const createTestModule = async (controller: any, providers: any[] = []) =
 				provide: TokenService,
 				useValue: {
 					verifyAccessToken: jest.fn(),
-					generateAccessToken: jest.fn(),
+					signAccessToken: jest.fn(),
 				},
 			},
 			{
-				provide: TokenBlacklistService,
+				provide: SessionService,
 				useValue: {
-					isBlacklisted: jest.fn(),
-					addToBlacklist: jest.fn(),
+					authenticate: jest.fn(),
 				},
 			},
 			...providers,

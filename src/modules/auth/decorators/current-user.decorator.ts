@@ -1,10 +1,10 @@
 import { createParamDecorator, type ExecutionContext } from '@nestjs/common'
-import type { TokenPayload } from '../dto/auth-response.dto'
+import type { AuthenticatedUser } from '../session/session.types'
 
 export const CurrentUser = createParamDecorator(
-	(data: keyof TokenPayload | undefined, ctx: ExecutionContext) => {
+	(data: keyof AuthenticatedUser | undefined, ctx: ExecutionContext) => {
 		const request = ctx.switchToHttp().getRequest()
-		const user = request.user as TokenPayload
+		const user = request.user as AuthenticatedUser
 
 		if (data) {
 			return user?.[data]

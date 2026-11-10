@@ -5,7 +5,7 @@ import {
 	Injectable,
 } from '@nestjs/common'
 import { PrismaService } from '@/shared/prisma/prisma.service'
-import type { TokenPayload } from '../dto/auth-response.dto'
+import type { AuthenticatedUser } from '../session/session.types'
 
 @Injectable()
 export class AdminGuard implements CanActivate {
@@ -13,7 +13,7 @@ export class AdminGuard implements CanActivate {
 
 	async canActivate(context: ExecutionContext): Promise<boolean> {
 		const request = context.switchToHttp().getRequest()
-		const user = request.user as TokenPayload | undefined
+		const user = request.user as AuthenticatedUser | undefined
 
 		if (!user?.sub) {
 			throw new ForbiddenException('Authentication required')

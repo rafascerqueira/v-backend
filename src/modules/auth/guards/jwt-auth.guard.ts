@@ -1,20 +1,14 @@
-import {
-	type CanActivate,
-	type ExecutionContext,
-	Injectable,
-	UnauthorizedException,
-} from '@nestjs/common'
+import { type CanActivate, type ExecutionContext, Injectable } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { AUTH_COOKIES } from '../constants/cookies'
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
-import { TokenService } from '../services/token.service'
-import { TokenBlacklistService } from '../services/token-blacklist.service'
+import { SessionService } from '../services/session.service'
+import { SESSION_ERROR_CODE, SessionException } from '../session/session.errors'
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
 	constructor(
-		private readonly tokenService: TokenService,
-		private readonly tokenBlacklistService: TokenBlacklistService,
+		private readonly sessionService: SessionService,
 		private readonly reflector: Reflector,
 	) {}
 
@@ -32,20 +26,13 @@ export class JwtAuthGuard implements CanActivate {
 		const token = this.extractToken(request)
 
 		if (!token) {
-			throw new UnauthorizedException('Token not provided')
+			throw new SessionException(SESSION_ERROR_CODE.EXPIRED)
 		}
 
-		const isBlacklisted = await this.tokenBlacklistService.isBlacklisted(token)
-		if (isBlacklisted) {
-			throw new UnauthorizedException('Token has been revoked')
-		}
-
-		try {
-			const payload = await this.tokenService.verifyAccessToken(token)
-			request.user = payload
-		} catch {
-			throw new UnauthorizedException('Invalid or expired token')
-		}
+		// `request.user` is the account as it is now (role, plan, e-mail read from the
+		// account, not from the token), so plan guards and tenant scoping downstream
+		// always act on current data.
+		request.user = await this.sessionService.authenticate(token)
 
 		return true
 	}

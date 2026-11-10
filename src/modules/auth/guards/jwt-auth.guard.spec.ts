@@ -1,16 +1,19 @@
 /**
  * JwtAuthGuard unit tests.
- * Covers: @Public() bypass, missing token, blacklist revocation branch,
- *         invalid/expired token, and successful header- vs cookie-based auth.
+ * Covers: @Public() bypass, missing token, header- vs cookie-based token extraction,
+ *         request.user populated from the session (account state, not token claims),
+ *         and that session failures propagate untouched (401 with a code, 503).
  *
- * TokenService and TokenBlacklistService are mocked at the constructor level
- * (no real JwtService / Redis). Reflector is a plain jest mock.
+ * SessionService is mocked at the constructor level (no JwtService / Redis).
  */
-import { UnauthorizedException } from '@nestjs/common'
 import type { Reflector } from '@nestjs/core'
 import { AUTH_COOKIES } from '../constants/cookies'
-import type { TokenService } from '../services/token.service'
-import type { TokenBlacklistService } from '../services/token-blacklist.service'
+import type { SessionService } from '../services/session.service'
+import {
+	SESSION_ERROR_CODE,
+	SessionException,
+	SessionStoreUnavailableException,
+} from '../session/session.errors'
 import { JwtAuthGuard } from './jwt-auth.guard'
 
 function makeContext(req: any): any {
@@ -21,111 +24,112 @@ function makeContext(req: any): any {
 	}
 }
 
+const user = {
+	sub: 'acc-1',
+	email: 'a@b.com',
+	role: 'seller' as const,
+	plan_type: 'pro' as const,
+	sid: 'sid-1',
+}
+
 describe('JwtAuthGuard', () => {
 	let guard: JwtAuthGuard
-	let tokenService: { verifyAccessToken: jest.Mock }
-	let blacklist: { isBlacklisted: jest.Mock }
+	let sessionService: { authenticate: jest.Mock }
 	let reflector: { getAllAndOverride: jest.Mock }
 
 	beforeEach(() => {
-		tokenService = { verifyAccessToken: jest.fn() }
-		blacklist = { isBlacklisted: jest.fn().mockResolvedValue(false) }
+		sessionService = { authenticate: jest.fn().mockResolvedValue(user) }
 		reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) }
 		guard = new JwtAuthGuard(
-			tokenService as unknown as TokenService,
-			blacklist as unknown as TokenBlacklistService,
+			sessionService as unknown as SessionService,
 			reflector as unknown as Reflector,
 		)
 	})
 
 	it('bypasses auth entirely for @Public() routes', async () => {
 		reflector.getAllAndOverride.mockReturnValueOnce(true)
+		const req: any = { headers: {}, cookies: {} }
+
+		await expect(guard.canActivate(makeContext(req))).resolves.toBe(true)
+		expect(sessionService.authenticate).not.toHaveBeenCalled()
+		expect(req.user).toBeUndefined()
+	})
+
+	it('answers 401 SESSION_EXPIRED when no token is present in header or cookie', async () => {
 		const req = { headers: {}, cookies: {} }
 
-		await expect(guard.canActivate(makeContext(req))).resolves.toBe(true)
-		// Short-circuits before touching the token or the blacklist.
-		expect(blacklist.isBlacklisted).not.toHaveBeenCalled()
-		expect(tokenService.verifyAccessToken).not.toHaveBeenCalled()
+		const error = await guard.canActivate(makeContext(req)).catch((e) => e)
+
+		expect(error).toBeInstanceOf(SessionException)
+		expect(error.getStatus()).toBe(401)
+		expect(error.getResponse()).toMatchObject({ code: SESSION_ERROR_CODE.EXPIRED })
+		expect(sessionService.authenticate).not.toHaveBeenCalled()
 	})
 
-	it('rejects when no token is present in header or cookie', async () => {
-		const req = { headers: {}, cookies: {} }
-
-		await expect(guard.canActivate(makeContext(req))).rejects.toThrow(
-			new UnauthorizedException('Token not provided'),
-		)
-		expect(blacklist.isBlacklisted).not.toHaveBeenCalled()
-	})
-
-	it('rejects a revoked (blacklisted) token before verifying it', async () => {
-		blacklist.isBlacklisted.mockResolvedValueOnce(true)
-		const req = { headers: { authorization: 'Bearer revoked-token' }, cookies: {} }
-
-		await expect(guard.canActivate(makeContext(req))).rejects.toThrow(
-			new UnauthorizedException('Token has been revoked'),
-		)
-		expect(blacklist.isBlacklisted).toHaveBeenCalledWith('revoked-token')
-		// Verification must NOT run for a blacklisted token.
-		expect(tokenService.verifyAccessToken).not.toHaveBeenCalled()
-	})
-
-	it('rejects an invalid/expired token (verifyAccessToken throws)', async () => {
-		blacklist.isBlacklisted.mockResolvedValueOnce(false)
-		tokenService.verifyAccessToken.mockRejectedValueOnce(new Error('jwt expired'))
-		const req = { headers: { authorization: 'Bearer bad-token' }, cookies: {} }
-
-		await expect(guard.canActivate(makeContext(req))).rejects.toThrow(
-			new UnauthorizedException('Invalid or expired token'),
-		)
-		expect(req).not.toHaveProperty('user')
-	})
-
-	it('authenticates a valid Bearer token and attaches the payload to request.user', async () => {
-		const payload = { sub: 'acc-1', email: 'a@b.com', role: 'seller', type: 'access' }
-		blacklist.isBlacklisted.mockResolvedValueOnce(false)
-		tokenService.verifyAccessToken.mockResolvedValueOnce(payload)
-		const req: any = { headers: { authorization: 'Bearer good-token' }, cookies: {} }
+	it('authenticates from the Authorization header and sets request.user', async () => {
+		const req: any = { headers: { authorization: 'Bearer header-token' }, cookies: {} }
 
 		await expect(guard.canActivate(makeContext(req))).resolves.toBe(true)
-		expect(blacklist.isBlacklisted).toHaveBeenCalledWith('good-token')
-		expect(tokenService.verifyAccessToken).toHaveBeenCalledWith('good-token')
-		expect(req.user).toEqual(payload)
+
+		expect(sessionService.authenticate).toHaveBeenCalledWith('header-token')
+		// The user is whatever the session resolved from the account, verbatim.
+		expect(req.user).toBe(user)
 	})
 
-	it('falls back to the HttpOnly access_token cookie when there is no Bearer header', async () => {
-		const payload = { sub: 'acc-2', type: 'access' }
-		tokenService.verifyAccessToken.mockResolvedValueOnce(payload)
-		const req: any = {
-			headers: {},
-			cookies: { [AUTH_COOKIES.ACCESS_TOKEN]: 'cookie-token' },
-		}
+	it('falls back to the HttpOnly access cookie', async () => {
+		const req: any = { headers: {}, cookies: { [AUTH_COOKIES.ACCESS_TOKEN]: 'cookie-token' } }
 
 		await expect(guard.canActivate(makeContext(req))).resolves.toBe(true)
-		expect(tokenService.verifyAccessToken).toHaveBeenCalledWith('cookie-token')
-		expect(req.user).toEqual(payload)
+
+		expect(sessionService.authenticate).toHaveBeenCalledWith('cookie-token')
+		expect(req.user).toBe(user)
 	})
 
-	it('ignores a non-Bearer Authorization scheme and falls back to the cookie', async () => {
-		const payload = { sub: 'acc-3', type: 'access' }
-		tokenService.verifyAccessToken.mockResolvedValueOnce(payload)
-		const req: any = {
-			headers: { authorization: 'Basic dXNlcjpwYXNz' },
-			cookies: { [AUTH_COOKIES.ACCESS_TOKEN]: 'cookie-token' },
-		}
-
-		await expect(guard.canActivate(makeContext(req))).resolves.toBe(true)
-		expect(tokenService.verifyAccessToken).toHaveBeenCalledWith('cookie-token')
-	})
-
-	it('prefers the Bearer header over the cookie when both are present', async () => {
-		const payload = { sub: 'acc-4', type: 'access' }
-		tokenService.verifyAccessToken.mockResolvedValueOnce(payload)
+	it('prefers the Authorization header over the cookie', async () => {
 		const req: any = {
 			headers: { authorization: 'Bearer header-token' },
 			cookies: { [AUTH_COOKIES.ACCESS_TOKEN]: 'cookie-token' },
 		}
 
-		await expect(guard.canActivate(makeContext(req))).resolves.toBe(true)
-		expect(tokenService.verifyAccessToken).toHaveBeenCalledWith('header-token')
+		await guard.canActivate(makeContext(req))
+
+		expect(sessionService.authenticate).toHaveBeenCalledWith('header-token')
+	})
+
+	it('ignores a non-Bearer Authorization header and uses the cookie', async () => {
+		const req: any = {
+			headers: { authorization: 'Basic abc' },
+			cookies: { [AUTH_COOKIES.ACCESS_TOKEN]: 'cookie-token' },
+		}
+
+		await guard.canActivate(makeContext(req))
+
+		expect(sessionService.authenticate).toHaveBeenCalledWith('cookie-token')
+	})
+
+	it.each([
+		SESSION_ERROR_CODE.EXPIRED,
+		SESSION_ERROR_CODE.REVOKED,
+		SESSION_ERROR_CODE.ACCOUNT_INACTIVE,
+	])('propagates a %s session failure and leaves request.user unset', async (code) => {
+		sessionService.authenticate.mockRejectedValueOnce(new SessionException(code))
+		const req: any = { headers: { authorization: 'Bearer t' }, cookies: {} }
+
+		const error = await guard.canActivate(makeContext(req)).catch((e) => e)
+
+		expect(error).toBeInstanceOf(SessionException)
+		expect(error.getResponse()).toMatchObject({ code })
+		expect(req.user).toBeUndefined()
+	})
+
+	it('fails closed (503) when the session store is unavailable', async () => {
+		sessionService.authenticate.mockRejectedValueOnce(new SessionStoreUnavailableException())
+		const req: any = { headers: { authorization: 'Bearer t' }, cookies: {} }
+
+		const error = await guard.canActivate(makeContext(req)).catch((e) => e)
+
+		expect(error).toBeInstanceOf(SessionStoreUnavailableException)
+		expect(error.getStatus()).toBe(503)
+		expect(req.user).toBeUndefined()
 	})
 })

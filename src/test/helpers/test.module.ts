@@ -13,7 +13,7 @@ export const createTestingModule = (controller: any, providers: any[] = []) => {
 				useValue: {},
 			},
 			{
-				provide: 'TokenBlacklistService',
+				provide: 'SessionService',
 				useValue: {},
 			},
 			...providers,

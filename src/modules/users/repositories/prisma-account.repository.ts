@@ -8,10 +8,14 @@ import type {
 	CreateOAuthAccountData,
 	UpdateAccountData,
 } from '@/shared/repositories/account.repository'
+import { type AccountSnapshot, AccountSnapshotStore } from '@/shared/session/account-snapshot.store'
 
 @Injectable()
 export class PrismaAccountRepository implements AccountRepository {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly accountSnapshots: AccountSnapshotStore,
+	) {}
 
 	async create(data: CreateAccountData): Promise<Account> {
 		return this.prisma.account.create({ data })
@@ -25,12 +29,45 @@ export class PrismaAccountRepository implements AccountRepository {
 		return this.prisma.account.findUnique({ where: { email } })
 	}
 
+	async findSessionState(id: string): Promise<AccountSnapshot | null> {
+		return this.prisma.account.findUnique({
+			where: { id },
+			select: {
+				email: true,
+				role: true,
+				plan_type: true,
+				is_active: true,
+				session_version: true,
+			},
+		})
+	}
+
+	async bumpSessionVersion(id: string): Promise<void> {
+		await this.prisma.account.update({
+			where: { id },
+			data: { session_version: { increment: 1 } },
+			select: { id: true },
+		})
+		await this.accountSnapshots.invalidate(id)
+	}
+
 	async update(id: string, data: UpdateAccountData): Promise<Account> {
-		return this.prisma.account.update({ where: { id }, data })
+		const account = await this.prisma.account.update({
+			where: { id },
+			// A new password ends every session of the account, in the same write.
+			data: data.password === undefined ? data : { ...data, session_version: { increment: 1 } },
+		})
+		// E-mail and password are part of what authentication reads.
+		if (data.email !== undefined || data.password !== undefined) {
+			await this.accountSnapshots.invalidate(id)
+		}
+		return account
 	}
 
 	async delete(id: string): Promise<Account> {
-		return this.prisma.account.delete({ where: { id } })
+		const account = await this.prisma.account.delete({ where: { id } })
+		await this.accountSnapshots.invalidate(id)
+		return account
 	}
 
 	async existsByStoreSlug(slug: string): Promise<boolean> {
@@ -114,6 +151,8 @@ export class PrismaAccountRepository implements AccountRepository {
 					store_banner: null,
 					store_phone: null,
 					store_whatsapp: null,
+					// The account can no longer be used: end every session it has.
+					session_version: { increment: 1 },
 				},
 			})
 
@@ -148,5 +187,6 @@ export class PrismaAccountRepository implements AccountRepository {
 			// 4. Delete notifications
 			await tx.notification.deleteMany({ where: { user_id: id } })
 		})
+		await this.accountSnapshots.invalidate(id)
 	}
 }

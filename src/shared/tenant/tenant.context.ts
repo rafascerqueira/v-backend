@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { Injectable } from '@nestjs/common'
+import { Injectable, UnauthorizedException } from '@nestjs/common'
 
 export interface TenantData {
 	sellerId: string
@@ -33,7 +33,14 @@ export class TenantContext {
 	requireSellerId(): string {
 		const sellerId = this.getSellerId()
 		if (!sellerId) {
-			throw new Error('Tenant context not initialized - sellerId is required')
+			// No authenticated account behind this call: answer 401 (a raw Error would
+			// surface as a 500).
+			throw new UnauthorizedException({
+				statusCode: 401,
+				error: 'Unauthorized',
+				message: 'Sua sessão expirou. Entre novamente.',
+				code: 'SESSION_EXPIRED',
+			})
 		}
 		return sellerId
 	}

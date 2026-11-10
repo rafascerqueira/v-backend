@@ -1,29 +1,36 @@
 /**
  * RefreshTokenController unit tests
- * Covers: POST /auth/refresh — @Public, refreshes tokens via body or cookie
+ * Covers: POST /auth/refresh — refresh token read from the HttpOnly cookie only,
+ *         cookies rewritten on success, cookies cleared when the session is over,
+ *         body carries only expiresIn.
+ * Guards mocked: JwtAuthGuard, OriginGuard
  */
 
-import { UnauthorizedException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
-import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard'
-import { TokenService } from '../services/token.service'
-import { TokenBlacklistService } from '../services/token-blacklist.service'
+import { JwtAuthGuard } from '../guards/jwt-auth.guard'
+import { OriginGuard } from '../guards/origin.guard'
+import { SessionService } from '../services/session.service'
+import {
+	SESSION_ERROR_CODE,
+	SessionException,
+	SessionStoreUnavailableException,
+} from '../session/session.errors'
 import { RefreshTokenController } from './refresh-token.controller'
 
-const tokenServiceMock = {
-	refreshTokens: jest.fn(),
-}
-
-const tokenBlacklistServiceMock = {
-	isBlacklisted: jest.fn(),
+const sessionServiceMock = {
+	refresh: jest.fn(),
 }
 
 function makeResponse() {
-	return { setCookie: jest.fn() }
+	return { setCookie: jest.fn(), clearCookie: jest.fn() }
 }
 
-function makeRequest(cookies: Record<string, string> = {}) {
-	return { cookies }
+const rotated = {
+	accessToken: 'new-access',
+	refreshToken: 'new-refresh',
+	expiresIn: 900,
+	persistent: true,
+	sessionTtl: 2592000,
 }
 
 describe('RefreshTokenController', () => {
@@ -32,12 +39,11 @@ describe('RefreshTokenController', () => {
 	beforeEach(async () => {
 		const module = await Test.createTestingModule({
 			controllers: [RefreshTokenController],
-			providers: [
-				{ provide: TokenService, useValue: tokenServiceMock },
-				{ provide: TokenBlacklistService, useValue: tokenBlacklistServiceMock },
-			],
+			providers: [{ provide: SessionService, useValue: sessionServiceMock }],
 		})
 			.overrideGuard(JwtAuthGuard)
+			.useValue({ canActivate: () => true })
+			.overrideGuard(OriginGuard)
 			.useValue({ canActivate: () => true })
 			.compile()
 
@@ -45,79 +51,79 @@ describe('RefreshTokenController', () => {
 		jest.clearAllMocks()
 	})
 
-	describe('handle', () => {
-		const tokens = { accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 900 }
+	it('renews the session from the refresh cookie and returns only expiresIn', async () => {
+		sessionServiceMock.refresh.mockResolvedValueOnce(rotated)
+		const res = makeResponse()
 
-		it('should refresh tokens when refreshToken provided in body', async () => {
-			tokenServiceMock.refreshTokens.mockResolvedValueOnce(tokens)
-			const res = makeResponse()
-			const req = makeRequest()
+		const result = await controller.handle(
+			{ cookies: { refresh_token: 'cookie-refresh' } } as any,
+			res as any,
+		)
 
-			const result = await controller.handle(
-				{ refreshToken: 'body-refresh-token' },
-				req as any,
-				res as any,
-			)
+		expect(sessionServiceMock.refresh).toHaveBeenCalledWith('cookie-refresh')
+		expect(res.setCookie.mock.calls.map(([name]) => name)).toEqual([
+			'access_token',
+			'refresh_token',
+			'csrf_token',
+			'vd_session',
+		])
+		expect(result).toEqual({ expiresIn: 900 })
+		expect(res.clearCookie).not.toHaveBeenCalled()
+	})
 
-			expect(tokenServiceMock.refreshTokens).toHaveBeenCalledWith(
-				'body-refresh-token',
-				tokenBlacklistServiceMock,
-			)
-			// access + refresh + csrf
-			expect(res.setCookie).toHaveBeenCalledTimes(3)
-			// CSRF cookie lifetime tracks the refresh token (7d), not the access token,
-			// so it never expires mid-session and forces an empty-header 403.
-			expect(res.setCookie).toHaveBeenCalledWith(
-				'csrf_token',
-				expect.any(String),
-				expect.objectContaining({ maxAge: 7 * 24 * 60 * 60 }),
-			)
-			expect(result).toEqual(tokens)
-		})
+	it('ignores a refresh token sent in the body: only the cookie counts', async () => {
+		const res = makeResponse()
+		const request = { cookies: {}, body: { refreshToken: 'body-refresh' } }
 
-		it('should refresh tokens when refreshToken provided via cookie', async () => {
-			tokenServiceMock.refreshTokens.mockResolvedValueOnce(tokens)
-			const res = makeResponse()
-			const req = makeRequest({ refresh_token: 'cookie-refresh-token' })
+		const error = await controller.handle(request as any, res as any).catch((e: unknown) => e)
 
-			await controller.handle({}, req as any, res as any)
+		expect(error).toBeInstanceOf(SessionException)
+		expect((error as SessionException).code).toBe(SESSION_ERROR_CODE.EXPIRED)
+		expect(sessionServiceMock.refresh).not.toHaveBeenCalled()
+	})
 
-			expect(tokenServiceMock.refreshTokens).toHaveBeenCalledWith(
-				'cookie-refresh-token',
-				tokenBlacklistServiceMock,
-			)
-		})
+	it('in the grace window sets a new access cookie and no refresh cookie', async () => {
+		sessionServiceMock.refresh.mockResolvedValueOnce({ ...rotated, refreshToken: undefined })
+		const res = makeResponse()
 
-		it('should prefer body token over cookie token', async () => {
-			tokenServiceMock.refreshTokens.mockResolvedValueOnce(tokens)
-			const res = makeResponse()
-			const req = makeRequest({ refresh_token: 'cookie-token' })
+		const result = await controller.handle(
+			{ cookies: { refresh_token: 'cookie-refresh', csrf_token: 'csrf' } } as any,
+			res as any,
+		)
 
-			await controller.handle({ refreshToken: 'body-token' }, req as any, res as any)
+		expect(res.setCookie.mock.calls.map(([name]) => name)).toEqual(['access_token'])
+		expect(result).toEqual({ expiresIn: 900 })
+	})
 
-			expect(tokenServiceMock.refreshTokens).toHaveBeenCalledWith(
-				'body-token',
-				tokenBlacklistServiceMock,
-			)
-		})
+	it.each([
+		SESSION_ERROR_CODE.EXPIRED,
+		SESSION_ERROR_CODE.REVOKED,
+		SESSION_ERROR_CODE.ACCOUNT_INACTIVE,
+	])('clears the cookies and answers 401 %s when the session is over', async (code) => {
+		sessionServiceMock.refresh.mockRejectedValueOnce(new SessionException(code))
+		const res = makeResponse()
 
-		it('should throw UnauthorizedException when no refresh token provided', async () => {
-			const res = makeResponse()
-			const req = makeRequest()
+		const error = await controller
+			.handle({ cookies: { refresh_token: 'cookie-refresh' } } as any, res as any)
+			.catch((e: unknown) => e)
 
-			await expect(controller.handle({}, req as any, res as any)).rejects.toThrow(
-				UnauthorizedException,
-			)
-		})
+		expect(error).toBeInstanceOf(SessionException)
+		expect((error as SessionException).getStatus()).toBe(401)
+		expect((error as SessionException).code).toBe(code)
+		expect(res.clearCookie.mock.calls.map(([name]) => name)).toEqual(
+			expect.arrayContaining(['access_token', 'refresh_token', 'csrf_token', 'vd_session']),
+		)
+		expect(res.setCookie).not.toHaveBeenCalled()
+	})
 
-		it('should throw UnauthorizedException when token service throws', async () => {
-			tokenServiceMock.refreshTokens.mockRejectedValueOnce(new Error('expired'))
-			const res = makeResponse()
-			const req = makeRequest()
+	it('keeps the cookies when the session store is down (503 is not a verdict)', async () => {
+		sessionServiceMock.refresh.mockRejectedValueOnce(new SessionStoreUnavailableException())
+		const res = makeResponse()
 
-			await expect(
-				controller.handle({ refreshToken: 'bad-token' }, req as any, res as any),
-			).rejects.toThrow(UnauthorizedException)
-		})
+		await expect(
+			controller.handle({ cookies: { refresh_token: 'cookie-refresh' } } as any, res as any),
+		).rejects.toBeInstanceOf(SessionStoreUnavailableException)
+
+		expect(res.clearCookie).not.toHaveBeenCalled()
 	})
 })

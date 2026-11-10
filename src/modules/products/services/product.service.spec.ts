@@ -221,6 +221,89 @@ describe('ProductService', () => {
 			expect(result).toBeTruthy()
 			expect(result?.name).toBe('Updated Product')
 		})
+
+		describe('multiple images after a downgrade', () => {
+			const seed = (images: string[]) =>
+				productRepository.create({
+					seller_id: 'test-seller-id',
+					name: 'Gallery Product',
+					sku: 'GALLERY',
+					unit: 'piece',
+					images,
+				})
+
+			beforeEach(() => {
+				// The seller is back on a plan without the feature.
+				planLimitsServiceMock.hasFeature.mockResolvedValue(false)
+			})
+
+			it('keeps the images already saved when other fields are edited', async () => {
+				const product = await seed(['a.jpg', 'b.jpg', 'c.jpg'])
+
+				const result = await service.update(
+					product.id.toString(),
+					{ name: 'Renamed', images: ['a.jpg', 'b.jpg', 'c.jpg'] },
+					'test-seller-id',
+					'free',
+				)
+
+				expect(result?.images).toEqual(['a.jpg', 'b.jpg', 'c.jpg'])
+				expect(planLimitsServiceMock.hasFeature).not.toHaveBeenCalled()
+			})
+
+			it('allows removing or reordering images', async () => {
+				const product = await seed(['a.jpg', 'b.jpg', 'c.jpg'])
+
+				const result = await service.update(
+					product.id.toString(),
+					{ images: ['c.jpg', 'a.jpg'] },
+					'test-seller-id',
+					'free',
+				)
+
+				expect(result?.images).toEqual(['c.jpg', 'a.jpg'])
+			})
+
+			it('blocks adding an image beyond the ones already saved', async () => {
+				const product = await seed(['a.jpg', 'b.jpg'])
+
+				await expect(
+					service.update(
+						product.id.toString(),
+						{ images: ['a.jpg', 'b.jpg', 'c.jpg'] },
+						'test-seller-id',
+						'free',
+					),
+				).rejects.toThrow(ForbiddenException)
+				expect(planLimitsServiceMock.hasFeature).toHaveBeenCalledWith(
+					'test-seller-id',
+					'free',
+					'multipleImages',
+				)
+				expect(productRepository.update).not.toHaveBeenCalled()
+			})
+
+			it('blocks going from one image to two', async () => {
+				const product = await seed(['a.jpg'])
+
+				await expect(
+					service.update(
+						product.id.toString(),
+						{ images: ['a.jpg', 'b.jpg'] },
+						'test-seller-id',
+						'free',
+					),
+				).rejects.toThrow(ForbiddenException)
+			})
+
+			it('never gates a single image', async () => {
+				const product = await seed([])
+
+				await service.update(product.id.toString(), { images: ['a.jpg'] }, 'test-seller-id', 'free')
+
+				expect(planLimitsServiceMock.hasFeature).not.toHaveBeenCalled()
+			})
+		})
 	})
 
 	describe('remove', () => {

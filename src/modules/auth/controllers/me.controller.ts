@@ -5,7 +5,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 import { AccountService } from '@/modules/users/services/account.service'
 import { AUTH_COOKIES } from '../constants/cookies'
 import { CurrentUser } from '../decorators/current-user.decorator'
-import type { TokenPayload } from '../dto/auth-response.dto'
+import type { AuthenticatedUser } from '../session/session.types'
 import { resolveAvatarUrl } from '../utils/avatar-url'
 import { setCsrfCookie } from '../utils/csrf'
 
@@ -21,7 +21,7 @@ export class MeController {
 	@Get('me')
 	@ApiOperation({ summary: 'Get current user data' })
 	async me(
-		@CurrentUser() user: TokenPayload,
+		@CurrentUser() user: AuthenticatedUser,
 		@Req() request: FastifyRequest,
 		@Res({ passthrough: true }) reply: FastifyReply,
 	) {

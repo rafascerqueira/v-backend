@@ -2,44 +2,22 @@ import { Controller, Get, Query, Req, Res } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import {
-	AUTH_COOKIES,
-	cookieOptions,
-	oauthStateCookieOptions,
-} from '@/modules/auth/constants/cookies'
-import { TokenService } from '@/modules/auth/services/token.service'
+import { AUTH_COOKIES, oauthStateCookieOptions } from '@/modules/auth/constants/cookies'
+import { SessionService } from '@/modules/auth/services/session.service'
 import { AccountService } from '@/modules/users/services/account.service'
 import { Public } from '../decorators/public.decorator'
 import { OAuthService } from '../services/oauth.service'
-import { setCsrfCookie } from '../utils/csrf'
+import { setSessionCookies } from '../utils/session-cookies'
 
 @ApiTags('auth')
 @Controller('auth')
 export class OAuthController {
 	constructor(
 		private readonly oauthService: OAuthService,
-		private readonly tokenService: TokenService,
+		private readonly sessionService: SessionService,
 		private readonly accountService: AccountService,
 		private readonly configService: ConfigService,
 	) {}
-
-	private setAuthCookies(
-		reply: FastifyReply,
-		accessToken: string,
-		refreshToken: string,
-		accessMaxAge: number,
-	) {
-		const opts = cookieOptions()
-		reply.setCookie(AUTH_COOKIES.ACCESS_TOKEN, accessToken, {
-			...opts,
-			maxAge: accessMaxAge,
-		})
-		reply.setCookie(AUTH_COOKIES.REFRESH_TOKEN, refreshToken, {
-			...opts,
-			maxAge: 7 * 24 * 60 * 60,
-		})
-		setCsrfCookie(reply, accessMaxAge)
-	}
 
 	private writeStateCookie(reply: FastifyReply, state: string) {
 		reply.setCookie(AUTH_COOKIES.OAUTH_STATE, state, oauthStateCookieOptions())
@@ -83,14 +61,9 @@ export class OAuthController {
 		try {
 			const account = await this.oauthService.handleGoogleCallback(code)
 			await this.accountService.updateLastLogin(account.id)
-			const tokens = await this.tokenService.generateTokens({
-				sub: account.id,
-				email: account.email,
-				role: account.role,
-				plan_type: account.plan_type,
-			})
-
-			this.setAuthCookies(reply, tokens.accessToken, tokens.refreshToken, tokens.expiresIn)
+			// A social login has no "keep me signed in" checkbox: it follows the default.
+			const session = await this.sessionService.create(account, { persistent: true })
+			setSessionCookies(request, reply, session)
 
 			return reply.redirect(`${frontendUrl}/dashboard`, 302)
 		} catch {
@@ -128,14 +101,9 @@ export class OAuthController {
 		try {
 			const account = await this.oauthService.handleFacebookCallback(code)
 			await this.accountService.updateLastLogin(account.id)
-			const tokens = await this.tokenService.generateTokens({
-				sub: account.id,
-				email: account.email,
-				role: account.role,
-				plan_type: account.plan_type,
-			})
-
-			this.setAuthCookies(reply, tokens.accessToken, tokens.refreshToken, tokens.expiresIn)
+			// A social login has no "keep me signed in" checkbox: it follows the default.
+			const session = await this.sessionService.create(account, { persistent: true })
+			setSessionCookies(request, reply, session)
 
 			return reply.redirect(`${frontendUrl}/dashboard`, 302)
 		} catch {

@@ -1,15 +1,27 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
-import type { AuthResponseDto, TokenPayload } from '../dto/auth-response.dto'
+import type { SessionTokenClaims } from '../session/session.types'
+import { parseDurationSeconds } from '../utils/duration'
 
+type SessionRef = Pick<SessionTokenClaims, 'sub' | 'sid' | 'sv'>
+
+interface VerifyOptions {
+	/** Accept a token past its `exp` (logout must work with an expired token). */
+	ignoreExpiration?: boolean
+}
+
+/**
+ * Signs and verifies the two session tokens (RS256). It knows nothing about whether
+ * a session is still alive: that is `SessionService`'s job.
+ */
 @Injectable()
 export class TokenService implements OnModuleInit {
 	private readonly logger = new Logger(TokenService.name)
 	private readonly accessTokenExpiresIn: number
-	private readonly refreshTokenExpiresIn: number
 	private readonly keysDir: string
 	private privateKey: string = ''
 	private publicKey: string = ''
@@ -18,11 +30,9 @@ export class TokenService implements OnModuleInit {
 		private readonly jwtService: JwtService,
 		readonly configService: ConfigService,
 	) {
-		this.accessTokenExpiresIn = this.parseExpiresIn(
+		this.accessTokenExpiresIn = parseDurationSeconds(
 			configService.get<string>('jwt.accessTokenExpiresIn', '1d'),
-		)
-		this.refreshTokenExpiresIn = this.parseExpiresIn(
-			configService.get<string>('jwt.refreshTokenExpiresIn', '7d'),
+			86400,
 		)
 		this.keysDir = configService.get<string>('jwt.keysDir') || join(process.cwd(), 'keys')
 	}
@@ -43,135 +53,63 @@ export class TokenService implements OnModuleInit {
 		this.logger.log('JWT: Using RS256 (asymmetric keys)')
 	}
 
-	private parseExpiresIn(value: string): number {
-		const match = value.match(/^(\d+)([smhd])$/)
-		if (!match) return 86400
-
-		const num = parseInt(match[1], 10)
-		const unit = match[2]
-
-		switch (unit) {
-			case 's':
-				return num
-			case 'm':
-				return num * 60
-			case 'h':
-				return num * 3600
-			case 'd':
-				return num * 86400
-			default:
-				return 86400
-		}
+	/** Access-token lifetime in seconds. */
+	get accessTokenTtl(): number {
+		return this.accessTokenExpiresIn
 	}
 
-	async generateTokens(payload: TokenPayload): Promise<AuthResponseDto> {
-		const signOptions = { privateKey: this.privateKey, algorithm: 'RS256' as const }
-		const refreshSignOptions = { privateKey: this.privateKey, algorithm: 'RS256' as const }
-
-		const [accessToken, refreshToken] = await Promise.all([
-			this.jwtService.signAsync(
-				{
-					sub: payload.sub,
-					email: payload.email,
-					role: payload.role,
-					plan_type: payload.plan_type,
-					type: 'access',
-				},
-				{ ...signOptions, expiresIn: this.accessTokenExpiresIn },
-			),
-			this.jwtService.signAsync(
-				{
-					sub: payload.sub,
-					email: payload.email,
-					role: payload.role,
-					plan_type: payload.plan_type,
-					type: 'refresh',
-				},
-				{ ...refreshSignOptions, expiresIn: this.refreshTokenExpiresIn },
-			),
-		])
-
-		return {
-			accessToken,
-			refreshToken,
-			expiresIn: this.accessTokenExpiresIn,
-		}
-	}
-
-	async verifyAccessToken(token: string): Promise<TokenPayload> {
-		const payload = await this.jwtService.verifyAsync<TokenPayload>(token, {
-			publicKey: this.publicKey,
-			algorithms: ['RS256' as const],
-		})
-		// Reject refresh/customer tokens presented as an access token (token-type confusion).
-		if (payload.type !== 'access') {
-			throw new Error('Invalid token type')
-		}
-		return payload
-	}
-
-	async verifyRefreshToken(token: string): Promise<TokenPayload> {
-		const payload = await this.jwtService.verifyAsync<TokenPayload>(token, {
-			publicKey: this.publicKey,
-			algorithms: ['RS256' as const],
-		})
-		if (payload.type !== 'refresh') {
-			throw new Error('Invalid token type')
-		}
-		return payload
-	}
-
-	async signCustomerToken(customerId: string, sellerId: string): Promise<string> {
+	async signAccessToken(session: SessionRef): Promise<string> {
 		return this.jwtService.signAsync(
-			{ sub: customerId, sellerId, type: 'customer_access' },
-			{ privateKey: this.privateKey, algorithm: 'RS256' as const, expiresIn: 7 * 24 * 3600 },
+			{ sub: session.sub, sid: session.sid, sv: session.sv, jti: randomUUID(), type: 'access' },
+			{ privateKey: this.privateKey, algorithm: 'RS256', expiresIn: this.accessTokenExpiresIn },
 		)
 	}
 
-	async verifyCustomerToken(
+	/** `jti` is the rotation id the session record expects to see next. */
+	async signRefreshToken(
+		session: SessionRef & { jti: string },
+		expiresInSeconds: number,
+	): Promise<string> {
+		return this.jwtService.signAsync(
+			{ sub: session.sub, sid: session.sid, sv: session.sv, jti: session.jti, type: 'refresh' },
+			{ privateKey: this.privateKey, algorithm: 'RS256', expiresIn: expiresInSeconds },
+		)
+	}
+
+	async verifyAccessToken(token: string, options: VerifyOptions = {}): Promise<SessionTokenClaims> {
+		return this.verify(token, 'access', options)
+	}
+
+	async verifyRefreshToken(
 		token: string,
-	): Promise<{ sub: string; sellerId: string; type: string }> {
-		const payload = await this.jwtService.verifyAsync<{
-			sub: string
-			sellerId: string
-			type: string
-		}>(token, {
+		options: VerifyOptions = {},
+	): Promise<SessionTokenClaims> {
+		return this.verify(token, 'refresh', options)
+	}
+
+	private async verify(
+		token: string,
+		type: SessionTokenClaims['type'],
+		options: VerifyOptions,
+	): Promise<SessionTokenClaims> {
+		const payload = await this.jwtService.verifyAsync<Partial<SessionTokenClaims>>(token, {
 			publicKey: this.publicKey,
-			algorithms: ['RS256' as const],
+			algorithms: ['RS256'],
+			ignoreExpiration: options.ignoreExpiration ?? false,
 		})
-		// Ensure a seller access/refresh token can never be used on customer endpoints.
-		if (payload.type !== 'customer_access') {
+		// Reject a refresh token presented as an access token (and vice versa).
+		if (payload.type !== type) {
 			throw new Error('Invalid token type')
 		}
-		return payload
-	}
-
-	async refreshTokens(
-		refreshToken: string,
-		blacklistService?: TokenBlacklistService,
-	): Promise<AuthResponseDto> {
-		const payload = await this.verifyRefreshToken(refreshToken)
-
-		// Blacklist the old refresh token to prevent reuse
-		if (blacklistService) {
-			const expiresIn = payload.exp
-				? payload.exp - Math.floor(Date.now() / 1000)
-				: this.refreshTokenExpiresIn
-			if (expiresIn > 0) {
-				await blacklistService.addToBlacklist(refreshToken, expiresIn)
-			}
+		// Tokens issued before sessions existed carry no session reference.
+		if (
+			typeof payload.sub !== 'string' ||
+			typeof payload.sid !== 'string' ||
+			typeof payload.jti !== 'string' ||
+			typeof payload.sv !== 'number'
+		) {
+			throw new Error('Invalid token claims')
 		}
-
-		return this.generateTokens({
-			sub: payload.sub,
-			email: payload.email,
-			role: payload.role,
-			// Legacy tokens issued before plan_type was added default to 'free'
-			// to keep refresh working during the rollout window.
-			plan_type: payload.plan_type ?? 'free',
-		})
+		return payload as SessionTokenClaims
 	}
 }
-
-// Import at bottom to avoid circular dependency
-import { TokenBlacklistService } from './token-blacklist.service'

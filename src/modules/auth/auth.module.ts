@@ -17,14 +17,15 @@ import { RefreshTokenController } from './controllers/refresh-token.controller'
 import { ResetPasswordController } from './controllers/reset-password.controller'
 import { TwoFactorController } from './controllers/two-factor.controller'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
+import { OriginGuard } from './guards/origin.guard'
 import { PrismaEmailVerificationRepository } from './repositories/prisma-email-verification.repository'
 import { PrismaPasswordResetRepository } from './repositories/prisma-password-reset.repository'
 import { PrismaTwoFactorRepository } from './repositories/prisma-two-factor.repository'
 import { EmailVerificationService } from './services/email-verification.service'
 import { OAuthService } from './services/oauth.service'
 import { PasswordResetService } from './services/password-reset.service'
+import { SessionService } from './services/session.service'
 import { TokenService } from './services/token.service'
-import { TokenBlacklistService } from './services/token-blacklist.service'
 import { TwoFactorService } from './services/two-factor.service'
 
 @Global()
@@ -51,8 +52,9 @@ import { TwoFactorService } from './services/two-factor.service'
 	],
 	providers: [
 		TokenService,
-		TokenBlacklistService,
+		SessionService,
 		JwtAuthGuard,
+		OriginGuard,
 		OAuthService,
 		PasswordResetService,
 		TwoFactorService,
@@ -72,8 +74,9 @@ import { TwoFactorService } from './services/two-factor.service'
 	],
 	exports: [
 		TokenService,
-		TokenBlacklistService,
+		SessionService,
 		JwtAuthGuard,
+		OriginGuard,
 		EmailVerificationService,
 		TwoFactorService,
 	],
