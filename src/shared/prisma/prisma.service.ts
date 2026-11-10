@@ -12,7 +12,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 		}
 
 		const adapter = new PrismaPg({ connectionString })
-		super({ adapter })
+		// Never return a storefront customer's password hash by accident: any query
+		// that returns whole Customer rows (lists, `include: { customer: true }`)
+		// leaked it. The storefront auth paths that need it select it explicitly,
+		// which overrides this global omit.
+		super({ adapter, omit: { customer: { password_hash: true } } })
 	}
 
 	async onModuleInit() {

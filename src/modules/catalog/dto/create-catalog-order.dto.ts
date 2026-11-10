@@ -16,14 +16,17 @@ export const catalogCustomerSchema = z.object({
 
 export const catalogOrderItemSchema = z.object({
 	product_id: z.coerce.number().int().positive(),
-	quantity: z.coerce.number().int().positive().default(1),
+	quantity: z.coerce.number().int().positive().max(10_000).default(1),
 })
 
 export const createCatalogOrderSchema = z
 	.object({
 		customerId: z.string().optional(),
 		customer: catalogCustomerSchema.optional(),
-		items: z.array(catalogOrderItemSchema).min(1, 'Adicione pelo menos um item'),
+		items: z
+			.array(catalogOrderItemSchema)
+			.min(1, 'Adicione pelo menos um item')
+			.max(100, 'Um pedido pode ter no máximo 100 itens'),
 		notes: z.string().optional(),
 	})
 	.refine((d) => d.customerId !== undefined || d.customer !== undefined, {

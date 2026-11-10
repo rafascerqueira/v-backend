@@ -11,6 +11,7 @@ const serviceMock = {
 	findAll: jest.fn(),
 	updateStatus: jest.fn(),
 	delete: jest.fn(),
+	findEvents: jest.fn(),
 }
 
 describe('OrdersController', () => {
@@ -31,16 +32,21 @@ describe('OrdersController', () => {
 		jest.clearAllMocks()
 	})
 
-	it('create should call service.create and return order', async () => {
+	it('create should call service.create with the body and the Idempotency-Key', async () => {
 		const dto: any = {
 			customer_id: 'c1',
-			order_number: 'ORD-1',
 			items: [{ product_id: 1, quantity: 1, unit_price: 1000 }],
 		}
-		serviceMock.create.mockResolvedValueOnce({ id: 1, ...dto })
-		const res = await controller.create(dto)
-		expect(serviceMock.create).toHaveBeenCalledWith(dto)
+		serviceMock.create.mockResolvedValueOnce({ id: 1, order_number: 'PED-000001' })
+		const res = await controller.create(dto, 'key-1')
+		expect(serviceMock.create).toHaveBeenCalledWith(dto, 'key-1')
 		expect(res.id).toBe(1)
+	})
+
+	it('events should call service.findEvents with numeric id', async () => {
+		serviceMock.findEvents.mockResolvedValueOnce([])
+		await controller.events(9)
+		expect(serviceMock.findEvents).toHaveBeenCalledWith(9)
 	})
 
 	it('addItem should call service.addItem with numeric order id', async () => {
