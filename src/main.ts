@@ -13,6 +13,7 @@ import { AppModule } from './app.module'
 import { setupSwagger } from './config/swagger.config'
 import { GlobalExceptionFilter } from './shared/filters/global-exception.filter'
 import { ZodExceptionFilter } from './shared/filters/zod-exception.filter'
+import { buildUploadsStaticOptions } from './shared/storage/uploads-static.options'
 
 async function bootstrap() {
 	const app = await NestFactory.create<NestFastifyApplication>(
@@ -73,16 +74,12 @@ async function bootstrap() {
 	// Only the local storage driver serves uploads from disk. With the S3 driver
 	// objects are served directly from the bucket/CDN, so no static route is needed.
 	if (configService.get<string>('storage.driver', 'local') === 'local') {
-		await app.register(fastifyStatic as any, {
-			root: configService.get<string>('upload.dir') || join(process.cwd(), 'uploads'),
-			prefix: '/uploads/',
-			decorateReply: false,
-			// Defense-in-depth: stop browsers from MIME-sniffing uploaded files into an
-			// executable type (e.g. treating a file as HTML/SVG).
-			setHeaders: (res: any) => {
-				res.setHeader('X-Content-Type-Options', 'nosniff')
-			},
-		})
+		await app.register(
+			fastifyStatic as any,
+			buildUploadsStaticOptions(
+				configService.get<string>('upload.dir') || join(process.cwd(), 'uploads'),
+			),
+		)
 	}
 
 	app.useGlobalFilters(new GlobalExceptionFilter(), new ZodExceptionFilter())

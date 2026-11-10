@@ -1,6 +1,6 @@
 import { STORAGE_PROVIDER, type StorageProvider } from '@infrastructure/storage/storage.types'
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
-import sharp from 'sharp'
+import sharp, { type Metadata } from 'sharp'
 
 export interface UploadOptions {
 	maxSizeBytes?: number
@@ -83,7 +83,7 @@ export class UploadService {
 	async processImage(
 		buffer: Buffer,
 		options: UploadOptions = {},
-	): Promise<{ buffer: Buffer; metadata: sharp.Metadata; ext: string }> {
+	): Promise<{ buffer: Buffer; metadata: Metadata; ext: string }> {
 		const opts = { ...DEFAULT_OPTIONS, ...options }
 		const resize = opts.resize ??
 			DEFAULT_OPTIONS.resize ?? { width: 1200, height: 1200, fit: 'inside' as const }
@@ -92,14 +92,16 @@ export class UploadService {
 
 		// Trust the format sharp actually decodes, not the client. Reject anything that is
 		// not a real raster image we re-encode (e.g. SVG, which can carry script).
-		let metadata: sharp.Metadata
+		let metadata: Metadata
 		try {
 			metadata = await sharpInstance.metadata()
 		} catch {
 			throw new BadRequestException('Arquivo de imagem inválido')
 		}
 
-		const detected = metadata.format === 'jpg' ? 'jpeg' : metadata.format
+		// sharp's types only list 'jpeg', but keep normalising the 'jpg' alias defensively.
+		const format: string | undefined = metadata.format
+		const detected = format === 'jpg' ? 'jpeg' : format
 		if (!detected || !(detected in UploadService.FORMAT_TO_EXT)) {
 			throw new BadRequestException('Formato de imagem não suportado. Use JPEG, PNG ou WebP.')
 		}
