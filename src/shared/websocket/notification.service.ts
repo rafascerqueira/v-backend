@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { type Notification as NotificationRecord, Prisma } from '@/generated/prisma/client'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import { QueueProducer } from '@/shared/queue/queue.producer'
 import { type Notification, NotificationsGateway } from './notifications.gateway'
@@ -13,6 +14,12 @@ export interface CreateNotificationOptions {
 	data?: Record<string, unknown>
 	sendEmail?: boolean
 	emailSubject?: string
+	/**
+	 * Makes the call idempotent: a second create with the same key returns the
+	 * existing notification without pushing it again over the socket or e-mailing.
+	 * Domain-event handlers build it with `domainEffectDedupeKey`.
+	 */
+	dedupeKey?: string
 }
 
 @Injectable()
@@ -26,16 +33,24 @@ export class NotificationService {
 	) {}
 
 	async create(options: CreateNotificationOptions): Promise<Notification> {
-		const notification = await this.prisma.notification.create({
-			data: {
-				user_id: options.userId,
-				type: options.type,
-				title: options.title,
-				message: options.message,
-				data: options.data ? JSON.parse(JSON.stringify(options.data)) : undefined,
-				email_sent: false,
-			},
-		})
+		let notification: NotificationRecord
+		try {
+			notification = await this.prisma.notification.create({
+				data: {
+					user_id: options.userId,
+					type: options.type,
+					title: options.title,
+					message: options.message,
+					data: options.data ? JSON.parse(JSON.stringify(options.data)) : undefined,
+					email_sent: false,
+					dedupe_key: options.dedupeKey,
+				},
+			})
+		} catch (error) {
+			const duplicate = await this.findDuplicate(options.dedupeKey, error)
+			if (duplicate) return duplicate
+			throw error
+		}
 
 		const wsNotification: Notification = {
 			id: `notif-${notification.id}`,
@@ -56,6 +71,35 @@ export class NotificationService {
 		}
 
 		return wsNotification
+	}
+
+	/** The already-delivered notification when `error` is its dedupe_key collision. */
+	private async findDuplicate(
+		dedupeKey: string | undefined,
+		error: unknown,
+	): Promise<Notification | null> {
+		if (
+			!dedupeKey ||
+			!(error instanceof Prisma.PrismaClientKnownRequestError) ||
+			error.code !== 'P2002'
+		) {
+			return null
+		}
+		const existing = await this.prisma.notification.findUnique({
+			where: { dedupe_key: dedupeKey },
+		})
+		if (!existing) return null
+
+		this.logger.debug(`Notification "${dedupeKey}" was already delivered; skipping`)
+		return {
+			id: `notif-${existing.id}`,
+			type: existing.type as NotificationType,
+			title: existing.title,
+			message: existing.message,
+			timestamp: existing.createdAt,
+			read: existing.read,
+			data: existing.data as Record<string, unknown>,
+		}
 	}
 
 	private async sendEmailNotification(userId: string, options: CreateNotificationOptions) {

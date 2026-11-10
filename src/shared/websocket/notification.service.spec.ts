@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing'
+import { Prisma } from '@/generated/prisma/client'
 import { PrismaService } from '@/shared/prisma/prisma.service'
 import { QueueProducer } from '@/shared/queue/queue.producer'
 import { NotificationService } from './notification.service'
@@ -11,6 +12,7 @@ const prismaMock = {
 		updateMany: jest.fn(),
 		count: jest.fn(),
 		findMany: jest.fn(),
+		findUnique: jest.fn(),
 	},
 	account: {
 		findUnique: jest.fn(),
@@ -71,6 +73,85 @@ describe('NotificationService', () => {
 			await service.create({ userId: 'u1', type: 'info', title: 'T', message: 'M' })
 
 			expect(queueProducerMock.sendEmail).not.toHaveBeenCalled()
+		})
+
+		describe('dedupeKey (idempotent consumer)', () => {
+			const uniqueViolation = () =>
+				new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+					code: 'P2002',
+					clientVersion: 'test',
+				})
+
+			it('stores the dedupe key with the notification', async () => {
+				prismaMock.notification.create.mockResolvedValueOnce({ ...baseNotification })
+
+				await service.create({
+					userId: 'u1',
+					type: 'warning',
+					title: 'T',
+					message: 'M',
+					dedupeKey: 'evt-1:handler',
+				})
+
+				expect(prismaMock.notification.create).toHaveBeenCalledWith({
+					data: expect.objectContaining({ dedupe_key: 'evt-1:handler' }),
+				})
+			})
+
+			it('returns the existing notification on a repeat, without socket or e-mail', async () => {
+				prismaMock.notification.create.mockRejectedValueOnce(uniqueViolation())
+				prismaMock.notification.findUnique.mockResolvedValueOnce({
+					id: 7,
+					type: 'warning',
+					title: 'Venda sem estoque',
+					message: 'M',
+					createdAt: new Date('2026-11-02'),
+					read: true,
+					data: { orderId: 1 },
+				})
+
+				const result = await service.create({
+					userId: 'u1',
+					type: 'warning',
+					title: 'Venda sem estoque',
+					message: 'M',
+					sendEmail: true,
+					dedupeKey: 'evt-1:handler',
+				})
+				await Promise.resolve()
+
+				expect(prismaMock.notification.findUnique).toHaveBeenCalledWith({
+					where: { dedupe_key: 'evt-1:handler' },
+				})
+				expect(result).toMatchObject({ id: 'notif-7', read: true })
+				expect(gatewayMock.sendToUser).not.toHaveBeenCalled()
+				expect(prismaMock.account.findUnique).not.toHaveBeenCalled()
+				expect(queueProducerMock.sendEmail).not.toHaveBeenCalled()
+			})
+
+			it('rethrows a unique violation when no dedupe key was given', async () => {
+				prismaMock.notification.create.mockRejectedValueOnce(uniqueViolation())
+
+				await expect(
+					service.create({ userId: 'u1', type: 'info', title: 'T', message: 'M' }),
+				).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError)
+				expect(prismaMock.notification.findUnique).not.toHaveBeenCalled()
+			})
+
+			it('rethrows other database errors even with a dedupe key', async () => {
+				prismaMock.notification.create.mockRejectedValueOnce(new Error('connection lost'))
+
+				await expect(
+					service.create({
+						userId: 'u1',
+						type: 'info',
+						title: 'T',
+						message: 'M',
+						dedupeKey: 'evt-1:handler',
+					}),
+				).rejects.toThrow('connection lost')
+				expect(gatewayMock.sendToUser).not.toHaveBeenCalled()
+			})
 		})
 
 		it('enqueues email when sendEmail is true and user exists', async () => {
