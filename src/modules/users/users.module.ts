@@ -16,6 +16,6 @@ import { AccountService } from './services/account.service'
 			useClass: PrismaAccountRepository,
 		},
 	],
-	exports: [AccountService],
+	exports: [AccountService, ACCOUNT_REPOSITORY],
 })
 export class UsersModule {}

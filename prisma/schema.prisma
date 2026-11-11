@@ -79,6 +79,10 @@ model Account {
   // (and block) an existing subscription. Created on first checkout.
   stripe_customer_id String?     @unique(map: "uq_accounts_stripe_customer_id") @db.VarChar(255)
   is_active          Boolean     @default(true)
+  // Bumped by every write that must end the account's sessions (password change or
+  // reset, deactivation, anonymization, "sign out everywhere"). Tokens carry the value
+  // they were issued under; a token with an older value is refused.
+  session_version    Int         @default(0)
   email_verified     Boolean     @default(false)
   email_verified_at  DateTime?   @db.Timestamptz()
   two_factor_enabled Boolean     @default(false)

@@ -9,7 +9,6 @@
 import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Test } from '@nestjs/testing'
-import { TokenService } from '@/modules/auth/services/token.service'
 import { OrdersService } from '@/modules/orders/services/orders.service'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
 import { hashRequest } from '@/shared/idempotency/request-hash'
@@ -70,14 +69,6 @@ describe('CatalogService', () => {
 			providers: [
 				CatalogService,
 				{ provide: CATALOG_REPOSITORY, useValue: repositoryMock },
-				{
-					provide: TokenService,
-					useValue: {
-						sign: jest.fn(),
-						verify: jest.fn(),
-						signCustomerToken: jest.fn().mockResolvedValue('customer.token'),
-					},
-				},
 				{
 					provide: PasswordHasherService,
 					useValue: { hash: jest.fn(), verify: jest.fn() },
@@ -445,7 +436,6 @@ describe('CatalogService', () => {
 				repositoryMock.findCustomerByEmailOrPhone.mockResolvedValueOnce(passwordlessCustomer as any)
 				redis().get.mockResolvedValueOnce(hashOtp('123456'))
 				;(service as any).passwordHasher.hash.mockResolvedValueOnce({ hash: 'hashed', salt: '' })
-				;(service as any).tokenService.signCustomerToken.mockResolvedValueOnce('customer.token')
 
 				const result = await service.setCustomerPassword('myshop', {
 					contact: 'j@test.com',
@@ -455,7 +445,9 @@ describe('CatalogService', () => {
 
 				expect(repositoryMock.updateCustomerPasswordHash).toHaveBeenCalledWith('cust-1', 'hashed')
 				expect(redis().delete).toHaveBeenCalledWith('customer:setpw:otp:cust-1')
-				expect(result.token).toBe('customer.token')
+				// The storefront has no customer session: the profile comes back, no token.
+				expect(result).not.toHaveProperty('token')
+				expect(result.customer.id).toBe('cust-1')
 			})
 		})
 	})
@@ -550,7 +542,6 @@ describe('CatalogService', () => {
 				redis().get.mockResolvedValueOnce('cust-1')
 				repositoryMock.findCustomerWithHashById.mockResolvedValueOnce(passwordlessCustomer as any)
 				;(service as any).passwordHasher.hash.mockResolvedValueOnce({ hash: 'hashed', salt: '' })
-				;(service as any).tokenService.signCustomerToken.mockResolvedValueOnce('customer.token')
 
 				const result = await service.redeemPasswordInvite('minha-loja', {
 					token: 'tok',
@@ -561,7 +552,9 @@ describe('CatalogService', () => {
 				expect(redis().delete).toHaveBeenCalledWith(
 					expect.stringContaining('customer:setpw:invite:'),
 				)
-				expect(result.token).toBe('customer.token')
+				// The storefront has no customer session: the profile comes back, no token.
+				expect(result).not.toHaveProperty('token')
+				expect(result.customer.id).toBe('cust-1')
 			})
 
 			it('overwrites an existing password (seller-assisted reset)', async () => {
@@ -572,7 +565,6 @@ describe('CatalogService', () => {
 					password_hash: 'old-hash',
 				} as any)
 				;(service as any).passwordHasher.hash.mockResolvedValueOnce({ hash: 'new-hash', salt: '' })
-				;(service as any).tokenService.signCustomerToken.mockResolvedValueOnce('customer.token')
 
 				const result = await service.redeemPasswordInvite('minha-loja', {
 					token: 'tok',
@@ -580,7 +572,9 @@ describe('CatalogService', () => {
 				})
 
 				expect(repositoryMock.updateCustomerPasswordHash).toHaveBeenCalledWith('cust-1', 'new-hash')
-				expect(result.token).toBe('customer.token')
+				// The storefront has no customer session: the profile comes back, no token.
+				expect(result).not.toHaveProperty('token')
+				expect(result.customer.id).toBe('cust-1')
 			})
 		})
 	})

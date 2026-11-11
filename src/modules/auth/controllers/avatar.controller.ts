@@ -5,7 +5,7 @@ import type { FastifyReply } from 'fastify'
 import { AccountService } from '@/modules/users/services/account.service'
 import { UploadService } from '@/shared/upload/upload.service'
 import { CurrentUser } from '../decorators/current-user.decorator'
-import type { TokenPayload } from '../dto/auth-response.dto'
+import type { AuthenticatedUser } from '../session/session.types'
 import { resolveAvatarUrl } from '../utils/avatar-url'
 
 /**
@@ -30,7 +30,7 @@ export class AvatarController {
 	@ApiOperation({ summary: 'Upload current user profile picture' })
 	@ApiConsumes('multipart/form-data')
 	@ApiResponse({ status: 201, description: 'Avatar uploaded' })
-	async upload(@CurrentUser() user: TokenPayload, @Req() req: any) {
+	async upload(@CurrentUser() user: AuthenticatedUser, @Req() req: any) {
 		const file = await this.parseMultipartFile(req)
 
 		// Re-encode + store privately; the storage key is persisted on the account
@@ -50,7 +50,7 @@ export class AvatarController {
 
 	@Get('profile/avatar')
 	@ApiOperation({ summary: 'Stream current user profile picture (owner only)' })
-	async serve(@CurrentUser() user: TokenPayload, @Res() reply: FastifyReply) {
+	async serve(@CurrentUser() user: AuthenticatedUser, @Res() reply: FastifyReply) {
 		const account = await this.accountService.findById(user.sub)
 		const avatar = account?.avatar
 
@@ -80,7 +80,7 @@ export class AvatarController {
 
 	@Delete('profile/avatar')
 	@ApiOperation({ summary: 'Remove current user profile picture' })
-	async remove(@CurrentUser() user: TokenPayload) {
+	async remove(@CurrentUser() user: AuthenticatedUser) {
 		await this.accountService.removeProfilePicture(user.sub)
 		return { avatarUrl: null }
 	}

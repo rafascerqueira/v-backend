@@ -8,10 +8,14 @@ import type {
 	SubscriptionRepository,
 	UsageRecord,
 } from '@/shared/repositories/subscription.repository'
+import { AccountSnapshotStore } from '@/shared/session/account-snapshot.store'
 
 @Injectable()
 export class PrismaSubscriptionRepository implements SubscriptionRepository {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly accountSnapshots: AccountSnapshotStore,
+	) {}
 
 	async findAccountPlan(accountId: string): Promise<string | null> {
 		const account = await this.prisma.account.findUnique({
@@ -26,6 +30,9 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
 			where: { id: accountId },
 			data: { plan_type: planType as any },
 		})
+		// Webhook, reconciliation and cancel all land here: the plan the account's next
+		// request sees is the one just written, with no new login.
+		await this.accountSnapshots.invalidate(accountId)
 	}
 
 	async findActiveSubscription(accountId: string): Promise<SubscriptionRecord | null> {

@@ -26,9 +26,17 @@ export class ProductService {
 	) {}
 
 	// Multiple images per product is a paid feature. Only a count > 1 is gated, so
-	// free sellers keep a single image. Plan is the caller's, resolved at the edge.
-	private async assertImagesAllowed(sellerId: string, planType: string, images?: string[]) {
-		if (images && images.length > 1) {
+	// free sellers keep a single image; and only when the count GROWS, so a product
+	// that already has several (saved while on a paid plan) can still be edited, have
+	// images removed or reordered after a downgrade. Plan is the caller's, resolved at
+	// the edge.
+	private async assertImagesAllowed(
+		sellerId: string,
+		planType: string,
+		images: string[] | undefined,
+		currentCount = 0,
+	) {
+		if (images && images.length > 1 && images.length > currentCount) {
 			const allowed = await this.planLimitsService.hasFeature(sellerId, planType, 'multipleImages')
 			if (!allowed) {
 				throw new ForbiddenException(FEATURE_UPGRADE_MESSAGE.multipleImages)
@@ -55,8 +63,12 @@ export class ProductService {
 	}
 
 	async update(id: string, data: UpdateProductDto, sellerId: string, planType: string) {
-		await this.assertImagesAllowed(sellerId, planType, data.images)
-		return this.productRepository.update(parseInt(id, 10), data)
+		const productId = parseInt(id, 10)
+		if (data.images && data.images.length > 1) {
+			const current = await this.productRepository.findById(productId)
+			await this.assertImagesAllowed(sellerId, planType, data.images, current?.images?.length ?? 0)
+		}
+		return this.productRepository.update(productId, data)
 	}
 
 	async remove(id: string) {

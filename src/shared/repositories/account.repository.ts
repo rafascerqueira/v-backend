@@ -1,4 +1,5 @@
 import type { AccountRole, PlanType } from '@/generated/prisma/client'
+import type { AccountSnapshot } from '@/shared/session/account-snapshot.store'
 
 export interface Account {
 	id: string
@@ -11,6 +12,7 @@ export interface Account {
 	role: AccountRole
 	plan_type: PlanType
 	is_active: boolean
+	session_version: number
 	two_factor_enabled: boolean
 	two_factor_secret: string | null
 	last_login_at: Date | null
@@ -57,8 +59,17 @@ export interface AccountRepository {
 	findByFacebookId(facebookId: string): Promise<Account | null>
 	linkGoogleId(id: string, googleId: string): Promise<void>
 	linkFacebookId(id: string, facebookId: string): Promise<void>
+	/**
+	 * The fields authentication depends on, read straight from the database.
+	 * Null when the account no longer exists.
+	 */
+	findSessionState(id: string): Promise<AccountSnapshot | null>
+	/** Ends every session of the account ("sign out everywhere"). */
+	bumpSessionVersion(id: string): Promise<void>
+	/** A password change also ends every session of the account (same write). */
 	update(id: string, data: UpdateAccountData): Promise<Account>
 	delete(id: string): Promise<Account>
+	/** Erases personal data and ends every session of the account. */
 	anonymize(id: string): Promise<void>
 	existsByStoreSlug(slug: string): Promise<boolean>
 	updateStoreSlug(id: string, slug: string): Promise<void>

@@ -19,14 +19,13 @@ import { TenantModule } from '@/shared/tenant/tenant.module'
 			provide: 'TokenService',
 			useValue: {
 				verifyAccessToken: jest.fn(),
-				generateAccessToken: jest.fn(),
+				signAccessToken: jest.fn(),
 			},
 		},
 		{
-			provide: 'TokenBlacklistService',
+			provide: 'SessionService',
 			useValue: {
-				isBlacklisted: jest.fn(),
-				addToBlacklist: jest.fn(),
+				authenticate: jest.fn(),
 			},
 		},
 	],

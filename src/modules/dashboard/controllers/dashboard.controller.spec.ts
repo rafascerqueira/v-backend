@@ -18,6 +18,7 @@ const mockUser = {
 	email: 'test@example.com',
 	role: 'seller' as const,
 	plan_type: 'free' as const,
+	sid: 'session-1',
 }
 
 describe('DashboardController', () => {

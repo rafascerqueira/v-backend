@@ -6,10 +6,17 @@
 import { ConfigService } from '@nestjs/config'
 import { RedisService } from './redis.service'
 
+const multiMock = {
+	hset: jest.fn().mockReturnThis(),
+	expire: jest.fn().mockReturnThis(),
+	exec: jest.fn(),
+}
 const clientMock = {
 	set: jest.fn(),
 	get: jest.fn(),
 	eval: jest.fn(),
+	hgetall: jest.fn(),
+	multi: jest.fn(() => multiMock),
 	quit: jest.fn(),
 }
 jest.mock('ioredis', () => ({
@@ -61,5 +68,64 @@ describe('RedisService locks', () => {
 		expect(numKeys).toBe(1)
 		expect(key).toBe('checkout-lock:acc-1')
 		expect(token).toBe('mine')
+	})
+})
+
+describe('RedisService hashes and scripts (session store)', () => {
+	let service: RedisService
+
+	beforeEach(() => {
+		jest.clearAllMocks()
+		service = new RedisService({ get: jest.fn() } as unknown as ConfigService)
+	})
+
+	it('reads a hash, yielding an empty object for a missing key', async () => {
+		clientMock.hgetall.mockResolvedValueOnce({ sub: 'acc-1' }).mockResolvedValueOnce({})
+
+		await expect(service.getHash('auth:session:s1')).resolves.toEqual({ sub: 'acc-1' })
+		await expect(service.getHash('auth:session:nope')).resolves.toEqual({})
+	})
+
+	it('writes hash fields and the TTL in one transaction', async () => {
+		multiMock.exec.mockResolvedValueOnce([
+			[null, 1],
+			[null, 1],
+		])
+
+		await service.setHashWithExpiry('auth:session:s1', { rjti: 'r1' }, 3600)
+
+		expect(multiMock.hset).toHaveBeenCalledWith('auth:session:s1', { rjti: 'r1' })
+		expect(multiMock.expire).toHaveBeenCalledWith('auth:session:s1', 3600)
+		expect(multiMock.exec).toHaveBeenCalledTimes(1)
+	})
+
+	it('throws when a command of the transaction fails (no hash left without a TTL unnoticed)', async () => {
+		multiMock.exec.mockResolvedValueOnce([
+			[null, 1],
+			[new Error('ERR expire failed'), null],
+		])
+
+		await expect(
+			service.setHashWithExpiry('auth:session:s1', { rjti: 'r1' }, 3600),
+		).rejects.toThrow('ERR expire failed')
+	})
+
+	it('throws when the transaction is discarded', async () => {
+		multiMock.exec.mockResolvedValueOnce(null)
+
+		await expect(
+			service.setHashWithExpiry('auth:session:s1', { rjti: 'r1' }, 3600),
+		).rejects.toThrow('Redis transaction was discarded')
+	})
+
+	it('passes keys (prefixed by ioredis) and args to EVAL in order', async () => {
+		clientMock.eval.mockResolvedValueOnce(['rotated', '60', '1'])
+
+		await expect(service.evalScript('return 1', ['k1'], ['a', 'b'])).resolves.toEqual([
+			'rotated',
+			'60',
+			'1',
+		])
+		expect(clientMock.eval).toHaveBeenCalledWith('return 1', 1, 'k1', 'a', 'b')
 	})
 })

@@ -4,10 +4,14 @@ import type {
 	PasswordResetRepository,
 	ResetTokenRecord,
 } from '@/shared/repositories/password-reset.repository'
+import { AccountSnapshotStore } from '@/shared/session/account-snapshot.store'
 
 @Injectable()
 export class PrismaPasswordResetRepository implements PasswordResetRepository {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly accountSnapshots: AccountSnapshotStore,
+	) {}
 
 	async deleteTokensByAccountId(accountId: string): Promise<void> {
 		await this.prisma.password_reset_token.deleteMany({
@@ -38,12 +42,15 @@ export class PrismaPasswordResetRepository implements PasswordResetRepository {
 		await this.prisma.$transaction([
 			this.prisma.account.update({
 				where: { id: accountId },
-				data: { password: hashedPassword, salt },
+				// Whoever asked for the reset may not be who holds the open sessions:
+				// a reset ends all of them, in the same write as the new password.
+				data: { password: hashedPassword, salt, session_version: { increment: 1 } },
 			}),
 			this.prisma.password_reset_token.update({
 				where: { id: tokenId },
 				data: { used_at: new Date() },
 			}),
 		])
+		await this.accountSnapshots.invalidate(accountId)
 	}
 }

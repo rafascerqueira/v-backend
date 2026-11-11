@@ -5,6 +5,7 @@
  * scoped by sellerId can leak data across tenants, so each helper has an explicit
  * test rather than relying on transitive coverage from interceptor/middleware specs.
  */
+import { UnauthorizedException } from '@nestjs/common'
 import { TenantContext } from './tenant.context'
 
 describe('TenantContext', () => {
@@ -43,8 +44,16 @@ describe('TenantContext', () => {
 		})
 	})
 
-	it('requireSellerId() throws when no context is set', () => {
-		expect(() => ctx.requireSellerId()).toThrow(/Tenant context not initialized/)
+	it('requireSellerId() answers 401 SESSION_EXPIRED when no context is set', () => {
+		// A raw Error here would surface as a 500 through the global filter.
+		expect(() => ctx.requireSellerId()).toThrow(UnauthorizedException)
+		try {
+			ctx.requireSellerId()
+		} catch (error) {
+			expect((error as UnauthorizedException).getResponse()).toMatchObject({
+				code: 'SESSION_EXPIRED',
+			})
+		}
 	})
 
 	it('requireSellerId() returns the id inside a run', () => {

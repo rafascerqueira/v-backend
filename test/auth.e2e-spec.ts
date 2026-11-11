@@ -2,6 +2,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import request from 'supertest'
 import type { PrismaService } from '../src/shared/prisma/prisma.service'
 import { createE2EApp } from './helpers/e2e'
+import { cookieHeader, parseSetCookies } from './helpers/session'
 
 describe('Auth (e2e)', () => {
 	let app: NestFastifyApplication
@@ -58,17 +59,18 @@ describe('Auth (e2e)', () => {
 			await request(app.getHttpServer()).post('/auth/register').send(validUser)
 		})
 
-		it('should login and return tokens', async () => {
+		it('should login, set the session cookies and keep the tokens out of the body', async () => {
 			const response = await request(app.getHttpServer())
 				.post('/auth/login')
 				.send({ email: validUser.email, password: validUser.password })
 				.expect(200)
 
-			expect(response.body).toHaveProperty('accessToken')
-			expect(response.body).toHaveProperty('refreshToken')
-			expect(response.body).toHaveProperty('expiresIn')
-			expect(typeof response.body.accessToken).toBe('string')
-			expect(typeof response.body.refreshToken).toBe('string')
+			expect(response.body).toEqual({ expiresIn: expect.any(Number) })
+			expect(response.body).not.toHaveProperty('accessToken')
+			expect(response.body).not.toHaveProperty('refreshToken')
+			const cookies = parseSetCookies(response.headers['set-cookie'])
+			expect(cookies.access_token?.value).toBeTruthy()
+			expect(cookies.refresh_token?.value).toBeTruthy()
 		})
 
 		it('should reject wrong password', async () => {
@@ -87,7 +89,7 @@ describe('Auth (e2e)', () => {
 	})
 
 	describe('POST /auth/refresh', () => {
-		let refreshToken: string
+		let sessionCookies: string
 
 		beforeEach(async () => {
 			await request(app.getHttpServer()).post('/auth/register').send(validUser)
@@ -96,25 +98,32 @@ describe('Auth (e2e)', () => {
 				.post('/auth/login')
 				.send({ email: validUser.email, password: validUser.password })
 
-			refreshToken = loginResponse.body.refreshToken
+			sessionCookies = cookieHeader(parseSetCookies(loginResponse.headers['set-cookie']))
 		})
 
-		it('should refresh tokens', async () => {
+		it('should refresh the session from the cookie', async () => {
 			const response = await request(app.getHttpServer())
 				.post('/auth/refresh')
-				.send({ refreshToken })
+				.set('Cookie', sessionCookies)
+				.send({})
 				.expect(200)
 
-			expect(response.body).toHaveProperty('accessToken')
-			expect(response.body).toHaveProperty('refreshToken')
-			expect(response.body.accessToken).not.toBe(refreshToken)
+			expect(response.body).toEqual({ expiresIn: expect.any(Number) })
+			const cookies = parseSetCookies(response.headers['set-cookie'])
+			expect(cookies.access_token?.value).toBeTruthy()
+			expect(cookies.refresh_token?.value).toBeTruthy()
 		})
 
-		it('should reject invalid refresh token', async () => {
+		it('should reject an invalid refresh token', async () => {
 			await request(app.getHttpServer())
 				.post('/auth/refresh')
-				.send({ refreshToken: 'invalid-token' })
+				.set('Cookie', 'refresh_token=invalid-token')
+				.send({})
 				.expect(401)
+		})
+
+		it('should reject a refresh without the cookie', async () => {
+			await request(app.getHttpServer()).post('/auth/refresh').send({}).expect(401)
 		})
 	})
 
@@ -128,7 +137,9 @@ describe('Auth (e2e)', () => {
 				.post('/auth/login')
 				.send({ email: validUser.email, password: validUser.password })
 
-			accessToken = loginResponse.body.accessToken
+			// API clients may present the access token as a Bearer credential; it is only
+			// ever handed out in the HttpOnly cookie.
+			accessToken = parseSetCookies(loginResponse.headers['set-cookie']).access_token.value
 		})
 
 		it('should access protected route with valid token', async () => {
@@ -153,24 +164,9 @@ describe('Auth (e2e)', () => {
 	})
 
 	// --- Cookie + CSRF flow ----------------------------------------------------
-	// The JSON-body token path above is exercised by API clients. Browsers use the
-	// cookie path, which is where production has been failing (403 on mutations).
-	// These tests assert the *actual* mechanism the SPA depends on: HttpOnly session
-	// cookies, a JS-readable CSRF cookie, and double-submit validation.
-
-	/** Parse a Set-Cookie header array into { name: { value, attrs } }. */
-	function parseSetCookies(header: string | string[] | undefined) {
-		const lines = Array.isArray(header) ? header : header ? [header] : []
-		const jar: Record<string, { value: string; raw: string; attrs: string[] }> = {}
-		for (const line of lines) {
-			const [pair, ...rest] = line.split(';')
-			const eq = pair.indexOf('=')
-			const name = pair.slice(0, eq).trim()
-			const value = pair.slice(eq + 1).trim()
-			jar[name] = { value, raw: line, attrs: rest.map((a) => a.trim().toLowerCase()) }
-		}
-		return jar
-	}
+	// Browsers use the cookie path, which is where production has been failing (403 on
+	// mutations). These tests assert the *actual* mechanism the SPA depends on: HttpOnly
+	// session cookies, a JS-readable CSRF cookie, and double-submit validation.
 
 	describe('Cookie-based auth', () => {
 		beforeEach(async () => {
@@ -262,14 +258,11 @@ describe('Auth (e2e)', () => {
 		})
 
 		it('does NOT require CSRF for Bearer-authenticated mutations (non-ambient credential)', async () => {
-			// Re-login to obtain the body token for the Bearer path.
-			const login = await request(app.getHttpServer())
-				.post('/auth/login')
-				.send({ email: validUser.email, password: validUser.password })
+			const accessToken = parseSetCookies(sessionCookies).access_token.value
 
 			await request(app.getHttpServer())
 				.patch('/auth/profile')
-				.set('Authorization', `Bearer ${login.body.accessToken}`)
+				.set('Authorization', `Bearer ${accessToken}`)
 				.send({ name: 'BearerRenamed' })
 				.expect((r) => expect(r.status).not.toBe(403))
 		})

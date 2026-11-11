@@ -7,7 +7,6 @@ import {
 	UnauthorizedException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { TokenService } from '@/modules/auth/services/token.service'
 import { isSequentialOrderNumber } from '@/modules/orders/order-numbering'
 import { ORDER_IDEMPOTENCY_SCOPES, OrdersService } from '@/modules/orders/services/orders.service'
 import { PasswordHasherService } from '@/shared/crypto/password-hasher.service'
@@ -48,7 +47,6 @@ export class CatalogService {
 
 	constructor(
 		@Inject(CATALOG_REPOSITORY) private readonly catalogRepository: CatalogRepository,
-		private readonly tokenService: TokenService,
 		private readonly passwordHasher: PasswordHasherService,
 		private readonly redis: RedisService,
 		private readonly queueProducer: QueueProducer,
@@ -467,11 +465,9 @@ export class CatalogService {
 		const valid = await this.passwordHasher.verify(dto.password, customer.password_hash, '')
 		if (!valid) throw new UnauthorizedException('Senha incorreta')
 
-		const token = await this.tokenService.signCustomerToken(customer.id, store.id)
 		const address = customer.address as Record<string, string> | null
 
 		return {
-			token,
 			customer: {
 				id: customer.id,
 				firstName: customer.name.split(' ')[0],
@@ -563,7 +559,7 @@ export class CatalogService {
 		await this.redis.delete(this.otpAttemptsKey(customer.id))
 		await this.redis.delete(this.otpCooldownKey(customer.id))
 
-		return this.buildCustomerAuthResponse(customer, store.id)
+		return this.buildCustomerAuthResponse(customer)
 	}
 
 	/**
@@ -620,16 +616,18 @@ export class CatalogService {
 		await this.catalogRepository.updateCustomerPasswordHash(customer.id, hash)
 		await this.redis.delete(inviteKey)
 
-		return this.buildCustomerAuthResponse(customer, store.id)
+		return this.buildCustomerAuthResponse(customer)
 	}
 
-	/** Shared shape for a freshly-authenticated customer (token + profile). */
-	private async buildCustomerAuthResponse(customer: CatalogCustomerWithHash, storeId: string) {
-		const token = await this.tokenService.signCustomerToken(customer.id, storeId)
+	/**
+	 * Shared shape for a customer who just identified themselves. No token is issued:
+	 * the storefront has no customer session, and nothing ever verified the one that
+	 * used to be returned here.
+	 */
+	private buildCustomerAuthResponse(customer: CatalogCustomerWithHash) {
 		const address = customer.address as Record<string, string> | null
 
 		return {
-			token,
 			customer: {
 				id: customer.id,
 				firstName: customer.name.split(' ')[0],

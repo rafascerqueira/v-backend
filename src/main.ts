@@ -13,6 +13,7 @@ import { AppModule } from './app.module'
 import { setupSwagger } from './config/swagger.config'
 import { GlobalExceptionFilter } from './shared/filters/global-exception.filter'
 import { ZodExceptionFilter } from './shared/filters/zod-exception.filter'
+import { allowedOriginsFromConfig, isOriginAllowed } from './shared/security/allowed-origins'
 import { buildUploadsStaticOptions } from './shared/storage/uploads-static.options'
 
 async function bootstrap() {
@@ -34,27 +35,11 @@ async function bootstrap() {
 
 	app.enableCors({
 		origin: (origin, callback) => {
-			// In production only the configured frontend origin(s) are allowed —
-			// CORS_ORIGIN may be a comma-separated list (e.g. apex + www). The exact
-			// origin is echoed back (never '*'), which is mandatory alongside
-			// credentials. Loopback origins (any 127.0.0.1 port) are accepted only
-			// outside production for local development.
-			const allowedOrigins: Array<string | RegExp> = configService
-				.get<string>('cors.origin', 'http://localhost:3000')
-				.split(',')
-				.map((o) => o.trim())
-				.filter(Boolean)
-			if (!isProduction) {
-				allowedOrigins.push('http://127.0.0.1:3000', /^http:\/\/127\.0\.0\.1:\d+$/)
-			}
-			if (
-				!origin ||
-				allowedOrigins.some((o) => (o instanceof RegExp ? o.test(origin) : o === origin))
-			) {
-				callback(null, true)
-			} else {
-				callback(null, false)
-			}
+			// One list answers CORS, the WebSocket handshake and the Origin check on
+			// login/refresh (see allowed-origins.ts). The exact origin is echoed back
+			// (never '*'), which is mandatory alongside credentials. Requests without an
+			// Origin header are not cross-origin browser requests and need no CORS headers.
+			callback(null, !origin || isOriginAllowed(origin, allowedOriginsFromConfig(configService)))
 		},
 		credentials: true,
 		methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

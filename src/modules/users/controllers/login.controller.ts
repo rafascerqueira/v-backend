@@ -4,17 +4,19 @@ import {
 	HttpCode,
 	HttpStatus,
 	Post,
+	Req,
 	Res,
 	UnauthorizedException,
+	UseGuards,
 } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
-import type { FastifyReply } from 'fastify'
-import { AUTH_COOKIES, cookieOptions } from '@/modules/auth/constants/cookies'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 import { Public } from '@/modules/auth/decorators/public.decorator'
-import { TokenService } from '@/modules/auth/services/token.service'
+import { OriginGuard } from '@/modules/auth/guards/origin.guard'
+import { SessionService } from '@/modules/auth/services/session.service'
 import { TwoFactorService } from '@/modules/auth/services/two-factor.service'
-import { setCsrfCookie } from '@/modules/auth/utils/csrf'
+import { setSessionCookies } from '@/modules/auth/utils/session-cookies'
 import { ZodValidationPipe } from '@/shared/pipes/zod-validation.pipe'
 import { type LoginDto, loginSchema } from '../dto/login.dto'
 import { AccountService } from '../services/account.service'
@@ -24,12 +26,15 @@ import { AccountService } from '../services/account.service'
 export class LoginController {
 	constructor(
 		private readonly accountService: AccountService,
-		private readonly tokenService: TokenService,
+		private readonly sessionService: SessionService,
 		private readonly twoFactorService: TwoFactorService,
 	) {}
 
 	@Post('login')
 	@Public()
+	// Login is CSRF-exempt (there is no session yet); a cross-site page is stopped by
+	// its Origin instead.
+	@UseGuards(OriginGuard)
 	@Throttle({
 		short: { ttl: 1000, limit: 1 },
 		medium: { ttl: 60000, limit: 5 },
@@ -37,8 +42,9 @@ export class LoginController {
 	})
 	@HttpCode(HttpStatus.OK)
 	@ApiOperation({ summary: 'User login' })
-	@ApiResponse({ status: 200, description: 'Login successful, returns JWT tokens' })
+	@ApiResponse({ status: 200, description: 'Login successful; session cookies set' })
 	@ApiResponse({ status: 401, description: 'Invalid credentials' })
+	@ApiResponse({ status: 403, description: 'ORIGIN_NOT_ALLOWED' })
 	@ApiBody({
 		schema: {
 			example: {
@@ -49,6 +55,7 @@ export class LoginController {
 	})
 	async handle(
 		@Body(new ZodValidationPipe(loginSchema)) body: LoginDto,
+		@Req() request: FastifyRequest,
 		@Res({ passthrough: true }) response: FastifyReply,
 	) {
 		const { email, password } = body
@@ -96,27 +103,10 @@ export class LoginController {
 		// Update last login timestamp
 		await this.accountService.updateLastLogin(account.id)
 
-		const tokens = await this.tokenService.generateTokens({
-			sub: account.id,
-			email: account.email,
-			role: account.role,
-			plan_type: account.plan_type,
-		})
+		// The tokens travel only in HttpOnly cookies; the body never carries them.
+		const session = await this.sessionService.create(account, { persistent: body.remember })
+		setSessionCookies(request, response, session)
 
-		const opts = cookieOptions()
-		response.setCookie(AUTH_COOKIES.ACCESS_TOKEN, tokens.accessToken, {
-			...opts,
-			maxAge: tokens.expiresIn,
-		})
-
-		response.setCookie(AUTH_COOKIES.REFRESH_TOKEN, tokens.refreshToken, {
-			...opts,
-			maxAge: 7 * 24 * 60 * 60,
-		})
-
-		// Issue the matching double-submit CSRF token for the new session.
-		setCsrfCookie(response, tokens.expiresIn)
-
-		return tokens
+		return { expiresIn: session.expiresIn }
 	}
 }

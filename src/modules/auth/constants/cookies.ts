@@ -3,7 +3,18 @@ export const AUTH_COOKIES = {
 	REFRESH_TOKEN: 'refresh_token',
 	OAUTH_STATE: 'oauth_state',
 	CSRF_TOKEN: 'csrf_token',
+	/**
+	 * JS-readable hint that a session probably exists (value `1`). It grants nothing:
+	 * the frontend uses it only to decide whether asking the API is worth a request.
+	 */
+	SESSION_HINT: 'vd_session',
 } as const
+
+/**
+ * The refresh token is only ever needed by the session endpoints, so the browser
+ * sends it to `/auth/*` and to nothing else.
+ */
+export const REFRESH_COOKIE_PATH = '/auth'
 
 /** Header the SPA echoes the CSRF token back in (double-submit cookie pattern). */
 export const CSRF_HEADER = 'x-csrf-token'
@@ -39,6 +50,10 @@ export function cookieOptions(): CookieOptions {
 	}
 }
 
+export function refreshCookieOptions(): CookieOptions {
+	return { ...cookieOptions(), path: REFRESH_COOKIE_PATH }
+}
+
 export function oauthStateCookieOptions(): CookieOptions {
 	return { ...cookieOptions(), maxAge: 600 }
 }
@@ -49,5 +64,9 @@ export function oauthStateCookieOptions(): CookieOptions {
 // set the matching header. Everything else mirrors the session cookie so it is
 // scoped to the same hosts (COOKIE_DOMAIN) and only sent over HTTPS in prod.
 export function csrfCookieOptions(): CookieOptions {
+	return { ...cookieOptions(), httpOnly: false }
+}
+
+export function sessionHintCookieOptions(): CookieOptions {
 	return { ...cookieOptions(), httpOnly: false }
 }

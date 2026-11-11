@@ -27,7 +27,7 @@ API RESTful para sistema de gestão de vendas, desenvolvida com NestJS e Fastify
 
 - **Autenticação JWT** com RS256 (criptografia assimétrica)
 - **Refresh tokens** para renovação de sessão
-- **Logout seguro** com blacklist de tokens (Redis)
+- **Sessões revogáveis** no Redis (logout, "sair de todos os dispositivos", troca de senha)
 - **Cookies HttpOnly** para máxima segurança
 - **CRUD completo** de clientes, produtos, pedidos
 - **Controle de estoque** com movimentações
@@ -44,7 +44,7 @@ API RESTful para sistema de gestão de vendas, desenvolvida com NestJS e Fastify
 | Fastify | 5.x | HTTP server de alta performance |
 | Prisma | 7.x | ORM moderno para TypeScript |
 | PostgreSQL | 15+ | Banco de dados relacional |
-| Redis | 7+ | Cache e blacklist de tokens |
+| Redis | 7+ | Cache e sessões |
 | Zod | 4.x | Validação de schemas |
 | Argon2 | - | Hash de senhas (Argon2id) |
 | JWT | RS256 | Autenticação com chaves assimétricas |
@@ -92,7 +92,9 @@ JWT_KEYS_DIR=./keys
 JWT_SECRET=seu_jwt_secret_aqui
 JWT_REFRESH_SECRET=seu_refresh_secret_aqui
 JWT_ACCESS_TOKEN_EXPIRES_IN=1d
-JWT_REFRESH_TOKEN_EXPIRES_IN=7d
+SESSION_IDLE_TTL=30d
+SESSION_ABSOLUTE_TTL=90d
+SESSION_BROWSER_TTL=12h
 
 # Redis
 REDIS_HOST=localhost
@@ -171,41 +173,34 @@ Content-Type: application/json
 }
 ```
 
-Resposta:
+O campo opcional `remember` (padrão `true`) é o "Manter conectado": com `false`, os cookies duram só a sessão do navegador.
+
+Resposta (os tokens **não** vêm no corpo):
 ```json
 {
-  "accessToken": "eyJhbGciOiJSUzI1NiIs...",
-  "refreshToken": "eyJhbGciOiJSUzI1NiIs...",
   "expiresIn": 86400
 }
 ```
 
-### Usando o Token
+A sessão fica em cookies: `access_token` e `refresh_token` (HttpOnly; o segundo só é enviado para `/auth/*`), `csrf_token` (lido pelo frontend e devolvido no cabeçalho `X-CSRF-Token` em toda mutação) e `vd_session` (indício de sessão para o frontend, sem valor de autenticação).
 
-```bash
-curl -H "Authorization: Bearer {accessToken}" \
-  http://localhost:3000/customers
-```
+Plano, papel e status da conta são lidos da conta a cada requisição: uma mudança vale na requisição seguinte, sem novo login.
 
-### Refresh Token
+### Renovação da sessão
 
 ```
 POST /auth/refresh
-Content-Type: application/json
-
-{
-  "refreshToken": "eyJhbGciOiJSUzI1NiIs..."
-}
 ```
+
+Sem corpo: o refresh token é lido apenas do cookie. Resposta `{ "expiresIn": ... }` e cookies novos. Em caso de `401`, o campo `code` diz o motivo: `SESSION_EXPIRED`, `SESSION_REVOKED` ou `ACCOUNT_INACTIVE` (os mesmos códigos valem para qualquer rota autenticada).
 
 ### Logout
 
 ```
 POST /auth/logout
-Authorization: Bearer {accessToken}
 ```
 
-> O logout invalida o token no Redis e limpa os cookies HttpOnly.
+> O logout encerra a sessão no Redis e limpa os cookies, mesmo com o access token já vencido. `POST /auth/logout-all` encerra todas as sessões da conta.
 
 ## 🧪 Testes
 

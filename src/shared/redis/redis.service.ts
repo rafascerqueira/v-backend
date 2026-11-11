@@ -46,6 +46,32 @@ export class RedisService implements OnModuleDestroy {
 		await this.client.setex(key, expirySeconds, value)
 	}
 
+	/** All fields of a hash; an empty object when the key does not exist. */
+	async getHash(key: string): Promise<Record<string, string>> {
+		return this.client.hgetall(key)
+	}
+
+	/**
+	 * Writes the given hash fields (leaving any other field untouched) and (re)sets the
+	 * key's TTL, both in one MULTI so a hash is never left behind without an expiry.
+	 */
+	async setHashWithExpiry(
+		key: string,
+		fields: Record<string, string>,
+		expirySeconds: number,
+	): Promise<void> {
+		const results = await this.client.multi().hset(key, fields).expire(key, expirySeconds).exec()
+		const failure = results?.find(([error]) => error)?.[0]
+		if (!results || failure) {
+			throw failure ?? new Error('Redis transaction was discarded')
+		}
+	}
+
+	/** Runs a Lua script atomically. `keys` get the configured key prefix; `args` do not. */
+	async evalScript(script: string, keys: string[], args: string[]): Promise<unknown> {
+		return this.client.eval(script, keys.length, ...keys, ...args)
+	}
+
 	/**
 	 * Best-effort mutual exclusion (single Redis node): SET NX PX with a random token.
 	 * Returns the token when acquired, null when someone else holds the lock. The TTL

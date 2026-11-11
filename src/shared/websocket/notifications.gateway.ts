@@ -10,7 +10,8 @@ import {
 } from '@nestjs/websockets'
 import type { Server, Socket } from 'socket.io'
 import configuration from '@/config/configuration'
-import { TokenService } from '@/modules/auth/services/token.service'
+import { SessionService } from '@/modules/auth/services/session.service'
+import { isOriginAllowed } from '@/shared/security/allowed-origins'
 
 export interface Notification {
 	id: string
@@ -22,16 +23,24 @@ export interface Notification {
 	data?: Record<string, unknown>
 }
 
-const config = configuration()
+// Origin settings are read on each handshake (not at import time), so a late-loaded
+// .env is honoured. Same list as CORS and the login/refresh Origin check.
+function handshakeOriginAllowed(origin: string | undefined): boolean {
+	if (!origin) return true
+	const config = configuration()
+	return isOriginAllowed(origin, {
+		corsOrigin: config.cors.origin,
+		frontendUrl: config.frontendUrl,
+		apiUrl: config.appUrl,
+		isProduction: config.isProduction,
+	})
+}
 
 @Injectable()
 @WebSocketGateway({
 	cors: {
 		origin: (origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
-			const allowedOrigins = [config.frontendUrl, 'http://127.0.0.1:3000']
-			const isAllowed =
-				!origin || allowedOrigins.includes(origin) || /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)
-			callback(null, isAllowed)
+			callback(null, handshakeOriginAllowed(origin))
 		},
 		credentials: true,
 	},
@@ -40,7 +49,7 @@ const config = configuration()
 export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 	private readonly logger = new Logger(NotificationsGateway.name)
 
-	constructor(private readonly tokenService: TokenService) {}
+	constructor(private readonly sessionService: SessionService) {}
 
 	@WebSocketServer()
 	server!: Server
@@ -57,8 +66,9 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 		}
 
 		try {
-			const payload = await this.tokenService.verifyAccessToken(token)
-			const userId = payload.sub
+			// Same check as an HTTP request: live session, active account, current version.
+			const user = await this.sessionService.authenticate(token)
+			const userId = user.sub
 
 			;(client as any).userId = userId
 			const existing = this.connectedUsers.get(userId) || []

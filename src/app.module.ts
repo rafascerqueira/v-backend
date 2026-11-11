@@ -35,6 +35,7 @@ import { ExportModule } from './shared/export/export.module'
 import { PrismaModule } from './shared/prisma/prisma.module'
 import { QueueModule } from './shared/queue/queue.module'
 import { RedisModule } from './shared/redis/redis.module'
+import { SessionStateModule } from './shared/session/session-state.module'
 import { TenantInterceptor } from './shared/tenant/tenant.interceptor'
 import { TenantModule } from './shared/tenant/tenant.module'
 import { AppThrottlerModule } from './shared/throttler/throttler.module'
@@ -47,6 +48,7 @@ import { WebSocketModule } from './shared/websocket/websocket.module'
 		PrismaModule,
 		TenantModule,
 		RedisModule,
+		SessionStateModule,
 		CryptoModule,
 		EmailModule,
 		QueueModule,

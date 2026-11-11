@@ -1,7 +1,8 @@
 /**
  * TokenService unit tests
- * Covers: generateTokens, verifyAccessToken, verifyRefreshToken, refreshTokens
- * Verifies: JWT sign/verify delegation, RS256 algorithm, blacklist integration on refresh
+ * Covers: signAccessToken, signRefreshToken, verifyAccessToken, verifyRefreshToken
+ * Verifies: RS256 sign/verify delegation, session claims only (no role/plan/e-mail),
+ *           token-type confusion, tokens without a session reference, ignoreExpiration.
  */
 
 import { ConfigService } from '@nestjs/config'
@@ -17,8 +18,7 @@ const jwtServiceMock = {
 const configServiceMock = {
 	get: jest.fn((key: string, defaultValue?: unknown) => {
 		const config: Record<string, unknown> = {
-			'jwt.accessTokenExpiresIn': '1d',
-			'jwt.refreshTokenExpiresIn': '7d',
+			'jwt.accessTokenExpiresIn': '15m',
 			'jwt.keysDir': '/fake/keys',
 		}
 		return config[key] ?? defaultValue
@@ -35,6 +35,8 @@ jest.mock('node:fs', () => ({
 	}),
 }))
 
+const session = { sub: 'acc-1', sid: 'sid-1', sv: 3 }
+
 describe('TokenService', () => {
 	let service: TokenService
 
@@ -47,167 +49,134 @@ describe('TokenService', () => {
 			],
 		}).compile()
 
-		// Trigger OnModuleInit lifecycle
 		service = module.get(TokenService)
 		await service.onModuleInit()
 		jest.clearAllMocks()
 	})
 
-	describe('generateTokens', () => {
-		it('should call signAsync twice and return access and refresh tokens', async () => {
-			jwtServiceMock.signAsync
-				.mockResolvedValueOnce('access.token.here')
-				.mockResolvedValueOnce('refresh.token.here')
+	it('exposes the access-token lifetime in seconds', () => {
+		expect(service.accessTokenTtl).toBe(900)
+	})
 
-			const result = await service.generateTokens({
-				sub: 'user-id',
-				email: 'user@test.com',
-				role: 'seller',
-				plan_type: 'free',
+	describe('signAccessToken', () => {
+		it('signs RS256 with the session reference and nothing about role, plan or e-mail', async () => {
+			jwtServiceMock.signAsync.mockResolvedValueOnce('access.jwt')
+
+			await expect(service.signAccessToken(session)).resolves.toBe('access.jwt')
+
+			const [payload, options] = jwtServiceMock.signAsync.mock.calls[0]
+			expect(payload).toEqual({
+				sub: 'acc-1',
+				sid: 'sid-1',
+				sv: 3,
+				jti: expect.any(String),
+				type: 'access',
 			})
-
-			expect(jwtServiceMock.signAsync).toHaveBeenCalledTimes(2)
-			expect(result.accessToken).toBe('access.token.here')
-			expect(result.refreshToken).toBe('refresh.token.here')
-			expect(typeof result.expiresIn).toBe('number')
-			expect(result.expiresIn).toBeGreaterThan(0)
+			expect(options).toEqual({
+				privateKey: 'FAKE_PRIVATE_KEY',
+				algorithm: 'RS256',
+				expiresIn: 900,
+			})
 		})
 
-		it('should include type: access and type: refresh in respective payloads', async () => {
-			jwtServiceMock.signAsync
-				.mockResolvedValueOnce('access.token')
-				.mockResolvedValueOnce('refresh.token')
+		it('gives every access token its own jti', async () => {
+			jwtServiceMock.signAsync.mockResolvedValue('jwt')
 
-			await service.generateTokens({
-				sub: 'uid',
-				email: 'e@e.com',
-				role: 'seller',
-				plan_type: 'free',
-			})
+			await service.signAccessToken(session)
+			await service.signAccessToken(session)
 
-			const accessPayload = jwtServiceMock.signAsync.mock.calls[0][0]
-			const refreshPayload = jwtServiceMock.signAsync.mock.calls[1][0]
-			expect(accessPayload.type).toBe('access')
-			expect(refreshPayload.type).toBe('refresh')
+			const [first, second] = jwtServiceMock.signAsync.mock.calls.map(([payload]) => payload.jti)
+			expect(first).not.toBe(second)
 		})
+	})
 
-		it('should sign with RS256 algorithm', async () => {
-			jwtServiceMock.signAsync.mockResolvedValue('token')
+	describe('signRefreshToken', () => {
+		it('carries the rotation id it is given and the requested lifetime', async () => {
+			jwtServiceMock.signAsync.mockResolvedValueOnce('refresh.jwt')
 
-			await service.generateTokens({
-				sub: 'uid',
-				email: 'e@e.com',
-				role: 'seller',
-				plan_type: 'free',
-			})
+			await expect(service.signRefreshToken({ ...session, jti: 'rot-1' }, 2592000)).resolves.toBe(
+				'refresh.jwt',
+			)
 
-			const opts = jwtServiceMock.signAsync.mock.calls[0][1]
-			expect(opts.algorithm).toBe('RS256')
+			expect(jwtServiceMock.signAsync).toHaveBeenCalledWith(
+				{ sub: 'acc-1', sid: 'sid-1', sv: 3, jti: 'rot-1', type: 'refresh' },
+				{ privateKey: 'FAKE_PRIVATE_KEY', algorithm: 'RS256', expiresIn: 2592000 },
+			)
 		})
 	})
 
 	describe('verifyAccessToken', () => {
-		it('should delegate to jwtService.verifyAsync with public key and RS256', async () => {
-			const payload = {
-				sub: 'uid',
-				email: 'e@e.com',
-				role: 'seller',
-				plan_type: 'free',
-				type: 'access',
-			}
-			jwtServiceMock.verifyAsync.mockResolvedValueOnce(payload)
+		const claims = { ...session, jti: 'j-1', type: 'access' }
 
-			const result = await service.verifyAccessToken('some.access.token')
+		it('returns the claims of a valid access token', async () => {
+			jwtServiceMock.verifyAsync.mockResolvedValueOnce(claims)
+
+			await expect(service.verifyAccessToken('token')).resolves.toEqual(claims)
+			expect(jwtServiceMock.verifyAsync).toHaveBeenCalledWith('token', {
+				publicKey: 'FAKE_PUBLIC_KEY',
+				algorithms: ['RS256'],
+				ignoreExpiration: false,
+			})
+		})
+
+		it('rejects a refresh token presented as an access token', async () => {
+			jwtServiceMock.verifyAsync.mockResolvedValueOnce({ ...claims, type: 'refresh' })
+
+			await expect(service.verifyAccessToken('token')).rejects.toThrow('Invalid token type')
+		})
+
+		it.each([
+			['sid', { sid: undefined }],
+			['sv', { sv: undefined }],
+			['sv as a string', { sv: '3' }],
+			['jti', { jti: undefined }],
+			['sub', { sub: undefined }],
+		])('rejects a token without a usable %s (issued before sessions existed)', async (_, patch) => {
+			jwtServiceMock.verifyAsync.mockResolvedValueOnce({ ...claims, ...patch })
+
+			await expect(service.verifyAccessToken('token')).rejects.toThrow('Invalid token claims')
+		})
+
+		it('propagates signature / expiry failures', async () => {
+			jwtServiceMock.verifyAsync.mockRejectedValueOnce(new Error('jwt expired'))
+
+			await expect(service.verifyAccessToken('token')).rejects.toThrow('jwt expired')
+		})
+
+		it('can accept an expired token when asked to (logout)', async () => {
+			jwtServiceMock.verifyAsync.mockResolvedValueOnce(claims)
+
+			await service.verifyAccessToken('token', { ignoreExpiration: true })
 
 			expect(jwtServiceMock.verifyAsync).toHaveBeenCalledWith(
-				'some.access.token',
-				expect.objectContaining({ algorithms: ['RS256'] }),
+				'token',
+				expect.objectContaining({ ignoreExpiration: true }),
 			)
-			expect(result).toEqual(payload)
 		})
 	})
 
 	describe('verifyRefreshToken', () => {
-		it('should delegate to jwtService.verifyAsync with public key and RS256', async () => {
-			const payload = {
-				sub: 'uid',
-				email: 'e@e.com',
-				role: 'seller',
-				plan_type: 'free',
-				type: 'refresh',
-			}
-			jwtServiceMock.verifyAsync.mockResolvedValueOnce(payload)
+		const claims = { ...session, jti: 'rot-1', type: 'refresh' }
 
-			const result = await service.verifyRefreshToken('some.refresh.token')
+		it('returns the claims of a valid refresh token', async () => {
+			jwtServiceMock.verifyAsync.mockResolvedValueOnce(claims)
 
-			expect(jwtServiceMock.verifyAsync).toHaveBeenCalledWith(
-				'some.refresh.token',
-				expect.objectContaining({ algorithms: ['RS256'] }),
-			)
-			expect(result).toEqual(payload)
+			await expect(service.verifyRefreshToken('token')).resolves.toEqual(claims)
+		})
+
+		it('rejects an access token presented as a refresh token', async () => {
+			jwtServiceMock.verifyAsync.mockResolvedValueOnce({ ...claims, type: 'access' })
+
+			await expect(service.verifyRefreshToken('token')).rejects.toThrow('Invalid token type')
 		})
 	})
 
-	describe('refreshTokens', () => {
-		it('should verify old refresh token and generate new tokens', async () => {
-			const payload = {
-				sub: 'uid',
-				email: 'e@e.com',
-				role: 'seller',
-				plan_type: 'free',
-				type: 'refresh',
-				exp: Math.floor(Date.now() / 1000) + 3600,
-			}
-			jwtServiceMock.verifyAsync.mockResolvedValueOnce(payload)
-			jwtServiceMock.signAsync
-				.mockResolvedValueOnce('new.access.token')
-				.mockResolvedValueOnce('new.refresh.token')
+	describe('onModuleInit', () => {
+		it('refuses to start without both RS256 keys', async () => {
+			const fs = jest.requireMock('node:fs') as { existsSync: jest.Mock }
+			fs.existsSync.mockReturnValueOnce(false)
 
-			const result = await service.refreshTokens('old.refresh.token')
-
-			expect(result.accessToken).toBe('new.access.token')
-			expect(result.refreshToken).toBe('new.refresh.token')
-		})
-
-		it('should blacklist the old refresh token when blacklistService is provided', async () => {
-			const payload = {
-				sub: 'uid',
-				email: 'e@e.com',
-				role: 'seller',
-				plan_type: 'free',
-				type: 'refresh',
-				exp: Math.floor(Date.now() / 1000) + 3600,
-			}
-			jwtServiceMock.verifyAsync.mockResolvedValueOnce(payload)
-			jwtServiceMock.signAsync.mockResolvedValue('new.token')
-
-			const blacklistService = { addToBlacklist: jest.fn().mockResolvedValue(undefined) }
-
-			await service.refreshTokens('old.refresh.token', blacklistService as any)
-
-			expect(blacklistService.addToBlacklist).toHaveBeenCalledWith(
-				'old.refresh.token',
-				expect.any(Number),
-			)
-		})
-
-		it('should not call blacklist when token is already expired (expiresIn <= 0)', async () => {
-			const payload = {
-				sub: 'uid',
-				email: 'e@e.com',
-				role: 'seller',
-				plan_type: 'free',
-				type: 'refresh',
-				exp: Math.floor(Date.now() / 1000) - 100,
-			}
-			jwtServiceMock.verifyAsync.mockResolvedValueOnce(payload)
-			jwtServiceMock.signAsync.mockResolvedValue('new.token')
-
-			const blacklistService = { addToBlacklist: jest.fn() }
-
-			await service.refreshTokens('old.refresh.token', blacklistService as any)
-
-			expect(blacklistService.addToBlacklist).not.toHaveBeenCalled()
+			expect(() => service.onModuleInit()).toThrow(/RS256 JWT keys not found/)
 		})
 	})
 })

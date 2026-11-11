@@ -18,7 +18,16 @@ export default () => ({
 	jwt: {
 		keysDir: process.env.JWT_KEYS_DIR,
 		accessTokenExpiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRES_IN || '1d',
-		refreshTokenExpiresIn: process.env.JWT_REFRESH_TOKEN_EXPIRES_IN || '7d',
+	},
+
+	session: {
+		// "Manter conectado": the session ends after `idleTtl` without use and never
+		// lives longer than `absoluteTtl`.
+		idleTtl: process.env.SESSION_IDLE_TTL || '30d',
+		absoluteTtl: process.env.SESSION_ABSOLUTE_TTL || '90d',
+		// Without it the cookies last for the browser session and the session ends
+		// after `browserTtl` at most.
+		browserTtl: process.env.SESSION_BROWSER_TTL || '12h',
 	},
 
 	cors: {

@@ -12,10 +12,14 @@ import type {
 	CreateAccountData,
 	SubscriptionStatsResult,
 } from '@/shared/repositories/admin.repository'
+import { AccountSnapshotStore } from '@/shared/session/account-snapshot.store'
 
 @Injectable()
 export class PrismaAdminRepository implements AdminRepository {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly accountSnapshots: AccountSnapshotStore,
+	) {}
 
 	async getStats(dates: {
 		startOfToday: Date
@@ -188,7 +192,7 @@ export class PrismaAdminRepository implements AdminRepository {
 	}
 
 	async updateAccountPlan(accountId: string, newPlan: PlanType): Promise<AccountBasicInfo> {
-		return this.prisma.account.update({
+		const updated = (await this.prisma.account.update({
 			where: { id: accountId },
 			data: { plan_type: newPlan },
 			select: {
@@ -197,7 +201,10 @@ export class PrismaAdminRepository implements AdminRepository {
 				email: true,
 				plan_type: true,
 			},
-		}) as unknown as AccountBasicInfo
+		})) as unknown as AccountBasicInfo
+		// The new plan applies on the account's next request, without a new login.
+		await this.accountSnapshots.invalidate(accountId)
+		return updated
 	}
 
 	async createAuditLog(data: {
@@ -234,11 +241,17 @@ export class PrismaAdminRepository implements AdminRepository {
 		data: Record<string, unknown>,
 		select: Record<string, boolean>,
 	): Promise<Record<string, unknown>> {
-		return this.prisma.account.update({
+		// Deactivating an account or replacing its password ends its sessions, in the
+		// same write. Plan, role and e-mail changes only refresh what the next request
+		// reads: the user stays signed in and sees the change at once.
+		const endsSessions = data.is_active === false || data.password !== undefined
+		const updated = (await this.prisma.account.update({
 			where: { id: accountId },
-			data: data as any,
+			data: (endsSessions ? { ...data, session_version: { increment: 1 } } : data) as any,
 			select,
-		}) as unknown as Record<string, unknown>
+		})) as unknown as Record<string, unknown>
+		await this.accountSnapshots.invalidate(accountId)
+		return updated
 	}
 
 	async createPasswordResetToken(data: {
@@ -396,5 +409,6 @@ export class PrismaAdminRepository implements AdminRepository {
 
 	async deleteAccount(accountId: string): Promise<void> {
 		await this.prisma.account.delete({ where: { id: accountId } })
+		await this.accountSnapshots.invalidate(accountId)
 	}
 }

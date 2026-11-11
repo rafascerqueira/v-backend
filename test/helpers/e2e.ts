@@ -5,8 +5,7 @@ import { Test, type TestingModule } from '@nestjs/testing'
 import { ThrottlerStorage } from '@nestjs/throttler'
 import { AppModule } from '../../src/app.module'
 import type { Prisma, PrismaClient } from '../../src/generated/prisma/client'
-import { TokenService } from '../../src/modules/auth/services/token.service'
-import { TokenBlacklistService } from '../../src/modules/auth/services/token-blacklist.service'
+import { SessionService } from '../../src/modules/auth/services/session.service'
 import { GlobalExceptionFilter } from '../../src/shared/filters/global-exception.filter'
 import { ZodExceptionFilter } from '../../src/shared/filters/zod-exception.filter'
 import { PrismaService } from '../../src/shared/prisma/prisma.service'
@@ -27,8 +26,8 @@ export const TEST_SELLER = {
 
 // `overrideGuard` does NOT replace APP_GUARD-registered global guards (JwtAuthGuard,
 // ThrottlerGuard) in this Nest version, so we neutralize them at the provider level
-// instead: a no-op throttler storage (never blocks) and a stubbed TokenService that
-// accepts any bearer token as TEST_SELLER.
+// instead: a no-op throttler storage (never blocks) and a stubbed
+// SessionService.authenticate that accepts any bearer token as TEST_SELLER.
 const NEVER_THROTTLE = {
 	increment: async () => ({
 		totalHits: 0,
@@ -39,9 +38,9 @@ const NEVER_THROTTLE = {
 }
 
 interface E2EAppOptions {
-	/** Keep real auth (TokenService) for suites that log in / assert 401. */
+	/** Keep real auth (sessions in Redis) for suites that log in / assert 401. */
 	realAuth?: boolean
-	/** Override the stubbed token's plan so feature/limit gating can be exercised. */
+	/** Override the stubbed user's plan so feature/limit gating can be exercised. */
 	planType?: 'free' | 'pro' | 'enterprise'
 }
 
@@ -53,32 +52,30 @@ export interface E2EApp {
 
 /**
  * Boot the full application for e2e tests, mirroring main.ts (cookie, multipart,
- * filters). Throttling is always disabled. In the default (injected) mode the
- * TokenService is stubbed and an Authorization header is forced onto every
- * request, so the real JwtAuthGuard authenticates each call as TEST_SELLER
- * without a login round-trip. Pass `realAuth` to exercise the real auth flow.
+ * filters). Throttling is always disabled. In the default (injected) mode
+ * SessionService.authenticate is stubbed and an Authorization header is forced
+ * onto every request, so the real JwtAuthGuard authenticates each call as
+ * TEST_SELLER without a login round-trip. Pass `realAuth` to exercise the real
+ * auth flow.
  */
 export async function createE2EApp(options: E2EAppOptions = {}): Promise<E2EApp> {
 	const builder = Test.createTestingModule({ imports: [AppModule] })
 		.overrideProvider(ThrottlerStorage)
 		.useValue(NEVER_THROTTLE)
 
-	if (!options.realAuth) {
-		builder
-			.overrideProvider(TokenService)
-			.useValue({
-				verifyAccessToken: async () => ({
-					sub: TEST_SELLER.id,
-					email: TEST_SELLER.email,
-					role: TEST_SELLER.role,
-					plan_type: options.planType ?? TEST_SELLER.plan_type,
-				}),
-			})
-			.overrideProvider(TokenBlacklistService)
-			.useValue({ isBlacklisted: async () => false, addToBlacklist: async () => undefined })
-	}
-
 	const module = await builder.compile()
+
+	if (!options.realAuth) {
+		// Every request authenticates as TEST_SELLER without a login round-trip. Only
+		// `authenticate` is replaced: the rest of the session service stays real.
+		jest.spyOn(module.get(SessionService), 'authenticate').mockImplementation(async () => ({
+			sub: TEST_SELLER.id,
+			email: TEST_SELLER.email,
+			role: TEST_SELLER.role,
+			plan_type: options.planType ?? TEST_SELLER.plan_type,
+			sid: 'e2e-session',
+		}))
+	}
 
 	// `logger: ['warn', 'error']` drops Nest's per-boot InstanceLoader/Routes
 	// mapping spam (logged at 'log' level) — the app boots once per suite, so
@@ -89,7 +86,7 @@ export async function createE2EApp(options: E2EAppOptions = {}): Promise<E2EApp>
 	const instance = app.getHttpAdapter().getInstance()
 
 	if (!options.realAuth) {
-		// Bearer auth => JwtAuthGuard passes (stubbed verify) and CsrfGuard exempts.
+		// Bearer auth => JwtAuthGuard passes (stubbed authenticate) and CsrfGuard exempts.
 		instance.addHook('onRequest', (req: any, _reply: any, done: () => void) => {
 			if (!req.headers.authorization) req.headers.authorization = 'Bearer e2e'
 			done()
